@@ -1,0 +1,14 @@
+bb.pix.wall
+drawable ic_launcher_background
+drawable ic_launcher_foreground
+drawable ic_social_email
+drawable ic_social_facebook
+drawable ic_social_instagram
+drawable ic_social_telegram
+drawable ic_social_youtube
+drawable ic_tile_blur
+drawable ic_tile_next
+drawable ic_tile_save
+drawable ic_tile_web
+mipmap ic_launcher
+style Theme_BBPixWall

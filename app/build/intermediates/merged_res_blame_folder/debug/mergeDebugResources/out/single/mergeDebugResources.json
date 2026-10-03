@@ -1,0 +1,50 @@
+[
+    {
+        "merged": "bb.pix.wall.app-debug-37:/drawable_ic_social_youtube.xml.flat",
+        "source": "bb.pix.wall.app-main-39:/drawable/ic_social_youtube.xml"
+    },
+    {
+        "merged": "bb.pix.wall.app-debug-37:/drawable_ic_tile_web.xml.flat",
+        "source": "bb.pix.wall.app-main-39:/drawable/ic_tile_web.xml"
+    },
+    {
+        "merged": "bb.pix.wall.app-debug-37:/drawable_ic_social_email.xml.flat",
+        "source": "bb.pix.wall.app-main-39:/drawable/ic_social_email.xml"
+    },
+    {
+        "merged": "bb.pix.wall.app-debug-37:/drawable_ic_tile_blur.xml.flat",
+        "source": "bb.pix.wall.app-main-39:/drawable/ic_tile_blur.xml"
+    },
+    {
+        "merged": "bb.pix.wall.app-debug-37:/drawable_ic_tile_save.xml.flat",
+        "source": "bb.pix.wall.app-main-39:/drawable/ic_tile_save.xml"
+    },
+    {
+        "merged": "bb.pix.wall.app-debug-37:/drawable_ic_tile_next.xml.flat",
+        "source": "bb.pix.wall.app-main-39:/drawable/ic_tile_next.xml"
+    },
+    {
+        "merged": "bb.pix.wall.app-debug-37:/drawable_ic_social_instagram.xml.flat",
+        "source": "bb.pix.wall.app-main-39:/drawable/ic_social_instagram.xml"
+    },
+    {
+        "merged": "bb.pix.wall.app-debug-37:/drawable_ic_social_facebook.xml.flat",
+        "source": "bb.pix.wall.app-main-39:/drawable/ic_social_facebook.xml"
+    },
+    {
+        "merged": "bb.pix.wall.app-debug-37:/mipmap-anydpi-v26_ic_launcher.xml.flat",
+        "source": "bb.pix.wall.app-main-39:/mipmap-anydpi-v26/ic_launcher.xml"
+    },
+    {
+        "merged": "bb.pix.wall.app-debug-37:/drawable_ic_social_telegram.xml.flat",
+        "source": "bb.pix.wall.app-main-39:/drawable/ic_social_telegram.xml"
+    },
+    {
+        "merged": "bb.pix.wall.app-debug-37:/drawable_ic_launcher_background.xml.flat",
+        "source": "bb.pix.wall.app-main-39:/drawable/ic_launcher_background.xml"
+    },
+    {
+        "merged": "bb.pix.wall.app-debug-37:/drawable_ic_launcher_foreground.xml.flat",
+        "source": "bb.pix.wall.app-main-39:/drawable/ic_launcher_foreground.xml"
+    }
+]
