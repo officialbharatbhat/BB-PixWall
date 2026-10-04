@@ -37,6 +37,7 @@ import androidx.compose.ui.window.Dialog
 import bb.pix.wall.R
 import bb.pix.wall.model.WallpaperState
 import bb.pix.wall.engine.RuntimeStatus
+import bb.pix.wall.settings.SettingsBackup
 import bb.pix.wall.engine.WallpaperController
 import bb.pix.wall.network.LanInfo
 import bb.pix.wall.settings.*
@@ -174,6 +175,80 @@ fun HomeScreen(
                     SettingSwitch("Pause in Battery Saver", "Pause automatic changes while Android Battery Saver is active.", settings.pauseBatterySaver) { onSettingsChange(settings.copy(pauseBatterySaver = it)) }
                     Text("Prefetch cache: ${settings.cacheTarget} wallpapers", fontWeight = FontWeight.SemiBold)
                     Slider(value = settings.cacheTarget.toFloat(), onValueChange = { onSettingsChange(settings.copy(cacheTarget = it.roundToInt().coerceIn(4, 36))) }, valueRange = 4f..36f, steps = 31)
+
+                    Text(
+                        "Backup & Restore",
+                        fontWeight =
+                            FontWeight.SemiBold
+                    )
+
+                    Text(
+                        "Portable local backup includes settings and learned preferences. Runtime/cache files are not backed up.",
+                        style =
+                            MaterialTheme.typography.bodySmall,
+                        color =
+                            MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+
+                    androidx.compose.material3.Button(
+                        onClick = {
+                            val result =
+                                SettingsBackup.create(
+                                    context,
+                                    includeLearning = true,
+                                )
+
+                            android.widget.Toast
+                                .makeText(
+                                    context,
+                                    result.message,
+                                    android.widget.Toast.LENGTH_LONG,
+                                )
+                                .show()
+                        }
+                    ) {
+                        Text(
+                            "Backup settings + learning"
+                        )
+                    }
+
+                    androidx.compose.material3.OutlinedButton(
+                        onClick = {
+                            val result =
+                                SettingsBackup.restoreLatest(
+                                    context
+                                )
+
+                            android.widget.Toast
+                                .makeText(
+                                    context,
+                                    result.message,
+                                    android.widget.Toast.LENGTH_LONG,
+                                )
+                                .show()
+
+                            if (
+                                result.success
+                            ) {
+                                (
+                                    context as?
+                                        android.app.Activity
+                                )?.recreate()
+                            }
+                        }
+                    ) {
+                        Text(
+                            "Restore latest backup"
+                        )
+                    }
+
+                    Text(
+                        "Backup location: /sdcard/wallpaper/backup/settings/",
+                        style =
+                            MaterialTheme.typography.bodySmall,
+                        color =
+                            MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                     Text(if (settings.leanStorageMode) "Lean mode: cache stays at this exact target to avoid wasting phone storage." else "Expanded mode: Advance may keep at least 16 ready wallpapers.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }

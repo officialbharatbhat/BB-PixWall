@@ -29,6 +29,12 @@ object WallpaperController {
     private val applying = AtomicBoolean(false)
     private val preparingNext = AtomicBoolean(false)
     private val cachePriming = AtomicBoolean(false)
+
+    /*
+     * primeCache() has many callers. If a refill is already active,
+     * do not discard later requests. Coalesce them into one follow-up.
+     */
+    private val cachePrimeRequested = AtomicBoolean(false)
     @Volatile private var lastApplyStartedAt = 0L
     private data class CachedMetaId(
         val modified: Long,
@@ -649,9 +655,10 @@ object WallpaperController {
                   runCatching {
                       rebalancePredictiveCache(
                           context,
-                          settings.cacheTarget
-                              .coerceIn(4, 36)
-                              .coerceAtMost(4),
+                          adaptiveHotTarget(
+                              settings.cacheTarget
+                                  .coerceIn(4, 36)
+                          ),
                       )
                   }.onSuccess {
                       RuntimeStatus.set(
@@ -956,14 +963,45 @@ object WallpaperController {
         return removed
     }
 
+    private fun adaptiveHotTarget(
+        target: Int,
+    ): Int =
+        when {
+            target >= 20 -> 8
+            target >= 12 -> 6
+            else -> target.coerceAtMost(4)
+        }
+
     fun primeCache(
         context: Context,
         settings: AppSettings = SettingsStore(context).load()
     ) {
-        if (!cachePriming.compareAndSet(false, true)) {
-            log("CACHE prime skipped: already running")
+        if (
+            !cachePriming.compareAndSet(
+                false,
+                true,
+            )
+        ) {
+            cachePrimeRequested.set(true)
+
+            RuntimeStatus.set(
+                context,
+                "cache_refill_queue",
+                "queued",
+            )
+
+            log(
+                "CACHE prime queued: already running"
+            )
+
             return
         }
+
+        RuntimeStatus.set(
+            context,
+            "cache_refill_queue",
+            "running",
+        )
 
         val primeStartedNs =
             System.nanoTime()
@@ -990,7 +1028,43 @@ object WallpaperController {
                 System.currentTimeMillis(),
             )
 
+            val followUp =
+                cachePrimeRequested
+                    .getAndSet(false)
+
             cachePriming.set(false)
+
+            RuntimeStatus.set(
+                context,
+                "cache_refill_queue",
+                if (followUp) {
+                    "follow-up scheduled"
+                } else {
+                    "idle"
+                },
+            )
+
+            if (followUp) {
+                EngineExecutors.io {
+                    /*
+                     * Tiny yield lets filesystem/cache moves settle
+                     * before recalculating the live inventory.
+                     */
+                    runCatching {
+                        Thread.sleep(250L)
+
+                        primeCache(
+                            context,
+                            SettingsStore(context)
+                                .load(),
+                        )
+                    }.onFailure {
+                        log(
+                            "CACHE follow-up failed: ${it.message}"
+                        )
+                    }
+                }
+            }
         }
     }
 
@@ -1009,13 +1083,93 @@ object WallpaperController {
             else -> settings.cacheTarget.coerceIn(4, 36)
         }
         val hotTarget =
-            when {
-                target >= 20 -> 8
-                target >= 12 -> 6
-                else -> target.coerceAtMost(4)
-            }
+            adaptiveHotTarget(target)
+
         trimCache(target)
-        val existing = cacheImageFiles().toMutableList()
+
+        val existing =
+            cacheImageFiles()
+                .toMutableList()
+
+        /*
+         * Incremental refill policy:
+         *
+         * cold cache        -> bootstrap up to 8 this pass
+         * below half target -> add up to 4 this pass
+         * normal depletion  -> add up to 2 this pass
+         *
+         * Every caller can continue requesting primeCache(), but one
+         * invocation no longer turns into a 20-image network marathon.
+         */
+        val missing =
+            (target - existing.size)
+                .coerceAtLeast(0)
+
+        /*
+         * BOTH_DIFFERENT consumes two cached images per Next press,
+         * so refill batches must understand consumption rate.
+         */
+        val pairCost =
+            when (settings.targetMode) {
+                WallpaperTargetMode.BOTH_DIFFERENT -> 2
+                else -> 1
+            }
+
+        val refillBatch =
+            when {
+                missing <= 0 ->
+                    0
+
+                existing.isEmpty() ->
+                    minOf(
+                        missing,
+                        8,
+                    )
+
+                existing.size <
+                    (target / 2)
+                        .coerceAtLeast(
+                            pairCost * 2
+                        ) ->
+                    minOf(
+                        missing,
+                        maxOf(
+                            6,
+                            pairCost * 3,
+                        ),
+                    )
+
+                else ->
+                    minOf(
+                        missing,
+                        maxOf(
+                            2,
+                            pairCost * 2,
+                        ),
+                    )
+            }
+
+        /*
+         * This is only a diagnostic target for this pass.
+         * Actual stop condition below uses successfulAdds so cache
+         * consumption happening in parallel cannot confuse the loop.
+         */
+        val cycleTarget =
+            (
+                existing.size +
+                    refillBatch
+            ).coerceAtMost(
+                target
+            )
+
+        RuntimeStatus.set(
+            context,
+            "cache_refill_plan",
+            "existing=${existing.size}" +
+                " • target=$target" +
+                " • batch=$refillBatch" +
+                " • cycle=$cycleTarget"
+        )
 
         if (existing.size >= target) {
             rebalancePredictiveCache(
@@ -1035,6 +1189,7 @@ object WallpaperController {
                 .toMutableSet()
         val knownPhash = readLinesSet(WallpaperFiles.seenPerceptual).toMutableSet()
         var index = existing.size
+        var successfulAdds = 0
 
         var hotCount =
             existing.count {
@@ -1045,7 +1200,10 @@ object WallpaperController {
         var directWarm = 0
 
         for (candidate in candidates) {
-            if (index >= target) break
+            if (
+                successfulAdds >=
+                    refillBatch
+            ) break
             if (candidate.id in seenIds || candidate.id in cachedIds) continue
 
             val ext =
@@ -1182,6 +1340,7 @@ object WallpaperController {
                 }
 
                 index++
+                successfulAdds++
 
                 RuntimeStatus.activeSource(
                     context,
@@ -1191,7 +1350,8 @@ object WallpaperController {
                 RuntimeStatus.set(
                     context,
                     "cache_progress",
-                    "$index/$target"
+                    "live=${cacheImageFiles().size}/$target" +
+                        " • added=$successfulAdds/$refillBatch"
                 )
 
                 RuntimeStatus.set(
@@ -1240,6 +1400,65 @@ object WallpaperController {
             context,
             hotTarget,
         )
+
+        val refillFinalCount =
+            cacheImageFiles().size
+
+        RuntimeStatus.set(
+            context,
+            "cache_refill_result",
+            "before=${existing.size}" +
+                " • after=$refillFinalCount" +
+                " • downloaded=$successfulAdds" +
+                " • net=${
+                    refillFinalCount -
+                        existing.size
+                }" +
+                " • remaining=${
+                    (target - refillFinalCount)
+                        .coerceAtLeast(0)
+                }"
+        )
+
+        /*
+         * A rapid manual burst may consume cache while this refill is
+         * downloading. If inventory finishes critically low, request
+         * exactly one additional coalesced recovery pass.
+         *
+         * We deliberately stop automatic chaining once at least half
+         * the configured cache is recovered. Normal callers can then
+         * top it toward the full target without one giant marathon.
+         */
+        val criticalFloor =
+            (target / 2)
+                .coerceAtLeast(
+                    pairCost * 2
+                )
+
+        if (
+            refillFinalCount <
+                criticalFloor &&
+            refillFinalCount <
+                target
+        ) {
+            cachePrimeRequested.set(true)
+
+            RuntimeStatus.set(
+                context,
+                "cache_refill_recovery",
+                "requested • $refillFinalCount/$target",
+            )
+
+            log(
+                "CACHE recovery requested: $refillFinalCount/$target"
+            )
+        } else {
+            RuntimeStatus.set(
+                context,
+                "cache_refill_recovery",
+                "stable • $refillFinalCount/$target",
+            )
+        }
     }
 
 
