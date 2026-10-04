@@ -49,7 +49,14 @@ object WallpaperSourceEngine {
                 val started = System.currentTimeMillis()
                 runCatching { googlePhotos(settings.photosAlbumUrl, settings.dataSaverEnabled) }
                     .onSuccess {
-                        all += it; photosOk = it.isNotEmpty(); sourceSuccess(context, "photos", System.currentTimeMillis() - started, it.size)
+                        all += it
+                        photosOk = it.isNotEmpty()
+                        sourceSuccess(
+                            context,
+                            "photos",
+                            System.currentTimeMillis() - started,
+                            it,
+                        )
                     }
                     .onFailure { sourceFailure(context, "photos", it, System.currentTimeMillis() - started); log("Google Photos: ${it.message}") }
             }
@@ -65,7 +72,15 @@ object WallpaperSourceEngine {
                 val started = System.currentTimeMillis()
                 runCatching { googleDriveFolder(settings.driveFolderUrl, settings.dataSaverEnabled) }
                     .onSuccess {
-                        all += it; driveOk = it.isNotEmpty(); sourceSuccess(context, "drive", System.currentTimeMillis() - started, it.size, fallback = true)
+                        all += it
+                        driveOk = it.isNotEmpty()
+                        sourceSuccess(
+                            context,
+                            "drive",
+                            System.currentTimeMillis() - started,
+                            it,
+                            fallback = true,
+                        )
                     }
                     .onFailure { sourceFailure(context, "drive", it, System.currentTimeMillis() - started); log("Google Drive: ${it.message}") }
             }
@@ -81,29 +96,127 @@ object WallpaperSourceEngine {
             })
         } else RuntimeStatus.source(context, "local", "Permission required")
 
+        val seed = stableSeed(context)
+
         val grouped = all.distinctBy { it.id }
             .groupBy { it.priority }
             .toSortedMap()
             .values
-            .flatMap { sortGroup(it, settings.wallpaperOrder, stableSeed(context)) }
-        RuntimeStatus.set(context, "candidate_count", grouped.size.toString())
+            .flatMap { group ->
+                val base = sortGroup(
+                    group,
+                    settings.wallpaperOrder,
+                    seed,
+                )
+
+                DecisionEngine.rank(
+                    context = context,
+                    settings = settings,
+                    candidates = base,
+                    seed = seed,
+                )
+            }
+
+        RuntimeStatus.set(
+            context,
+            "candidate_count",
+            grouped.size.toString()
+        )
         return grouped
     }
 
-    private fun sourceSuccess(context: Context, source: String, ms: Long, count: Int, fallback: Boolean = false) {
-        val previous = RuntimeStatus.get(context, "${source}_last_count", "").toIntOrNull()
+    private fun sourceSuccess(
+        context: Context,
+        source: String,
+        ms: Long,
+        items: List<Candidate>,
+        fallback: Boolean = false,
+    ) {
+        val count = items.size
+        val previousCount = RuntimeStatus.get(
+            context,
+            "${source}_last_count",
+            ""
+        ).toIntOrNull()
+
+        val fingerprint = sourceFingerprint(items)
+        val previousFingerprint = RuntimeStatus.get(
+            context,
+            "${source}_index_fingerprint",
+            ""
+        )
+
         RuntimeStatus.reset(context, "${source}_fail_streak")
         RuntimeStatus.setLong(context, "${source}_last_latency_ms", ms)
         RuntimeStatus.setLong(context, "${source}_last_ok", System.currentTimeMillis())
+        RuntimeStatus.setLong(context, "${source}_index_checked_at", System.currentTimeMillis())
         RuntimeStatus.set(context, "${source}_last_count", count.toString())
-        if (previous != null && previous != count) {
-            val delta = count - previous
-            RuntimeStatus.set(context, "${source}_delta", if (delta > 0) "+$delta" else delta.toString())
-            log("$source index changed $previous -> $count")
-        } else if (previous == null) {
-            RuntimeStatus.set(context, "${source}_delta", "baseline")
+        RuntimeStatus.set(context, "${source}_index_fingerprint", fingerprint)
+
+        when {
+            previousCount == null -> {
+                RuntimeStatus.set(context, "${source}_delta", "baseline")
+            }
+
+            previousCount != count -> {
+                val delta = count - previousCount
+                RuntimeStatus.set(
+                    context,
+                    "${source}_delta",
+                    if (delta > 0) "+$delta" else delta.toString()
+                )
+                RuntimeStatus.set(
+                    context,
+                    "${source}_content_change",
+                    "count $previousCount → $count"
+                )
+                log("$source index changed $previousCount -> $count")
+            }
+
+            previousFingerprint.isNotBlank() &&
+                previousFingerprint != fingerprint -> {
+                RuntimeStatus.set(context, "${source}_delta", "content changed")
+                RuntimeStatus.set(
+                    context,
+                    "${source}_content_change",
+                    "same count • IDs changed"
+                )
+                log("$source content changed with same count=$count")
+            }
+
+            else -> {
+                RuntimeStatus.set(context, "${source}_delta", "unchanged")
+            }
         }
-        RuntimeStatus.source(context, source, when { count == 0 -> "Empty"; fallback -> "Fallback active"; ms > 4500L -> "Slow"; else -> "Healthy" })
+
+        RuntimeStatus.source(
+            context,
+            source,
+            when {
+                count == 0 -> "Empty"
+                fallback -> "Fallback active"
+                ms > 4_500L -> "Slow"
+                else -> "Healthy"
+            }
+        )
+    }
+
+    private fun sourceFingerprint(items: List<Candidate>): String {
+        if (items.isEmpty()) return "empty"
+
+        val digest = java.security.MessageDigest.getInstance("SHA-256")
+
+        items.asSequence()
+            .map { it.id }
+            .sorted()
+            .forEach { id ->
+                digest.update(id.toByteArray(Charsets.UTF_8))
+                digest.update(0.toByte())
+            }
+
+        return digest.digest()
+            .take(12)
+            .joinToString("") { "%02x".format(it) }
     }
 
     private fun sourceFailure(context: Context, source: String, error: Throwable, ms: Long) {

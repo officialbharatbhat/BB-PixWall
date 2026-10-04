@@ -60,4 +60,8 @@ data class AppSettings(
     val smartCropTolerancePct: Float = 1.5f,
     // Keep local storage footprint small even in Advance mode.
     val leanStorageMode: Boolean = true,
+
+    // Intelligent ordering for Random Shuffle / Surprise only.
+    // Explicit A-Z/date/size orders are never overridden.
+    val decisionEngineEnabled: Boolean = true,
 )

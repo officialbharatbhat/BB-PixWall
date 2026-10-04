@@ -41,6 +41,7 @@ class SettingsStore(context: Context) {
         smartCropEnabled = prefs.getBoolean("smart_crop_enabled", true),
         smartCropTolerancePct = prefs.getFloat("smart_crop_tolerance_pct", 1.5f).coerceIn(0.2f, 5f),
         leanStorageMode = prefs.getBoolean("lean_storage_mode", true),
+        decisionEngineEnabled = prefs.getBoolean("decision_engine_enabled", true),
     )
 
     fun save(settings: AppSettings) {
@@ -80,6 +81,7 @@ class SettingsStore(context: Context) {
             .putBoolean("smart_crop_enabled", settings.smartCropEnabled)
             .putFloat("smart_crop_tolerance_pct", settings.smartCropTolerancePct.coerceIn(0.2f, 5f))
             .putBoolean("lean_storage_mode", settings.leanStorageMode)
+              .putBoolean("decision_engine_enabled", settings.decisionEngineEnabled)
             .apply()
     }
 
