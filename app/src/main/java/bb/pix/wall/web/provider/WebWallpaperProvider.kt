@@ -9,7 +9,7 @@ interface WebWallpaperProvider {
     val id: String
     val displayName: String
 
-    suspend fun search(
+    fun search(
         category: WebCategory? = null,
         customQuery: String? = null,
         display: DisplayProfile,
