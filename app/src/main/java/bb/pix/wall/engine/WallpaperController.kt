@@ -284,6 +284,37 @@ object WallpaperController {
               )
           }
 
+          if (out.isNotEmpty()) {
+              RuntimeStatus.set(
+                  context,
+                  "cache_predictive_save_refresh",
+                  "scheduled"
+              )
+
+              EngineExecutors.io {
+                  runCatching {
+                      rebalancePredictiveCache(
+                          context,
+                          settings.cacheTarget
+                              .coerceIn(4, 36)
+                              .coerceAtMost(4),
+                      )
+                  }.onSuccess {
+                      RuntimeStatus.set(
+                          context,
+                          "cache_predictive_save_refresh",
+                          "complete"
+                      )
+                  }.onFailure {
+                      RuntimeStatus.set(
+                          context,
+                          "cache_predictive_save_refresh",
+                          "failed"
+                      )
+                  }
+              }
+          }
+
           log("SAVE ${out.size} file(s)")
           out
       }
@@ -549,7 +580,15 @@ object WallpaperController {
         val hotTarget = target.coerceAtMost(4)
         trimCache(target)
         val existing = cacheImageFiles().toMutableList()
-        if (existing.size >= target) return
+
+        if (existing.size >= target) {
+            rebalancePredictiveCache(
+                context,
+                hotTarget,
+            )
+            return
+        }
+
         val candidates = WallpaperSourceEngine.collect(context, settings, allowNetwork = true)
         if (candidates.isEmpty()) return
         val knownHashes = (existingHashes(WallpaperFiles.currentHome, WallpaperFiles.currentLock, WallpaperFiles.nextHome, WallpaperFiles.nextLock) +
@@ -599,6 +638,275 @@ object WallpaperController {
             }
         }
         trimCache(target)
+        rebalancePredictiveCache(
+            context,
+            hotTarget,
+        )
+    }
+
+
+    private fun predictiveCacheScore(
+        context: Context,
+        candidateId: String,
+    ): Int {
+        val taste =
+            (TasteLearning.score(context, candidateId) * 2)
+                .coerceIn(-12, 12)
+
+        val style =
+            WallpaperStyleLearning
+                .decisionInfluence(
+                    context,
+                    candidateId,
+                )
+                ?.influence
+                ?: 0
+
+        return (taste + style)
+            .coerceIn(-22, 22)
+    }
+
+    private fun cacheCandidateId(file: File): String? {
+        val meta = File(file.absolutePath + ".meta")
+        if (!meta.exists()) return null
+
+        return runCatching {
+            Properties().apply {
+                meta.inputStream().use(::load)
+            }
+                .getProperty("id")
+                ?.trim()
+                ?.takeIf { it.isNotEmpty() }
+        }.getOrNull()
+    }
+
+    private data class PredictiveCacheEntry(
+        val file: File,
+        val id: String?,
+        val score: Int,
+    )
+
+    /**
+     * Rebalances existing cache only.
+     *
+     * No network, no bitmap decode, no new cache allocation.
+     * Top-scoring entries live in hot/, remaining entries in warm/.
+     */
+    private fun rebalancePredictiveCache(
+        context: Context,
+        hotTarget: Int,
+    ) = synchronized(lock) {
+        WallpaperFiles.ensure()
+
+        val allowed =
+            setOf("jpg", "jpeg", "png", "webp", "avif")
+
+        val files =
+            listOf(
+                WallpaperFiles.hotCache,
+                WallpaperFiles.warmCache,
+            )
+                .flatMap {
+                    it.listFiles()
+                        .orEmpty()
+                        .toList()
+                }
+                .filter {
+                    it.isFile &&
+                        it.extension.lowercase() in allowed
+                }
+                .distinctBy {
+                    it.absolutePath
+                }
+
+        if (files.isEmpty()) {
+            RuntimeStatus.set(
+                context,
+                "cache_predictive_state",
+                "empty"
+            )
+            return@synchronized
+        }
+
+        val entries =
+            files.map { file ->
+                val id = cacheCandidateId(file)
+
+                PredictiveCacheEntry(
+                    file = file,
+                    id = id,
+                    score =
+                        if (id == null) 0
+                        else predictiveCacheScore(
+                            context,
+                            id,
+                        ),
+                )
+            }
+                .sortedWith(
+                    compareByDescending<PredictiveCacheEntry> {
+                        it.score
+                    }.thenBy {
+                        it.file.lastModified()
+                    }
+                )
+
+        val desiredHot =
+            hotTarget
+                .coerceAtLeast(1)
+                .coerceAtMost(entries.size)
+
+        var promoted = 0
+        var demoted = 0
+
+        fun uniqueTarget(
+            dir: File,
+            originalName: String,
+        ): File {
+            val first = File(dir, originalName)
+            if (!first.exists()) return first
+
+            val base =
+                originalName.substringBeforeLast(
+                    '.',
+                    originalName
+                )
+
+            val ext =
+                originalName.substringAfterLast(
+                    '.',
+                    ""
+                )
+
+            var n = 1
+
+            while (true) {
+                val name =
+                    if (ext.isBlank()) {
+                        "${base}_$n"
+                    } else {
+                        "${base}_$n.$ext"
+                    }
+
+                val candidate = File(dir, name)
+
+                if (!candidate.exists()) {
+                    return candidate
+                }
+
+                n++
+            }
+        }
+
+        entries.forEachIndexed { index, entry ->
+            val desiredDir =
+                if (index < desiredHot)
+                    WallpaperFiles.hotCache
+                else
+                    WallpaperFiles.warmCache
+
+            if (entry.file.parentFile == desiredDir) {
+                return@forEachIndexed
+            }
+
+            desiredDir.mkdirs()
+
+            val src = entry.file
+            val srcMeta =
+                File(src.absolutePath + ".meta")
+
+            val target =
+                uniqueTarget(
+                    desiredDir,
+                    src.name,
+                )
+
+            val targetMeta =
+                File(target.absolutePath + ".meta")
+
+            val oldModified =
+                src.lastModified()
+
+            val moved =
+                runCatching {
+                    src.copyTo(
+                        target,
+                        overwrite = false,
+                    )
+
+                    if (srcMeta.exists()) {
+                        srcMeta.copyTo(
+                            targetMeta,
+                            overwrite = false,
+                        )
+                    }
+
+                    target.setLastModified(oldModified)
+
+                    src.delete()
+                    srcMeta.delete()
+
+                    true
+                }.getOrElse {
+                    target.delete()
+                    targetMeta.delete()
+                    false
+                }
+
+            if (moved) {
+                if (desiredDir == WallpaperFiles.hotCache) {
+                    promoted++
+                } else {
+                    demoted++
+                }
+            }
+        }
+
+        val hotCount =
+            WallpaperFiles.hotCache
+                .listFiles()
+                .orEmpty()
+                .count {
+                    it.isFile &&
+                        it.extension.lowercase() in allowed
+                }
+
+        val warmCount =
+            WallpaperFiles.warmCache
+                .listFiles()
+                .orEmpty()
+                .count {
+                    it.isFile &&
+                        it.extension.lowercase() in allowed
+                }
+
+        val best =
+            entries.firstOrNull()
+
+        RuntimeStatus.set(
+            context,
+            "cache_predictive_state",
+            "hot=$hotCount • warm=$warmCount • " +
+                "promoted=$promoted • demoted=$demoted"
+        )
+
+        RuntimeStatus.set(
+            context,
+            "cache_predictive_best_score",
+            (best?.score ?: 0).toString()
+        )
+
+        RuntimeStatus.set(
+            context,
+            "cache_predictive_best_id",
+            best?.id?.take(180) ?: "unknown"
+        )
+
+        log(
+            "CACHE predictive hot=$hotCount warm=$warmCount " +
+                "promoted=$promoted demoted=$demoted " +
+                "best=${best?.score ?: 0}"
+        )
     }
 
     private fun consumeCache(context: Context, dest: File, avoidHashes: Set<String>): Boolean {
