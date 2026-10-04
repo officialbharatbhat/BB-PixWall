@@ -569,6 +569,38 @@ object WallpaperStyleLearning {
         )
     }
 
+    fun traitsSnapshot(
+        context: Context,
+        candidateIds: Collection<String>,
+    ): Map<String, Traits> {
+        if (candidateIds.isEmpty()) {
+            return emptyMap()
+        }
+
+        val prefs =
+            context.getSharedPreferences(
+                PREFS,
+                Context.MODE_PRIVATE,
+            )
+
+        val result =
+            LinkedHashMap<String, Traits>()
+
+        candidateIds
+            .asSequence()
+            .distinct()
+            .forEach { id ->
+                readTraits(
+                    prefs,
+                    token(id),
+                )?.let { traits ->
+                    result[id] = traits
+                }
+            }
+
+        return result
+    }
+
     fun hasTraits(
         context: Context,
         candidateId: String,

@@ -220,12 +220,24 @@ object WallpaperController {
                       TasteLearning.recordManualAdvance(
                           context,
                           previousTasteIds,
-                      )
+                      )?.let { signal ->
+                          SessionMoodLearning.recordSignal(
+                              context,
+                              signal,
+                          )
+                      }
                   }
 
                   TasteLearning.recordAppliedCurrent(
                       context,
                       settings.targetMode,
+                  )
+
+                  SessionMoodLearning.recordApplied(
+                      context,
+                      TasteLearning.currentIds(
+                          settings.targetMode
+                      ),
                   )
 
                   EngineExecutors.io {
@@ -299,7 +311,12 @@ object WallpaperController {
               TasteLearning.recordSaveCurrent(
                   context,
                   settings.targetMode,
-              )
+              )?.let { signal ->
+                  SessionMoodLearning.recordSignal(
+                      context,
+                      signal,
+                  )
+              }
           }
 
           if (out.isNotEmpty()) {

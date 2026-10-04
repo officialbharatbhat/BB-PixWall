@@ -23,19 +23,30 @@ object DecisionEngine {
         val reason: String,
     )
 
+    private data class SourceHealth(
+        val failStreak: Int,
+        val latencyMs: Long,
+        val backoffUntil: Long,
+    )
+
     fun rank(
         context: Context,
         settings: AppSettings,
         candidates: List<WallpaperSourceEngine.Candidate>,
         seed: Long,
     ): List<WallpaperSourceEngine.Candidate> {
-        if (!settings.decisionEngineEnabled || candidates.size < 2) {
+        if (
+            !settings.decisionEngineEnabled ||
+            candidates.size < 2
+        ) {
             return candidates
         }
 
         if (
-            settings.wallpaperOrder != WallpaperOrder.RANDOM_SHUFFLE &&
-            settings.wallpaperOrder != WallpaperOrder.SURPRISE
+            settings.wallpaperOrder !=
+                WallpaperOrder.RANDOM_SHUFFLE &&
+            settings.wallpaperOrder !=
+                WallpaperOrder.SURPRISE
         ) {
             return candidates
         }
@@ -43,24 +54,47 @@ object DecisionEngine {
         val decisionStartedNs =
             System.nanoTime()
 
-        val recentIds = runCatching {
-            if (!WallpaperFiles.seenIds.exists()) emptySet()
-            else WallpaperFiles.seenIds
-                .readLines()
-                .asSequence()
-                .map(String::trim)
-                .filter(String::isNotEmpty)
-                .toList()
-                .takeLast(300)
-                .toSet()
-        }.getOrDefault(emptySet())
+        val now =
+            System.currentTimeMillis()
 
-        val day = System.currentTimeMillis() / 86_400_000L
-        val salt = if (settings.wallpaperOrder == WallpaperOrder.SURPRISE) {
-            seed xor day
-        } else {
-            seed
-        }
+        val recentStartedNs =
+            System.nanoTime()
+
+        val recentIds =
+            runCatching {
+                if (
+                    !WallpaperFiles.seenIds.exists()
+                ) {
+                    emptySet()
+                } else {
+                    WallpaperFiles.seenIds
+                        .readLines()
+                        .asSequence()
+                        .map(String::trim)
+                        .filter(String::isNotEmpty)
+                        .toList()
+                        .takeLast(300)
+                        .toSet()
+                }
+            }.getOrDefault(
+                emptySet()
+            )
+
+        val recentMs =
+            (System.nanoTime() - recentStartedNs) / 1_000_000L
+
+        val day =
+            now / 86_400_000L
+
+        val salt =
+            if (
+                settings.wallpaperOrder ==
+                    WallpaperOrder.SURPRISE
+            ) {
+                seed xor day
+            } else {
+                seed
+            }
 
         val currentIds =
             TasteLearning.currentIds(
@@ -71,13 +105,147 @@ object DecisionEngine {
             WallpaperStyleLearning
                 .profileConfidence(context)
 
-        val styleKnownCount =
-            candidates.count { candidate ->
-                WallpaperStyleLearning.hasTraits(
+        val mood =
+            SessionMoodLearning.snapshot(
+                context,
+                styleConfidence,
+            )
+
+        val styleIds =
+            buildList {
+                candidates.forEach {
+                    add(it.id)
+                }
+
+                addAll(currentIds)
+                addAll(mood.recentIds)
+            }
+
+        val traitsStartedNs =
+            System.nanoTime()
+
+        val traitsById =
+            WallpaperStyleLearning
+                .traitsSnapshot(
                     context,
-                    candidate.id,
+                    styleIds,
+                )
+
+        val traitsMs =
+            (System.nanoTime() - traitsStartedNs) / 1_000_000L
+
+        val styleKnownCount =
+            candidates.count {
+                traitsById.containsKey(
+                    it.id
                 )
             }
+
+        val tasteStartedNs =
+            System.nanoTime()
+
+        val tasteScores =
+            candidates.associate { candidate ->
+                candidate.id to
+                    TasteLearning.score(
+                        context,
+                        candidate.id,
+                    )
+            }
+
+        val tasteMs =
+            (System.nanoTime() - tasteStartedNs) / 1_000_000L
+
+        val learnedTaste =
+            tasteScores
+                .filterValues {
+                    it != 0
+                }
+
+        val styleStartedNs =
+            System.nanoTime()
+
+        val styleDecisions =
+            candidates.associate { candidate ->
+                candidate.id to
+                    WallpaperStyleLearning
+                        .decisionInfluence(
+                            context,
+                            candidate.id,
+                        )
+            }
+
+        val styleMs =
+            (System.nanoTime() - styleStartedNs) / 1_000_000L
+
+        val tiesStartedNs =
+            System.nanoTime()
+
+        val stableTies =
+            candidates.associate { candidate ->
+                candidate.id to
+                    stableTie(
+                        candidate.id,
+                        salt,
+                    )
+            }
+
+        val tiesMs =
+            (System.nanoTime() - tiesStartedNs) / 1_000_000L
+
+        val sourceStartedNs =
+            System.nanoTime()
+
+        val sourceHealth =
+            candidates
+                .asSequence()
+                .map {
+                    it.source.lowercase()
+                }
+                .distinct()
+                .associateWith { key ->
+                    SourceHealth(
+                        failStreak =
+                            RuntimeStatus.get(
+                                context,
+                                "${key}_fail_streak",
+                                "0",
+                            )
+                                .toIntOrNull()
+                                ?: 0,
+                        latencyMs =
+                            RuntimeStatus.getLong(
+                                context,
+                                "${key}_last_latency_ms",
+                                0L,
+                            ),
+                        backoffUntil =
+                            RuntimeStatus.getLong(
+                                context,
+                                "${key}_backoff_until",
+                                0L,
+                            ),
+                    )
+                }
+
+        val sourceMs =
+            (System.nanoTime() - sourceStartedNs) / 1_000_000L
+
+        val diversityIds =
+            (
+                currentIds +
+                    mood.recentIds
+            )
+                .distinct()
+
+        val diversityTraits =
+            diversityIds
+                .mapNotNull { id ->
+                    traitsById[id]
+                        ?.let {
+                            id to it
+                        }
+                }
 
         RuntimeStatus.set(
             context,
@@ -88,95 +256,175 @@ object DecisionEngine {
         RuntimeStatus.set(
             context,
             "decision_style_confidence",
-            "%.2f".format(styleConfidence),
+            "%.2f".format(
+                styleConfidence
+            ),
         )
-
-        val learnedTaste = candidates.mapNotNull { candidate ->
-            val raw = TasteLearning.score(
-                context,
-                candidate.id,
-            )
-
-            if (raw != 0) {
-                candidate.id to raw
-            } else {
-                null
-            }
-        }
 
         RuntimeStatus.set(
             context,
             "decision_taste_learned_count",
-            learnedTaste.size.toString()
+            learnedTaste.size.toString(),
         )
 
-        learnedTaste.maxByOrNull { it.second }?.let { best ->
-            RuntimeStatus.set(
-                context,
-                "decision_taste_best_positive",
-                "${best.second} • ${best.first.take(120)}"
-            )
-        }
+        learnedTaste
+            .maxByOrNull {
+                it.value
+            }
+            ?.let { best ->
+                RuntimeStatus.set(
+                    context,
+                    "decision_taste_best_positive",
+                    "${best.value} • ${best.key.take(120)}",
+                )
+            }
 
-        learnedTaste.minByOrNull { it.second }?.let { worst ->
-            RuntimeStatus.set(
-                context,
-                "decision_taste_best_negative",
-                "${worst.second} • ${worst.first.take(120)}"
-            )
-        }
+        learnedTaste
+            .minByOrNull {
+                it.value
+            }
+            ?.let { worst ->
+                RuntimeStatus.set(
+                    context,
+                    "decision_taste_best_negative",
+                    "${worst.value} • ${worst.key.take(120)}",
+                )
+            }
 
-        val ranked: List<Ranked> = candidates.map { candidate ->
-            score(
-                context = context,
-                settings = settings,
-                candidate = candidate,
-                recentIds = recentIds,
-                currentIds = currentIds,
-                styleConfidence = styleConfidence,
-                salt = salt,
-            )
-        }.sortedWith(
-            compareByDescending<Ranked> { it.score }
-                .thenBy { stableTie(it.candidate.id, salt) }
+        RuntimeStatus.set(
+            context,
+            "decision_session_mood",
+            "weight=${"%.2f".format(mood.weight)} • " +
+                "recent=${mood.recentIds.size} • " +
+                "explore=${mood.explorationPercent}% • " +
+                "+${mood.positiveSignals} " +
+                "-${mood.negativeSignals}",
         )
 
-        ranked.firstOrNull()?.let { top: Ranked ->
-            RuntimeStatus.set(
-                context,
-                "decision_last_id",
-                top.candidate.id.take(180)
-            )
-            RuntimeStatus.set(
-                context,
-                "decision_last_source",
-                top.candidate.source
-            )
-            RuntimeStatus.set(
-                context,
-                "decision_last_score",
-                top.score.toString()
-            )
-            RuntimeStatus.set(
-                context,
-                "decision_last_reason",
-                top.reason
-            )
-            RuntimeStatus.setLong(
-                context,
-                "decision_last_at",
-                System.currentTimeMillis()
-            )
+        RuntimeStatus.set(
+            context,
+            "decision_session_vector",
+            "b=${"%.3f".format(mood.brightness)} • " +
+                "sat=${"%.3f".format(mood.saturation)} • " +
+                "con=${"%.3f".format(mood.contrast)} • " +
+                "warm=${"%.3f".format(mood.warmth)} • " +
+                "dark=${"%.3f".format(mood.dark)}",
+        )
 
-            RuntimeStatus.set(
-                context,
-                "decision_last_log",
-                "DECISION selected=${top.candidate.id.take(90)} " +
-                    "score=${top.score} reason=${top.reason}"
-            )
-        }
+        val scoringStartedNs =
+            System.nanoTime()
 
-        val decisionElapsedMs =
+        val ranked =
+            candidates.map { candidate ->
+                score(
+                    settings = settings,
+                    candidate = candidate,
+                    recentIds = recentIds,
+                    sourceHealth =
+                        sourceHealth[
+                            candidate.source
+                                .lowercase()
+                        ] ?: SourceHealth(
+                            0,
+                            0L,
+                            0L,
+                        ),
+                    tasteRaw =
+                        tasteScores[
+                            candidate.id
+                        ] ?: 0,
+                    styleDecision =
+                        styleDecisions[
+                            candidate.id
+                        ],
+                    candidateTraits =
+                        traitsById[
+                            candidate.id
+                        ],
+                    diversityTraits =
+                        diversityTraits,
+                    mood = mood,
+                    tie =
+                        stableTies[
+                            candidate.id
+                        ] ?: 0L,
+                    now = now,
+                )
+            }
+                .sortedWith(
+                    compareByDescending<Ranked> {
+                        it.score
+                    }
+                        .thenBy {
+                            stableTies[
+                                it.candidate.id
+                            ] ?: 0L
+                        }
+                )
+
+        val scoringMs =
+            (System.nanoTime() - scoringStartedNs) / 1_000_000L
+
+        val moodActivity =
+            ranked.count {
+                "mood+" in it.reason ||
+                    "mood-" in it.reason
+            }
+
+        val diversityActivity =
+            ranked.count {
+                "diversity-" in it.reason
+            }
+
+        val explorationActivity =
+            ranked.count {
+                "explore+" in it.reason
+            }
+
+        RuntimeStatus.set(
+            context,
+            "decision_feature_activity",
+            "mood=$moodActivity • " +
+                "diversity=$diversityActivity • " +
+                "explore=$explorationActivity",
+        )
+
+        ranked
+            .firstOrNull()
+            ?.let { top ->
+                RuntimeStatus.set(
+                    context,
+                    "decision_last_id",
+                    top.candidate.id
+                        .take(180),
+                )
+
+                RuntimeStatus.set(
+                    context,
+                    "decision_last_source",
+                    top.candidate.source,
+                )
+
+                RuntimeStatus.set(
+                    context,
+                    "decision_last_score",
+                    top.score.toString(),
+                )
+
+                RuntimeStatus.set(
+                    context,
+                    "decision_last_reason",
+                    top.reason,
+                )
+
+                RuntimeStatus.setLong(
+                    context,
+                    "decision_last_at",
+                    now,
+                )
+            }
+
+        val elapsedMs =
             (
                 System.nanoTime() -
                     decisionStartedNs
@@ -185,7 +433,7 @@ object DecisionEngine {
         RuntimeStatus.setLong(
             context,
             "decision_rank_latency_ms",
-            decisionElapsedMs,
+            elapsedMs,
         )
 
         RuntimeStatus.set(
@@ -193,251 +441,411 @@ object DecisionEngine {
             "decision_rank_profile",
             "candidates=${candidates.size} • " +
                 "styleKnown=$styleKnownCount • " +
-                "elapsed=${decisionElapsedMs}ms",
+                "recentMemory=${mood.recentIds.size} • " +
+                "explore=${mood.explorationPercent}% • " +
+                "elapsed=${elapsedMs}ms",
         )
 
-        return ranked.map { it.candidate }
+        RuntimeStatus.set(
+            context,
+            "decision_stage_latency",
+            "recent=${recentMs}ms • " +
+                "traits=${traitsMs}ms • " +
+                "taste=${tasteMs}ms • " +
+                "style=${styleMs}ms • " +
+                "ties=${tiesMs}ms • " +
+                "source=${sourceMs}ms • " +
+                "scoreSort=${scoringMs}ms",
+        )
+
+        RuntimeStatus.set(
+            context,
+            "decision_hotpath_reuse",
+            "taste=${tasteScores.size} • " +
+                "style=${styleDecisions.size} • " +
+                "traits=${traitsById.size} • " +
+                "ties=${stableTies.size} • " +
+                "sources=${sourceHealth.size}",
+        )
+
+        return ranked.map {
+            it.candidate
+        }
     }
 
     private fun score(
-        context: Context,
         settings: AppSettings,
         candidate: WallpaperSourceEngine.Candidate,
         recentIds: Set<String>,
-        currentIds: Set<String>,
-        styleConfidence: Float,
-        salt: Long,
+        sourceHealth: SourceHealth,
+        tasteRaw: Int,
+        styleDecision: WallpaperStyleLearning.StyleDecision?,
+        candidateTraits: WallpaperStyleLearning.Traits?,
+        diversityTraits: List<Pair<String, WallpaperStyleLearning.Traits>>,
+        mood: SessionMoodLearning.Snapshot,
+        tie: Long,
+        now: Long,
     ): Ranked {
         var score = 0
-        val reasons = mutableListOf<String>()
 
-        // Preserve cloud-first design.
-        val sourceScore = when (candidate.source.lowercase()) {
-            "photos" -> 36
-            "drive" -> 24
-            "local" -> 10
-            else -> 0
-        }
+        val reasons =
+            mutableListOf<String>()
+
+        val sourceScore =
+            when (
+                candidate.source
+                    .lowercase()
+            ) {
+                "photos" -> 36
+                "drive" -> 24
+                "local" -> 10
+                else -> 0
+            }
 
         score += sourceScore
-        reasons += "source+$sourceScore"
+        reasons +=
+            "source+$sourceScore"
 
-        // Source health, based only on existing diagnostics.
-        val key = candidate.source.lowercase()
-        val failStreak =
-            RuntimeStatus.get(context, "${key}_fail_streak", "0")
-                .toIntOrNull() ?: 0
+        if (
+            sourceHealth.failStreak > 0
+        ) {
+            val penalty =
+                (
+                    sourceHealth.failStreak *
+                        7
+                ).coerceAtMost(28)
 
-        val latency =
-            RuntimeStatus.getLong(
-                context,
-                "${key}_last_latency_ms",
-                0L
-            )
-
-        val backoffUntil =
-            RuntimeStatus.getLong(
-                context,
-                "${key}_backoff_until",
-                0L
-            )
-
-        if (failStreak > 0) {
-            val penalty = (failStreak * 7).coerceAtMost(28)
             score -= penalty
-            reasons += "fail-$penalty"
+            reasons +=
+                "fail-$penalty"
         }
 
         when {
-            latency in 1..1_500 -> {
+            sourceHealth.latencyMs in
+                1L..1_500L -> {
                 score += 8
                 reasons += "fast+8"
             }
-            latency > 4_500 -> {
+
+            sourceHealth.latencyMs >
+                4_500L -> {
                 score -= 8
                 reasons += "slow-8"
             }
         }
 
-        if (backoffUntil > System.currentTimeMillis()) {
+        if (
+            sourceHealth.backoffUntil >
+            now
+        ) {
             score -= 30
             reasons += "backoff-30"
         }
 
-        // Strong preference for Bharat's native 9:20 library,
-        // but only when dimensions are already known.
-        if (candidate.width > 0 && candidate.height > 0) {
+        if (
+            candidate.width > 0 &&
+            candidate.height > 0
+        ) {
             val actual =
                 candidate.width.toDouble() /
                     candidate.height.toDouble()
 
-            val target = 9.0 / 20.0
+            val target =
+                9.0 / 20.0
+
             val deltaPct =
-                abs(actual - target) / target * 100.0
+                abs(
+                    actual -
+                        target
+                ) /
+                    target *
+                    100.0
 
             if (
                 deltaPct <=
-                settings.smartCropTolerancePct
-                    .coerceIn(0.2f, 5f)
+                settings
+                    .smartCropTolerancePct
+                    .coerceIn(
+                        0.2f,
+                        5f,
+                    )
             ) {
                 score += 35
                 reasons += "9:20+35"
-            } else if (candidate.height >= candidate.width) {
+            } else if (
+                candidate.height >=
+                candidate.width
+            ) {
                 score += 5
                 score -= 16
                 reasons += "portrait+5"
                 reasons += "ratio-16"
             } else {
                 score -= 30
-                reasons += "landscape-30"
+                reasons +=
+                    "landscape-30"
             }
         } else {
-            reasons += "ratio=unknown"
+            reasons +=
+                "ratio=unknown"
         }
 
-        // Recently applied source IDs should sink to the bottom even
-        // before the hard duplicate guard gets involved.
-        if (candidate.id in recentIds) {
+        if (
+            candidate.id in recentIds
+        ) {
             score -= 80
             reasons += "recent-80"
         }
 
-        // Prefer reasonable original resolution when metadata exists.
         if (
             candidate.width >= 1080 &&
             candidate.height >= 2000
         ) {
             score += 8
-            reasons += "resolution+8"
+            reasons +=
+                "resolution+8"
         }
-
-        // Local Taste Learning influence.
-        //
-        // TasteLearning stores a bounded raw score (-24..+24).
-        // Decision influence is deliberately capped at ±12 so a few
-        // Save/Skip actions cannot overpower source health, 9:20 quality,
-        // anti-repeat or novelty.
-        val tasteRaw = TasteLearning.score(
-            context,
-            candidate.id,
-        )
 
         if (tasteRaw != 0) {
             val tasteInfluence =
-                (tasteRaw * 2).coerceIn(-12, 12)
+                (tasteRaw * 2)
+                    .coerceIn(
+                        -12,
+                        12,
+                    )
 
-            score += tasteInfluence
+            score +=
+                tasteInfluence
 
-            reasons += when {
-                tasteInfluence > 0 ->
-                    "taste+$tasteInfluence(raw=$tasteRaw)"
+            reasons +=
+                when {
+                    tasteInfluence > 0 ->
+                        "taste+$tasteInfluence(raw=$tasteRaw)"
 
-                tasteInfluence < 0 ->
-                    "taste$tasteInfluence(raw=$tasteRaw)"
+                    tasteInfluence < 0 ->
+                        "taste$tasteInfluence(raw=$tasteRaw)"
 
-                else ->
-                    "taste=neutral"
-            }
+                    else ->
+                        "taste=neutral"
+                }
         }
-
-        // Generalized visual-style preference.
-        //
-        // Only previously analyzed candidates receive this score.
-        // Influence is capped at ±10 and requires a mature profile.
-        val styleDecision =
-            WallpaperStyleLearning.decisionInfluence(
-                context,
-                candidate.id,
-            )
 
         if (
             styleDecision != null &&
             styleDecision.influence != 0
         ) {
-            score += styleDecision.influence
+            score +=
+                styleDecision.influence
 
-            reasons += if (styleDecision.influence > 0) {
-                "style+${styleDecision.influence}" +
-                    "(${styleDecision.hue}; ${styleDecision.explain})"
-            } else {
-                "style${styleDecision.influence}" +
-                    "(${styleDecision.hue}; ${styleDecision.explain})"
-            }
+            reasons +=
+                if (
+                    styleDecision.influence >
+                    0
+                ) {
+                    "style+${styleDecision.influence}" +
+                        "(${styleDecision.hue}; " +
+                        "${styleDecision.explain})"
+                } else {
+                    "style${styleDecision.influence}" +
+                        "(${styleDecision.hue}; " +
+                        "${styleDecision.explain})"
+                }
         }
 
-        /*
-         * Consecutive visual diversity.
-         */
-        val diversitySimilarity =
-            currentIds
-                .asSequence()
-                .filter { it != candidate.id }
-                .mapNotNull { currentId ->
-                    WallpaperStyleLearning
-                        .visualSimilarity(
-                            context,
-                            candidate.id,
-                            currentId,
+        val moodInfluence =
+            candidateTraits
+                ?.let {
+                    SessionMoodLearning
+                        .influence(
+                            mood,
+                            it,
                         )
                 }
-                .maxOrNull()
+                ?: 0
 
-        if (diversitySimilarity != null) {
-            val diversityPenalty =
-                when {
-                    diversitySimilarity >= 0.92f -> 8
-                    diversitySimilarity >= 0.84f -> 4
-                    diversitySimilarity >= 0.78f -> 2
-                    else -> 0
+        if (moodInfluence != 0) {
+            score += moodInfluence
+
+            reasons +=
+                if (
+                    moodInfluence > 0
+                ) {
+                    "mood+$moodInfluence"
+                } else {
+                    "mood$moodInfluence"
+                }
+        }
+
+        val similarity =
+            candidateTraits
+                ?.let { candidateStyle ->
+                    diversityTraits
+                        .asSequence()
+                        .filter {
+                            it.first !=
+                                candidate.id
+                        }
+                        .map {
+                            visualSimilarity(
+                                candidateStyle,
+                                it.second,
+                            )
+                        }
+                        .maxOrNull()
                 }
 
-            if (diversityPenalty > 0) {
-                score -= diversityPenalty
+        if (similarity != null) {
+            val penalty =
+                when {
+                    similarity >= 0.92f ->
+                        8
+
+                    similarity >= 0.84f ->
+                        4
+
+                    similarity >= 0.78f ->
+                        2
+
+                    else ->
+                        0
+                }
+
+            if (penalty > 0) {
+                score -= penalty
 
                 reasons +=
-                    "diversity-$diversityPenalty" +
-                        "(sim=${"%.2f".format(diversitySimilarity)})"
+                    "diversity-$penalty" +
+                        "(sim=${"%.2f".format(similarity)})"
             }
         }
 
-        /*
-         * Deterministic exploration quota.
-         * Roughly 20% of unknown-style candidates get a tiny bonus.
-         */
         val styleKnown =
-            WallpaperStyleLearning.hasTraits(
-                context,
-                candidate.id,
-            )
+            candidateTraits != null
 
-        val explorationBucket =
+        val bucket =
             (
-                (stableTie(candidate.id, salt) ushr 1) %
-                    5L
+                (tie ushr 1) %
+                    100L
             ).toInt()
 
         if (
             !styleKnown &&
-            styleConfidence >= 0.65f &&
-            explorationBucket == 0
+            bucket <
+                mood.explorationPercent
         ) {
-            score += 4
-            reasons += "explore+4"
+            val bonus =
+                (
+                    2 +
+                        mood.explorationPercent /
+                            10
+                ).coerceIn(
+                    2,
+                    5,
+                )
+
+            score += bonus
+
+            reasons +=
+                "explore+$bonus" +
+                    "(${mood.explorationPercent}%)"
         }
 
-        // Small deterministic novelty contribution.
-        // No random() calls, so ordering remains reproducible.
         val novelty =
-            ((stableTie(candidate.id, salt) ushr 1) % 17L)
-                .toInt()
+            (
+                (tie ushr 1) %
+                    17L
+            ).toInt()
 
         score += novelty
-        reasons += "novelty+$novelty"
+        reasons +=
+            "novelty+$novelty"
 
         return Ranked(
             candidate = candidate,
             score = score,
-            reason = reasons.joinToString(" • "),
+            reason =
+                reasons.joinToString(
+                    " • "
+                ),
+        )
+    }
+
+    private fun visualSimilarity(
+        a: WallpaperStyleLearning.Traits,
+        b: WallpaperStyleLearning.Traits,
+    ): Float {
+        fun distance(
+            x: Float,
+            y: Float,
+        ): Float =
+            abs(x - y)
+                .coerceIn(
+                    0f,
+                    1f,
+                )
+
+        val brightness =
+            distance(
+                a.brightness,
+                b.brightness,
+            )
+
+        val saturation =
+            distance(
+                a.saturation,
+                b.saturation,
+            )
+
+        val contrast =
+            distance(
+                a.contrast,
+                b.contrast,
+            )
+
+        val dark =
+            distance(
+                a.darkRatio,
+                b.darkRatio,
+            )
+
+        val warmth =
+            (
+                abs(
+                    a.warmth -
+                        b.warmth
+                ) / 2f
+            ).coerceIn(
+                0f,
+                1f,
+            )
+
+        val hue =
+            when {
+                a.hue == b.hue ->
+                    0f
+
+                a.hue == "neutral" ||
+                    b.hue == "neutral" ->
+                    0.45f
+
+                else ->
+                    1f
+            }
+
+        val distance =
+            brightness * 0.18f +
+                saturation * 0.18f +
+                contrast * 0.16f +
+                dark * 0.18f +
+                warmth * 0.12f +
+                hue * 0.18f
+
+        return (
+            1f -
+                distance
+        ).coerceIn(
+            0f,
+            1f,
         )
     }
 
