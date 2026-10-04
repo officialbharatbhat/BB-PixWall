@@ -11,8 +11,8 @@ android {
         applicationId = "bb.pix.wall"
         minSdk = 35
         targetSdk = 37
-        versionCode = 13
-        versionName = "1.0.0-beta4"
+        versionCode = 14
+        versionName = "1.0.0-rc1"
     }
 
     buildFeatures {
