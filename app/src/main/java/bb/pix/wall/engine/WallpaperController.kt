@@ -128,6 +128,218 @@ object WallpaperController {
         return made || WallpaperFiles.nextHome.exists() || WallpaperFiles.nextLock.exists()
     }
 
+    private fun prepareNextFromPredictiveCache(
+        context: Context,
+        settings: AppSettings,
+    ): Boolean {
+        requireStorage()
+
+        fun targetReady(): Boolean =
+            when (settings.targetMode) {
+                WallpaperTargetMode.HOME ->
+                    WallpaperFiles.nextHome.exists()
+
+                WallpaperTargetMode.LOCK ->
+                    WallpaperFiles.nextLock.exists()
+
+                WallpaperTargetMode.BOTH_SAME ->
+                    WallpaperFiles.nextHome.exists() ||
+                        WallpaperFiles.nextLock.exists()
+
+                WallpaperTargetMode.BOTH_DIFFERENT ->
+                    WallpaperFiles.nextHome.exists() &&
+                        WallpaperFiles.nextLock.exists()
+            }
+
+        if (targetReady()) {
+            return true
+        }
+
+        /*
+         * HOT first, then WARM.
+         * cacheImageFiles() only returns actual image files, not .meta.
+         */
+        val cached =
+            cacheImageFiles()
+                .sortedWith(
+                    compareBy<File> {
+                        when (it.parentFile) {
+                            WallpaperFiles.hotCache -> 0
+                            WallpaperFiles.warmCache -> 1
+                            else -> 2
+                        }
+                    }.thenBy {
+                        it.lastModified()
+                    }
+                )
+                .toMutableList()
+
+        if (cached.isEmpty()) {
+            RuntimeStatus.set(
+                context,
+                "next_cache_fastpath",
+                "empty",
+            )
+            return false
+        }
+
+        fun consumeInto(
+            dest: File,
+        ): Boolean {
+            if (dest.exists()) {
+                return true
+            }
+
+            while (cached.isNotEmpty()) {
+                val src =
+                    cached.removeAt(0)
+
+                if (
+                    !src.exists() ||
+                    !src.isFile
+                ) {
+                    continue
+                }
+
+                val srcMeta =
+                    File(
+                        src.absolutePath +
+                            ".meta"
+                    )
+
+                val destMeta =
+                    File(
+                        dest.absolutePath +
+                            ".meta"
+                    )
+
+                return try {
+                    dest.parentFile?.mkdirs()
+
+                    dest.delete()
+                    destMeta.delete()
+
+                    /*
+                     * Same filesystem in normal BB-PixWall layout,
+                     * so rename is nearly instant. Copy fallback keeps
+                     * this safe if Android/storage decides to be dramatic.
+                     */
+                    val moved =
+                        src.renameTo(dest)
+
+                    if (!moved) {
+                        src.copyTo(
+                            dest,
+                            overwrite = true,
+                        )
+                        src.delete()
+                    }
+
+                    if (srcMeta.exists()) {
+                        val metaMoved =
+                            srcMeta.renameTo(
+                                destMeta
+                            )
+
+                        if (!metaMoved) {
+                            srcMeta.copyTo(
+                                destMeta,
+                                overwrite = true,
+                            )
+                            srcMeta.delete()
+                        }
+                    }
+
+                    if (
+                        dest.exists() &&
+                        dest.length() > 0L
+                    ) {
+                        log(
+                            "NEXT cache-fast ${src.parentFile?.name} -> ${dest.name}"
+                        )
+
+                        RuntimeStatus.set(
+                            context,
+                            "next_cache_fastpath",
+                            "${src.parentFile?.name ?: "cache"} -> ${dest.name}",
+                        )
+
+                        true
+                    } else {
+                        dest.delete()
+                        destMeta.delete()
+                        false
+                    }
+                } catch (t: Throwable) {
+                    dest.delete()
+                    destMeta.delete()
+
+                    log(
+                        "NEXT cache-fast failed ${src.name}: ${t.message}"
+                    )
+
+                    false
+                }
+            }
+
+            return false
+        }
+
+        when (settings.targetMode) {
+            WallpaperTargetMode.HOME -> {
+                consumeInto(
+                    WallpaperFiles.nextHome
+                )
+            }
+
+            WallpaperTargetMode.LOCK -> {
+                consumeInto(
+                    WallpaperFiles.nextLock
+                )
+            }
+
+            WallpaperTargetMode.BOTH_SAME -> {
+                if (
+                    !WallpaperFiles.nextHome.exists() &&
+                    !WallpaperFiles.nextLock.exists()
+                ) {
+                    consumeInto(
+                        WallpaperFiles.nextHome
+                    )
+                }
+            }
+
+            WallpaperTargetMode.BOTH_DIFFERENT -> {
+                if (
+                    !WallpaperFiles.nextHome.exists()
+                ) {
+                    consumeInto(
+                        WallpaperFiles.nextHome
+                    )
+                }
+
+                if (
+                    !WallpaperFiles.nextLock.exists()
+                ) {
+                    consumeInto(
+                        WallpaperFiles.nextLock
+                    )
+                }
+            }
+        }
+
+        val ready =
+            targetReady()
+
+        RuntimeStatus.set(
+            context,
+            "next_cache_fastpath_ready",
+            ready.toString(),
+        )
+
+        return ready
+    }
+
     fun nextWall(
         context: Context,
         allowNetwork: Boolean = true,
@@ -146,37 +358,98 @@ object WallpaperController {
                 emptySet()
             }
 
-            // Fast path only: current trigger must never wait for cloud/network.
-            // Consume already prepared/cache/local content synchronously.
-            ensureNext(context, settings, allowNetwork = false)
+            // Real fast path:
+            // 1. already prepared next files
+            // 2. predictive HOT/WARM cache
+            // 3. existing offline/local ensureNext fallback
+            //
+            // Manual Next must not hit cloud while ready cached
+            // wallpapers are sitting unused on disk.
+            if (
+                !prepareNextFromPredictiveCache(
+                    context,
+                    settings,
+                )
+            ) {
+                ensureNext(
+                    context,
+                    settings,
+                    allowNetwork = false,
+                )
+            }
 
-            val preparedForTarget = when (settings.targetMode) {
-                WallpaperTargetMode.HOME ->
-                    WallpaperFiles.nextHome.exists()
+            fun targetPrepared(): Boolean =
+                when (settings.targetMode) {
+                    WallpaperTargetMode.HOME ->
+                        WallpaperFiles.nextHome.exists()
 
-                WallpaperTargetMode.LOCK ->
-                    WallpaperFiles.nextLock.exists()
-
-                WallpaperTargetMode.BOTH_SAME ->
-                    WallpaperFiles.nextHome.exists() ||
+                    WallpaperTargetMode.LOCK ->
                         WallpaperFiles.nextLock.exists()
 
-                WallpaperTargetMode.BOTH_DIFFERENT ->
-                    WallpaperFiles.nextHome.exists() &&
-                        WallpaperFiles.nextLock.exists()
+                    WallpaperTargetMode.BOTH_SAME ->
+                        WallpaperFiles.nextHome.exists() ||
+                            WallpaperFiles.nextLock.exists()
+
+                    WallpaperTargetMode.BOTH_DIFFERENT ->
+                        WallpaperFiles.nextHome.exists() &&
+                            WallpaperFiles.nextLock.exists()
+                }
+
+            var preparedForTarget =
+                targetPrepared()
+
+            /*
+             * Manual/QS Next must behave as one press = one change.
+             *
+             * Fast path still consumes prepared/cache content first.
+             * Only when that queue is empty do we allow this SAME
+             * user-initiated request to prepare from network.
+             *
+             * Background/automatic triggers remain non-blocking.
+             */
+            if (
+                !preparedForTarget &&
+                allowNetwork &&
+                userInitiated
+            ) {
+                RuntimeStatus.set(
+                    context,
+                    "next_state",
+                    "Fetching next wallpaper"
+                )
+
+                runCatching {
+                    ensureNext(
+                        context,
+                        settings,
+                        allowNetwork = true,
+                    )
+                }.onFailure {
+                    log(
+                        "NEXT manual prepare failed: ${it.message}"
+                    )
+                }
+
+                preparedForTarget =
+                    targetPrepared()
             }
 
             if (!preparedForTarget) {
-                if (allowNetwork) {
+                if (
+                    allowNetwork &&
+                    !userInitiated
+                ) {
                     EngineExecutors.io {
                         runCatching {
                             ensureNext(
                                 context,
                                 settings,
-                                allowNetwork = true
+                                allowNetwork = true,
                             )
                         }.onFailure {
-                            log("NEXT background prepare failed: ${it.message}")
+                            log(
+                                "NEXT background prepare failed: ${it.message}"
+                            )
                         }
                     }
                 }
@@ -184,9 +457,21 @@ object WallpaperController {
                 RuntimeStatus.set(
                     context,
                     "next_state",
-                    "Preparing next wallpaper"
+                    if (userInitiated) {
+                        "Unable to prepare next wallpaper"
+                    } else {
+                        "Preparing next wallpaper"
+                    }
                 )
-                log("NEXT deferred: prepared/cache queue empty; cloud refill moved to background")
+
+                log(
+                    if (userInitiated) {
+                        "NEXT manual: no prepared wallpaper available after refill"
+                    } else {
+                        "NEXT deferred: prepared/cache queue empty; cloud refill moved to background"
+                    }
+                )
+
                 return false
             }
 
@@ -252,8 +537,42 @@ object WallpaperController {
                 RuntimeStatus.success(context, "Wallpaper applied: ${settings.targetMode.label}")
                 RuntimeStatus.setLong(context, "last_change", System.currentTimeMillis())
                 EngineExecutors.io {
-                    runCatching { primeCache(context, settings) }
-                    runCatching { ensureNext(context, settings, allowNetwork = WallpaperSourceEngine.networkAvailable(context)) }
+                    /*
+                     * Keep the next pair continuously ready.
+                     * Cache promotion is local/instant; cloud refill comes after.
+                     */
+                    runCatching {
+                        prepareNextFromPredictiveCache(
+                            context,
+                            settings,
+                        )
+                    }
+
+                    runCatching {
+                        primeCache(
+                            context,
+                            settings,
+                        )
+                    }
+
+                    if (
+                        !prepareNextFromPredictiveCache(
+                            context,
+                            settings,
+                        )
+                    ) {
+                        runCatching {
+                            ensureNext(
+                                context,
+                                settings,
+                                allowNetwork =
+                                    WallpaperSourceEngine
+                                        .networkAvailable(
+                                            context
+                                        ),
+                            )
+                        }
+                    }
                 }
                 log("NEXT applied target=${settings.targetMode}")
             } else if (!allowNetwork) {
@@ -689,7 +1008,12 @@ object WallpaperController {
             settings.engineMode == EngineMode.ADVANCED -> max(settings.cacheTarget, 16)
             else -> settings.cacheTarget.coerceIn(4, 36)
         }
-        val hotTarget = target.coerceAtMost(4)
+        val hotTarget =
+            when {
+                target >= 20 -> 8
+                target >= 12 -> 6
+                else -> target.coerceAtMost(4)
+            }
         trimCache(target)
         val existing = cacheImageFiles().toMutableList()
 

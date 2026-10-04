@@ -111,6 +111,11 @@ object DecisionEngine {
                 styleConfidence,
             )
 
+        val deviceContext =
+            ContextAwareness.snapshot(
+                context
+            )
+
         val styleIds =
             buildList {
                 candidates.forEach {
@@ -303,6 +308,14 @@ object DecisionEngine {
 
         RuntimeStatus.set(
             context,
+            "decision_device_context",
+            ContextAwareness.describe(
+                deviceContext
+            ),
+        )
+
+        RuntimeStatus.set(
+            context,
             "decision_session_vector",
             "b=${"%.3f".format(mood.brightness)} • " +
                 "sat=${"%.3f".format(mood.saturation)} • " +
@@ -344,6 +357,8 @@ object DecisionEngine {
                     diversityTraits =
                         diversityTraits,
                     mood = mood,
+                    deviceContext =
+                        deviceContext,
                     tie =
                         stableTies[
                             candidate.id
@@ -381,12 +396,19 @@ object DecisionEngine {
                 "explore+" in it.reason
             }
 
+        val contextActivity =
+            ranked.count {
+                "context+" in it.reason ||
+                    "context-" in it.reason
+            }
+
         RuntimeStatus.set(
             context,
             "decision_feature_activity",
             "mood=$moodActivity • " +
                 "diversity=$diversityActivity • " +
-                "explore=$explorationActivity",
+                "explore=$explorationActivity • " +
+                "context=$contextActivity",
         )
 
         ranked
@@ -415,6 +437,41 @@ object DecisionEngine {
                     context,
                     "decision_last_reason",
                     top.reason,
+                )
+
+                RuntimeStatus.set(
+                    context,
+                    "decision_why_selected",
+                    explainReason(
+                        top.reason
+                    ),
+                )
+
+                RuntimeStatus.set(
+                    context,
+                    "selection_reason",
+                    explainReason(
+                        top.reason
+                    ),
+                )
+
+                val alternatives =
+                    ranked
+                        .drop(1)
+                        .take(3)
+                        .mapIndexed { index, item ->
+                            "#${index + 2} " +
+                                "${item.score}: " +
+                                explainReason(
+                                    item.reason
+                                )
+                        }
+                        .joinToString(" || ")
+
+                RuntimeStatus.set(
+                    context,
+                    "decision_alternatives",
+                    alternatives,
                 )
 
                 RuntimeStatus.setLong(
@@ -483,6 +540,7 @@ object DecisionEngine {
         candidateTraits: WallpaperStyleLearning.Traits?,
         diversityTraits: List<Pair<String, WallpaperStyleLearning.Traits>>,
         mood: SessionMoodLearning.Snapshot,
+        deviceContext: ContextAwareness.Snapshot,
         tie: Long,
         now: Long,
     ): Ranked {
@@ -676,6 +734,23 @@ object DecisionEngine {
                 }
         }
 
+        val contextInfluence =
+            ContextAwareness.visualInfluence(
+                deviceContext,
+                candidateTraits,
+            )
+
+        if (contextInfluence != 0) {
+            score += contextInfluence
+
+            reasons +=
+                if (contextInfluence > 0) {
+                    "context+$contextInfluence"
+                } else {
+                    "context$contextInfluence"
+                }
+        }
+
         val similarity =
             candidateTraits
                 ?.let { candidateStyle ->
@@ -847,6 +922,105 @@ object DecisionEngine {
             0f,
             1f,
         )
+    }
+
+    private fun explainReason(
+        reason: String,
+    ): String {
+        val parts =
+            reason.split(" • ")
+
+        val out =
+            mutableListOf<String>()
+
+        parts.forEach { part ->
+            when {
+                part.startsWith("source+36") ->
+                    out +=
+                        "Google Photos preferred"
+
+                part.startsWith("source+24") ->
+                    out +=
+                        "Drive fallback preferred"
+
+                part.startsWith("source+10") ->
+                    out +=
+                        "Local fallback"
+
+                part.startsWith("9:20+") ->
+                    out +=
+                        "native 9:20 fit"
+
+                part.startsWith("resolution+") ->
+                    out +=
+                        "high-resolution source"
+
+                part.startsWith("taste+") ->
+                    out +=
+                        "matches long-term taste"
+
+                part.startsWith("taste-") ->
+                    out +=
+                        "weak exact-wall history"
+
+                part.startsWith("style+") ->
+                    out +=
+                        "matches learned visual style"
+
+                part.startsWith("style-") ->
+                    out +=
+                        "resembles disliked style"
+
+                part.startsWith("mood+") ->
+                    out +=
+                        "matches current session mood"
+
+                part.startsWith("mood-") ->
+                    out +=
+                        "does not match current mood"
+
+                part.startsWith("context+") ->
+                    out +=
+                        "fits current device theme"
+
+                part.startsWith("context-") ->
+                    out +=
+                        "less suited to current theme"
+
+                part.startsWith("diversity-") ->
+                    out +=
+                        "similar to recent wallpapers"
+
+                part.startsWith("explore+") ->
+                    out +=
+                        "exploration candidate"
+
+                part.startsWith("recent-") ->
+                    out +=
+                        "recently shown"
+
+                part.startsWith("fast+") ->
+                    out +=
+                        "healthy fast source"
+
+                part.startsWith("slow-") ->
+                    out +=
+                        "source currently slow"
+
+                part.startsWith("backoff-") ->
+                    out +=
+                        "source temporarily backed off"
+            }
+        }
+
+        if (out.isEmpty()) {
+            return "Selected by balanced ranking"
+        }
+
+        return out
+            .distinct()
+            .take(5)
+            .joinToString(" • ")
     }
 
     private fun stableTie(id: String, salt: Long): Long {
