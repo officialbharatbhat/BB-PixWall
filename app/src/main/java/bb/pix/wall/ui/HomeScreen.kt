@@ -122,8 +122,8 @@ fun HomeScreen(
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     SettingHeader(Icons.Outlined.HealthAndSafety, "Source health")
-                    Text("Photos: ${RuntimeStatus.get(context, "source_photos")}")
-                    Text("Drive: ${RuntimeStatus.get(context, "source_drive")}")
+                    Text("Photos: ${RuntimeStatus.get(context, "source_photos")} • ${RuntimeStatus.get(context, "photos_last_count", "0")} items • Δ ${RuntimeStatus.get(context, "photos_delta", "-")}")
+                    Text("Drive: ${RuntimeStatus.get(context, "source_drive")} • ${RuntimeStatus.get(context, "drive_last_count", "0")} items • Δ ${RuntimeStatus.get(context, "drive_delta", "-")}")
                     Text("Local: ${RuntimeStatus.get(context, "source_local")}")
                     Text("Active: ${RuntimeStatus.get(context, "active_source", "None yet")}", color = MaterialTheme.colorScheme.primary)
                 }
@@ -169,11 +169,12 @@ fun HomeScreen(
                     SettingSwitch("Data Saver", "When ON, cloud sources request reduced-resolution images where supported. Local wallpapers stay untouched.", settings.dataSaverEnabled) { onSettingsChange(settings.copy(dataSaverEnabled = it)) }
                     SettingSwitch("Wi-Fi only", "Use Wi-Fi for cloud prefetch. Already-cached wallpapers can still rotate offline.", settings.wifiOnly) { onSettingsChange(settings.copy(wifiOnly = it)) }
                     SettingSwitch("Allow mobile data", "Allow cloud prefetch on mobile data when Wi-Fi-only is OFF.", settings.mobileDataAllowed) { onSettingsChange(settings.copy(mobileDataAllowed = it)) }
+                    SettingSwitch("Lean local storage", "Keep only the configured prefetch amount even in Advance mode. Google Photos stays primary and Drive remains the mirror/fallback.", settings.leanStorageMode) { onSettingsChange(settings.copy(leanStorageMode = it)) }
                     SettingSwitch("Charging only", "Run automatic wallpaper changes only while charging.", settings.chargingOnly) { onSettingsChange(settings.copy(chargingOnly = it)) }
                     SettingSwitch("Pause in Battery Saver", "Pause automatic changes while Android Battery Saver is active.", settings.pauseBatterySaver) { onSettingsChange(settings.copy(pauseBatterySaver = it)) }
                     Text("Prefetch cache: ${settings.cacheTarget} wallpapers", fontWeight = FontWeight.SemiBold)
                     Slider(value = settings.cacheTarget.toFloat(), onValueChange = { onSettingsChange(settings.copy(cacheTarget = it.roundToInt().coerceIn(4, 36))) }, valueRange = 4f..36f, steps = 31)
-                    Text("Advance mode keeps at least 16 ready wallpapers. Standard follows this value.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(if (settings.leanStorageMode) "Lean mode: cache stays at this exact target to avoid wasting phone storage." else "Expanded mode: Advance may keep at least 16 ready wallpapers.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
 
@@ -242,6 +243,23 @@ fun HomeScreen(
                             WallpaperTargetMode.BOTH_DIFFERENT -> "Pick separate images for Home and Lock."
                         }) { onSettingsChange(settings.copy(targetMode = mode)) }
                     }
+                }
+            }
+
+            SectionTitle("Quality & aspect")
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    SettingHeader(Icons.Outlined.HighQuality, "9:20 quality-first pipeline")
+                    SettingSwitch(
+                        "Smart Crop (mismatch only)",
+                        "Your 9:20-compatible wallpapers are streamed untouched: no crop, resize or BB-PixWall recompression. Only an accidental aspect mismatch may be center-cropped to 9:20.",
+                        settings.smartCropEnabled
+                    ) { onSettingsChange(settings.copy(smartCropEnabled = it)) }
+                    Text("Match tolerance: ${settings.smartCropTolerancePct}% • fixed target 9:20", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("Last pipeline: ${RuntimeStatus.get(context, "last_pipeline", "Waiting for first apply")}", color = MaterialTheme.colorScheme.primary)
+                    Text("Last aspect: ${RuntimeStatus.get(context, "last_aspect", "Unknown")}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("Why this wallpaper: ${RuntimeStatus.get(context, "selection_reason", "Waiting for selection")}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("Blur is an explicit processed path; the exact downloaded source is still preserved for Save Wall and unblur.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
 
@@ -318,11 +336,19 @@ fun HomeScreen(
                     Text("Cache: ${bb.pix.wall.engine.WallpaperController.cacheCount()} files • ${bb.pix.wall.engine.WallpaperController.cacheBytes() / (1024 * 1024)} MB")
                     Text("Cache pools: ${bb.pix.wall.engine.WallpaperController.cacheBreakdown()}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Text("Automation: ${if (settings.autoChange) settings.triggerMode.label else "Off"}")
+                    Text("Engine health: ${RuntimeStatus.get(context, "engine_health", "Waiting for audit")}")
                     Text("Offline ready: ${bb.pix.wall.engine.WallpaperController.offlineReadyCount()} wallpaper(s)")
                     Text("Cycle progress: ${bb.pix.wall.engine.WallpaperController.cycleProgress(context)}")
                     Text("Last trigger: ${RuntimeStatus.get(context, "last_trigger", "None yet")}")
+                    Text("Root: ${RuntimeStatus.get(context, "root_state", if (settings.engineMode == EngineMode.ADVANCED) "Not checked" else "Standard mode")}")
+                    Text("Root provider: ${RuntimeStatus.get(context, "root_provider", "Unknown")}")
+                    Text("Root capabilities: ${RuntimeStatus.get(context, "root_caps", "Not scanned")}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("Root probe latency: ${RuntimeStatus.getLong(context, "root_latency_ms", 0L)} ms")
                     Text("Root priority: ${RuntimeStatus.get(context, "root_priority", "Not tuned")}")
                     Text("Doze whitelist: ${RuntimeStatus.get(context, "root_doze_whitelist", "Unknown")}")
+                    Text("AppOps verified: ${RuntimeStatus.get(context, "root_appops_verified", "Unknown")}")
+                    Text("OOM score: ${RuntimeStatus.get(context, "root_oom_score", "Unknown")}")
+                    Text("Root last action: ${RuntimeStatus.get(context, "root_last_result", "None")}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Text("Active source: ${RuntimeStatus.get(context, "active_source", "None yet")}")
                     Text("Last error: ${RuntimeStatus.get(context, "last_error", "None").ifBlank { "None" }}")
                     val nextRun = RuntimeStatus.getLong(context, "next_run", 0L)

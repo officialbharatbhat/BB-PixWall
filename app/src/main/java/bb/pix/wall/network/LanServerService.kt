@@ -142,20 +142,13 @@ class LanServerService : Service() {
                     val socket = try { ss.accept() } catch (_: Throwable) { break }
                     if (!clientPool.isShutdown) {
                         clientPool.execute {
-                            runCatching { handle(socket) }
-                                .onFailure { t ->
-                                    if (t !is java.net.SocketException &&
-                                        t !is java.io.IOException) {
-                                        bb.pix.wall.engine.RuntimeStatus.failure(
-                                            this,
-                                            "LAN client: ${t.message ?: t.javaClass.simpleName}"
-                                        )
-                                    }
+                            runCatching { handle(socket) }.onFailure { t ->
+                                if (t !is java.net.SocketException && t !is java.io.IOException) {
+                                    bb.pix.wall.engine.RuntimeStatus.failure(this, "LAN client: ${t.message ?: t.javaClass.simpleName}")
                                 }
+                            }
                         }
-                    } else {
-                        runCatching { socket.close() }
-                    }
+                    } else runCatching { socket.close() }
                 }
                 acceptAlive = false
                 break
@@ -226,6 +219,7 @@ class LanServerService : Service() {
             "/api/logs" -> sendText(s, 200, "text/plain; charset=utf-8", runCatching { WallpaperFiles.runtimeLog.readLines().takeLast(80).joinToString("\n") }.getOrDefault("No logs yet"))
             "/api/triggers" -> sendText(s, 200, "text/plain; charset=utf-8", runCatching { WallpaperFiles.triggerHistory.readLines().takeLast(80).joinToString("\n") }.getOrDefault("No trigger history yet"))
             "/api/queue" -> sendJson(s, 200, queueJson())
+            "/api/root-diagnostics" -> sendText(s, 200, "text/plain; charset=utf-8", RootAccess.diagnosticsText(this))
             "/api/debug-report" -> if (mutationAllowed) sendText(s, 200, "text/plain; charset=utf-8", WallpaperController.exportDebugReport(this).readText()) else sendJson(s, 403, "{\"error\":\"forbidden\"}")
             "/api/settings" -> {
                 if (method == "GET") sendJson(s, 200, settingsJson())
@@ -281,6 +275,8 @@ class LanServerService : Service() {
             quietEndHour = form["quietEndHour"]?.toIntOrNull()?.coerceIn(0,23) ?: old.quietEndHour,
             cacheTarget = form["cacheTarget"]?.toIntOrNull()?.coerceIn(4,36) ?: old.cacheTarget,
             backgroundGuardEnabled = bool("backgroundGuardEnabled", old.backgroundGuardEnabled),
+            smartCropEnabled = bool("smartCropEnabled", old.smartCropEnabled),
+            leanStorageMode = bool("leanStorageMode", old.leanStorageMode),
         )
         store.save(updated)
         val automationIntent = Intent(this, WallpaperAutomationService::class.java)
@@ -297,7 +293,7 @@ class LanServerService : Service() {
     private fun settingsJson(): String {
         val s = SettingsStore(this).load(); val st = WallpaperController.state()
         val theme = getSharedPreferences("bb_pixwall_ui", Context.MODE_PRIVATE).getString("theme", ThemeProfile.SIGNATURE.name)
-        return """{"engineMode":"${s.engineMode.name}","cache":${WallpaperController.cacheCount()},"offlineReady":${WallpaperController.offlineReadyCount()},"photosAlbumUrl":${quote(s.photosAlbumUrl)},"driveFolderUrl":${quote(s.driveFolderUrl)},"autoChange":${s.autoChange},"triggerMode":"${s.triggerMode.name}","intervalMinutes":${s.intervalMinutes},"targetMode":"${s.targetMode.name}","wallpaperOrder":"${s.wallpaperOrder.name}","homeBlurEnabled":${s.homeBlurEnabled},"homeBlurRadius":${s.homeBlurRadius},"lockBlurEnabled":${s.lockBlurEnabled},"lockBlurRadius":${s.lockBlurRadius},"appearanceMode":"${s.appearanceMode.name}","dataSaverEnabled":${s.dataSaverEnabled},"wifiOnly":${s.wifiOnly},"mobileDataAllowed":${s.mobileDataAllowed},"chargingOnly":${s.chargingOnly},"pauseBatterySaver":${s.pauseBatterySaver},"pauseLowBattery":${s.pauseLowBattery},"lowBatteryThreshold":${s.lowBatteryThreshold},"quietHoursEnabled":${s.quietHoursEnabled},"quietStartHour":${s.quietStartHour},"quietEndHour":${s.quietEndHour},"cacheTarget":${s.cacheTarget},"backgroundGuardEnabled":${s.backgroundGuardEnabled},"theme":${quote(theme)},"blurMaster":${WallpaperController.blurMasterEnabled(this)},"currentHome":${quote(st.currentHome)},"currentLock":${quote(st.currentLock)},"nextHome":${quote(st.nextHome)},"nextLock":${quote(st.nextLock)},"activeSource":${quote(bb.pix.wall.engine.RuntimeStatus.get(this,"active_source","None"))},"photosHealth":${quote(bb.pix.wall.engine.RuntimeStatus.get(this,"source_photos"))},"driveHealth":${quote(bb.pix.wall.engine.RuntimeStatus.get(this,"source_drive"))},"localHealth":${quote(bb.pix.wall.engine.RuntimeStatus.get(this,"source_local"))},"lastError":${quote(bb.pix.wall.engine.RuntimeStatus.get(this,"last_error",""))},"lastTrigger":${quote(bb.pix.wall.engine.RuntimeStatus.get(this,"last_trigger",""))},"lanState":${quote(bb.pix.wall.engine.RuntimeStatus.get(this,"lan_state","Stopped"))},"nextRun":${bb.pix.wall.engine.RuntimeStatus.getLong(this,"next_run",0L)}}"""
+        return """{"engineMode":"${s.engineMode.name}","cache":${WallpaperController.cacheCount()},"offlineReady":${WallpaperController.offlineReadyCount()},"photosAlbumUrl":${quote(s.photosAlbumUrl)},"driveFolderUrl":${quote(s.driveFolderUrl)},"autoChange":${s.autoChange},"triggerMode":"${s.triggerMode.name}","intervalMinutes":${s.intervalMinutes},"targetMode":"${s.targetMode.name}","wallpaperOrder":"${s.wallpaperOrder.name}","homeBlurEnabled":${s.homeBlurEnabled},"homeBlurRadius":${s.homeBlurRadius},"lockBlurEnabled":${s.lockBlurEnabled},"lockBlurRadius":${s.lockBlurRadius},"appearanceMode":"${s.appearanceMode.name}","dataSaverEnabled":${s.dataSaverEnabled},"wifiOnly":${s.wifiOnly},"mobileDataAllowed":${s.mobileDataAllowed},"chargingOnly":${s.chargingOnly},"pauseBatterySaver":${s.pauseBatterySaver},"pauseLowBattery":${s.pauseLowBattery},"lowBatteryThreshold":${s.lowBatteryThreshold},"quietHoursEnabled":${s.quietHoursEnabled},"quietStartHour":${s.quietStartHour},"quietEndHour":${s.quietEndHour},"cacheTarget":${s.cacheTarget},"backgroundGuardEnabled":${s.backgroundGuardEnabled},"smartCropEnabled":${s.smartCropEnabled},"leanStorageMode":${s.leanStorageMode},"lastPipeline":${quote(bb.pix.wall.engine.RuntimeStatus.get(this,"last_pipeline","Waiting"))},"lastAspect":${quote(bb.pix.wall.engine.RuntimeStatus.get(this,"last_aspect","Unknown"))},"selectionReason":${quote(bb.pix.wall.engine.RuntimeStatus.get(this,"selection_reason","Waiting"))},"rootState":${quote(bb.pix.wall.engine.RuntimeStatus.get(this,"root_state","Not checked"))},"rootProvider":${quote(bb.pix.wall.engine.RuntimeStatus.get(this,"root_provider","Unknown"))},"rootCaps":${quote(bb.pix.wall.engine.RuntimeStatus.get(this,"root_caps","Not scanned"))},"theme":${quote(theme)},"blurMaster":${WallpaperController.blurMasterEnabled(this)},"currentHome":${quote(st.currentHome)},"currentLock":${quote(st.currentLock)},"nextHome":${quote(st.nextHome)},"nextLock":${quote(st.nextLock)},"activeSource":${quote(bb.pix.wall.engine.RuntimeStatus.get(this,"active_source","None"))},"photosHealth":${quote(bb.pix.wall.engine.RuntimeStatus.get(this,"source_photos"))},"driveHealth":${quote(bb.pix.wall.engine.RuntimeStatus.get(this,"source_drive"))},"localHealth":${quote(bb.pix.wall.engine.RuntimeStatus.get(this,"source_local"))},"lastError":${quote(bb.pix.wall.engine.RuntimeStatus.get(this,"last_error",""))},"lastTrigger":${quote(bb.pix.wall.engine.RuntimeStatus.get(this,"last_trigger",""))},"lanState":${quote(bb.pix.wall.engine.RuntimeStatus.get(this,"lan_state","Stopped"))},"nextRun":${bb.pix.wall.engine.RuntimeStatus.getLong(this,"next_run",0L)}}"""
     }
 
     private fun queueJson(): String {
@@ -328,17 +324,15 @@ class LanServerService : Service() {
     private fun sendBytes(socket: Socket, code: Int, type: String, bytes: ByteArray) {
         val reason = when (code) { 200 -> "OK"; 403 -> "Forbidden"; 404 -> "Not Found"; 429 -> "Too Many Requests"; 500 -> "Error"; else -> "OK" }
         val header = "HTTP/1.1 $code $reason\r\nContent-Type: $type\r\nContent-Length: ${bytes.size}\r\nConnection: close\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nContent-Security-Policy: default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' data:\r\n\r\n"
-
         try {
             val out = socket.getOutputStream()
             out.write(header.toByteArray(Charsets.UTF_8))
             out.write(bytes)
             out.flush()
         } catch (_: java.net.SocketException) {
-            // Browser/network disappeared while response was being sent.
-            // Normal client disconnect, never an application crash.
+            // Normal browser/network disconnect. Never crash the app process.
         } catch (_: java.io.IOException) {
-            // Same treatment for ordinary network disconnects.
+            // Same treatment for ordinary client disconnects.
         }
     }
 
@@ -355,12 +349,13 @@ class LanServerService : Service() {
 <div class='card'><h2>Network, cache & reliability</h2><div class='two'><div class='field'><label>Data Saver</label><select id='dataSaverEnabled'><option value='true'>On</option><option value='false'>Off</option></select></div><div class='field'><label>Wi-Fi only</label><select id='wifiOnly'><option value='true'>On</option><option value='false'>Off</option></select></div><div class='field'><label>Charging only</label><select id='chargingOnly'><option value='true'>On</option><option value='false'>Off</option></select></div><div class='field'><label>Pause in Battery Saver</label><select id='pauseBatterySaver'><option value='true'>On</option><option value='false'>Off</option></select></div><div class='field'><label>Prefetch cache (4–36)</label><input id='cacheTarget' type='number' min='4' max='36'></div><div class='field'><label>Pause below 15% battery</label><select id='pauseLowBattery'><option value='true'>On</option><option value='false'>Off</option></select></div><div class='field'><label>Quiet hours</label><select id='quietHoursEnabled'><option value='true'>On</option><option value='false'>Off</option></select></div><div class='field'><label>Quiet start hour</label><input id='quietStartHour' type='number' min='0' max='23'></div><div class='field'><label>Quiet end hour</label><input id='quietEndHour' type='number' min='0' max='23'></div><div class='field'><label>Background guard</label><select id='backgroundGuardEnabled'><option value='true'>On</option><option value='false'>Off</option></select></div></div></div>
 <div class='card'><h2>Blur</h2><div class='two'><div><div class='field'><label>Home blur</label><select id='homeBlurEnabled'><option value='true'>On</option><option value='false'>Off</option></select></div><div class='field'><label>Home intensity 0–64</label><input id='homeBlurRadius' type='range' min='0' max='64'></div></div><div><div class='field'><label>Lock blur</label><select id='lockBlurEnabled'><option value='true'>On</option><option value='false'>Off</option></select></div><div class='field'><label>Lock intensity 0–64</label><input id='lockBlurRadius' type='range' min='0' max='64'></div></div></div></div>
 <div class='card'><h2>Appearance</h2><div class='two'><div class='field'><label>Color mode</label><select id='appearanceMode'>${options(AppearanceMode.entries.map { it.name to it.label })}</select></div><div class='field'><label>Theme</label><select id='theme'>${options(ThemeProfile.entries.map { it.name to it.title })}</select></div></div></div>
-<div class='card'><h2>Engine</h2><p class='muted'>Advance requests root on the phone, raises BB-PixWall process priority and expands the prefetch cache. Wallpaper application still uses Android WallpaperManager for reliability.</p><div class='row'><button onclick="act('/api/advanced')">Request Advance / su</button><button class='secondary' onclick="act('/api/standard')">Use Standard</button></div><p class='muted'>Advance mode uses a larger persistent cache.</p></div>
+<div class='card'><h2>Engine & quality</h2><p class='muted'>Advance uses only verified root capabilities. Wallpaper commits still use Android WallpaperManager.</p><div class='row'><button onclick="act('/api/advanced')">Request Advance / su</button><button class='secondary' onclick="act('/api/standard')">Use Standard</button><button class='secondary' onclick="loadRoot()">Root diagnostics</button></div><div class='two'><div class='field'><label>Smart Crop (mismatch only)</label><select id='smartCropEnabled'><option value='true'>On</option><option value='false'>Off</option></select></div><div class='field'><label>Lean local storage</label><select id='leanStorageMode'><option value='true'>On</option><option value='false'>Off</option></select></div></div><p class='muted'>9:20-compatible images are streamed untouched. Only accidental aspect mismatches may be cropped.</p><pre id='rootDiag' style='white-space:pre-wrap;background:#0b0b0d;padding:12px;border-radius:12px'></pre></div>
 <div class='card'><h2>Diagnostics</h2><p class='muted'>Live runtime log</p><pre id='logs' style='white-space:pre-wrap;max-height:260px;overflow:auto;background:#0b0b0d;padding:12px;border-radius:12px'></pre><button onclick='loadLogs()' class='secondary'>Refresh logs</button> <button onclick="act('/api/debug-report')" class='secondary'>Export debug</button></div><div class='card'><button onclick='saveSettings()'>Save all settings</button></div>
 <script>
-const token=${jsString(token)}; const ids=['photosAlbumUrl','driveFolderUrl','autoChange','triggerMode','intervalMinutes','targetMode','wallpaperOrder','homeBlurEnabled','homeBlurRadius','lockBlurEnabled','lockBlurRadius','appearanceMode','dataSaverEnabled','wifiOnly','chargingOnly','pauseBatterySaver','pauseLowBattery','quietHoursEnabled','quietStartHour','quietEndHour','cacheTarget','backgroundGuardEnabled','theme'];
+const token=${jsString(token)}; const ids=['photosAlbumUrl','driveFolderUrl','autoChange','triggerMode','intervalMinutes','targetMode','wallpaperOrder','homeBlurEnabled','homeBlurRadius','lockBlurEnabled','lockBlurRadius','appearanceMode','dataSaverEnabled','wifiOnly','chargingOnly','pauseBatterySaver','pauseLowBattery','quietHoursEnabled','quietStartHour','quietEndHour','cacheTarget','backgroundGuardEnabled','smartCropEnabled','leanStorageMode','theme'];
 async function act(p){let r=await fetch(p,{method:'POST',headers:{'X-BBPixWall-Token':token}});document.getElementById('status').textContent=await r.text();setTimeout(load,300)}
-async function load(){let s=await (await fetch('/api/settings',{cache:'no-store'})).json();ids.forEach(id=>{let e=document.getElementById(id);if(!e||s[id]===undefined)return;if(e.type==='checkbox')e.checked=Boolean(s[id]);else e.value=String(s[id])});document.getElementById('mode').textContent=s.engineMode==='ADVANCED'?'Advance':'Standard';document.getElementById('cache').textContent=s.cache;document.getElementById('activeSource').textContent=s.activeSource||'None';document.getElementById('photosHealth').textContent=s.photosHealth||'-';document.getElementById('driveHealth').textContent=s.driveHealth||'-';document.getElementById('localHealth').textContent=s.localHealth||'-';document.getElementById('nextRun').textContent=s.nextRun?new Date(s.nextRun).toLocaleTimeString():'Event/manual';document.getElementById('lastError').textContent=s.lastError?'Last error: '+s.lastError:'';document.querySelectorAll('.thumb img').forEach(i=>i.src=i.src.split('?')[0]+'?t='+Date.now())}
+async function load(){let s=await (await fetch('/api/settings',{cache:'no-store'})).json();ids.forEach(id=>{let e=document.getElementById(id);if(!e||s[id]===undefined)return;if(e.type==='checkbox')e.checked=Boolean(s[id]);else e.value=String(s[id])});document.getElementById('mode').textContent=s.engineMode==='ADVANCED'?'Advance':'Standard';document.getElementById('cache').textContent=s.cache;document.getElementById('activeSource').textContent=s.activeSource||'None';document.getElementById('photosHealth').textContent=s.photosHealth||'-';document.getElementById('driveHealth').textContent=s.driveHealth||'-';document.getElementById('localHealth').textContent=s.localHealth||'-';document.getElementById('nextRun').textContent=s.nextRun?new Date(s.nextRun).toLocaleTimeString():'Event/manual';document.getElementById('lastError').textContent=s.lastError?'Last error: '+s.lastError:'';document.getElementById('rootDiag').textContent='Root: '+(s.rootState||'Unknown')+' • '+(s.rootProvider||'')+'\n'+(s.rootCaps||'')+'\nPipeline: '+(s.lastPipeline||'-')+'\nAspect: '+(s.lastAspect||'-')+'\nWhy: '+(s.selectionReason||'-');document.querySelectorAll('.thumb img').forEach(i=>i.src=i.src.split('?')[0]+'?t='+Date.now())}
+async function loadRoot(){document.getElementById('rootDiag').textContent=await (await fetch('/api/root-diagnostics',{cache:'no-store'})).text()}
 async function loadLogs(){document.getElementById('logs').textContent=await (await fetch('/api/logs',{cache:'no-store'})).text()}
 async function saveSettings(){let p=new URLSearchParams();ids.forEach(id=>{let e=document.getElementById(id);if(!e)return;p.set(id,e.type==='checkbox'?(e.checked?'true':'false'):e.value)});let r=await fetch('/api/settings',{method:'POST',headers:{'X-BBPixWall-Token':token,'Content-Type':'application/x-www-form-urlencoded'},body:p});document.getElementById('status').textContent=r.ok?'Saved':'Save failed';await load()}
 load();loadLogs();setInterval(load,3000)

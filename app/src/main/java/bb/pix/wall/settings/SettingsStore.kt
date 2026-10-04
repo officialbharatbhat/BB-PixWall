@@ -38,6 +38,9 @@ class SettingsStore(context: Context) {
         lowStorageReserveMb = prefs.getInt("low_storage_reserve_mb", 768).coerceIn(256, 8192),
         aspectPreference = enumOrDefault(prefs.getString("aspect_preference", null), AspectPreference.ANY),
         perceptualDistance = prefs.getInt("perceptual_distance", 6).coerceIn(0, 24),
+        smartCropEnabled = prefs.getBoolean("smart_crop_enabled", true),
+        smartCropTolerancePct = prefs.getFloat("smart_crop_tolerance_pct", 1.5f).coerceIn(0.2f, 5f),
+        leanStorageMode = prefs.getBoolean("lean_storage_mode", true),
     )
 
     fun save(settings: AppSettings) {
@@ -74,6 +77,9 @@ class SettingsStore(context: Context) {
             .putInt("low_storage_reserve_mb", settings.lowStorageReserveMb.coerceIn(256,8192))
             .putString("aspect_preference", settings.aspectPreference.name)
             .putInt("perceptual_distance", settings.perceptualDistance.coerceIn(0,24))
+            .putBoolean("smart_crop_enabled", settings.smartCropEnabled)
+            .putFloat("smart_crop_tolerance_pct", settings.smartCropTolerancePct.coerceIn(0.2f, 5f))
+            .putBoolean("lean_storage_mode", settings.leanStorageMode)
             .apply()
     }
 

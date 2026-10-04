@@ -54,4 +54,10 @@ data class AppSettings(
     val lowStorageReserveMb: Int = 768,
     val aspectPreference: AspectPreference = AspectPreference.ANY,
     val perceptualDistance: Int = 6,
+    // Quality-first aspect handling for Bharat's 9:20 wallpaper library.
+    // Compatible images are always streamed untouched; only mismatches may be cropped.
+    val smartCropEnabled: Boolean = true,
+    val smartCropTolerancePct: Float = 1.5f,
+    // Keep local storage footprint small even in Advance mode.
+    val leanStorageMode: Boolean = true,
 )

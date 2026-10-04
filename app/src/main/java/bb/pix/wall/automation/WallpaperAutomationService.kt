@@ -18,6 +18,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import bb.pix.wall.R
 import bb.pix.wall.engine.EngineExecutors
+import bb.pix.wall.engine.EngineHealth
 import bb.pix.wall.engine.RuntimeStatus
 import bb.pix.wall.engine.WallpaperController
 import bb.pix.wall.engine.WallpaperFiles
@@ -49,6 +50,16 @@ class WallpaperAutomationService : Service() {
         }
     }
 
+    private val healthTask = object : Runnable {
+        override fun run() {
+            val latest = SettingsStore(this@WallpaperAutomationService).load()
+            EngineExecutors.io {
+                runCatching { EngineHealth.auditAndRepair(applicationContext, latest, allowNetworkRefill = true) }
+            }
+            handler.postDelayed(this, 15 * 60_000L)
+        }
+    }
+
     private val intervalTask = object : Runnable {
         override fun run() {
             val s = SettingsStore(this@WallpaperAutomationService).load()
@@ -68,12 +79,15 @@ class WallpaperAutomationService : Service() {
         val f = IntentFilter().apply { addAction(Intent.ACTION_SCREEN_OFF); addAction(Intent.ACTION_SCREEN_ON) }
         ContextCompat.registerReceiver(this, screenReceiver, f, ContextCompat.RECEIVER_NOT_EXPORTED)
         screenRegistered = true
+        handler.postDelayed(healthTask, 45_000L)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         handler.removeCallbacks(intervalTask)
         val s = SettingsStore(this).load()
         if (!s.autoChange) { stopSelf(); return START_NOT_STICKY }
+
+        EngineExecutors.io { runCatching { EngineHealth.auditAndRepair(applicationContext, s, allowNetworkRefill = false) } }
 
         if (s.engineMode == EngineMode.ADVANCED && s.backgroundGuardEnabled) {
             EngineExecutors.io { runCatching { RootAccess.tuneBackground(applicationContext) } }

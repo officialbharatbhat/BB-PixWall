@@ -64,6 +64,7 @@ class MainActivity : ComponentActivity() {
                     onRefreshPreviews = { previewTick++ },
                     onPrepareNext = {
                         Thread {
+                            bb.pix.wall.engine.WallpaperSourceEngine.invalidateCloudIndex()
                             runCatching { WallpaperController.primeCache(applicationContext, settings) }
                             runCatching { WallpaperController.ensureNext(applicationContext, settings) }
                             runOnUiThread { previewTick++ }
@@ -145,7 +146,9 @@ class MainActivity : ComponentActivity() {
             previous.lockBlurEnabled != updated.lockBlurEnabled
         val blurRadiusChanged = previous.homeBlurRadius != updated.homeBlurRadius ||
             previous.lockBlurRadius != updated.lockBlurRadius
-        if (blurToggleChanged || blurRadiusChanged) {
+        val qualityPipelineChanged = previous.smartCropEnabled != updated.smartCropEnabled ||
+            previous.smartCropTolerancePct != updated.smartCropTolerancePct
+        if (blurToggleChanged || blurRadiusChanged || qualityPipelineChanged) {
             val generation = ++blurGeneration
             blurDebounce.removeCallbacksAndMessages(null)
             blurDebounce.postDelayed({

@@ -56,21 +56,29 @@ object WallpaperSourceEngine {
         } else RuntimeStatus.source(context, "photos", "Not configured")
 
         if (settings.driveFolderUrl.isNotBlank()) {
-            if (!network) RuntimeStatus.source(context, "drive", "Offline")
+            // Drive is a mirror/fallback, not a second source to poll on every healthy Photos cycle.
+            // This keeps network and storage churn low for the user's cloud-first setup.
+            if (photosOk) RuntimeStatus.source(context, "drive", "Standby mirror")
+            else if (!network) RuntimeStatus.source(context, "drive", "Offline")
             else if (!sourceBackoffExpired(context, "drive")) RuntimeStatus.source(context, "drive", "Backoff")
             else {
                 val started = System.currentTimeMillis()
                 runCatching { googleDriveFolder(settings.driveFolderUrl, settings.dataSaverEnabled) }
                     .onSuccess {
-                        all += it; driveOk = it.isNotEmpty(); sourceSuccess(context, "drive", System.currentTimeMillis() - started, it.size, fallback = !photosOk)
+                        all += it; driveOk = it.isNotEmpty(); sourceSuccess(context, "drive", System.currentTimeMillis() - started, it.size, fallback = true)
                     }
                     .onFailure { sourceFailure(context, "drive", it, System.currentTimeMillis() - started); log("Google Drive: ${it.message}") }
             }
         } else RuntimeStatus.source(context, "drive", "Not configured")
 
         if (Environment.isExternalStorageManager()) {
-            val local = localFiles(settings); all += local
-            RuntimeStatus.source(context, "local", when { local.isEmpty() -> "Empty"; !photosOk && !driveOk -> "Fallback active"; else -> "Healthy" })
+            val local = localFiles(settings)
+            if (!photosOk && !driveOk) all += local
+            RuntimeStatus.source(context, "local", when {
+                local.isEmpty() -> "Empty"
+                !photosOk && !driveOk -> "Fallback active"
+                else -> "Standby local"
+            })
         } else RuntimeStatus.source(context, "local", "Permission required")
 
         val grouped = all.distinctBy { it.id }
@@ -83,10 +91,18 @@ object WallpaperSourceEngine {
     }
 
     private fun sourceSuccess(context: Context, source: String, ms: Long, count: Int, fallback: Boolean = false) {
+        val previous = RuntimeStatus.get(context, "${source}_last_count", "").toIntOrNull()
         RuntimeStatus.reset(context, "${source}_fail_streak")
         RuntimeStatus.setLong(context, "${source}_last_latency_ms", ms)
         RuntimeStatus.setLong(context, "${source}_last_ok", System.currentTimeMillis())
         RuntimeStatus.set(context, "${source}_last_count", count.toString())
+        if (previous != null && previous != count) {
+            val delta = count - previous
+            RuntimeStatus.set(context, "${source}_delta", if (delta > 0) "+$delta" else delta.toString())
+            log("$source index changed $previous -> $count")
+        } else if (previous == null) {
+            RuntimeStatus.set(context, "${source}_delta", "baseline")
+        }
         RuntimeStatus.source(context, source, when { count == 0 -> "Empty"; fallback -> "Fallback active"; ms > 4500L -> "Slow"; else -> "Healthy" })
     }
 
