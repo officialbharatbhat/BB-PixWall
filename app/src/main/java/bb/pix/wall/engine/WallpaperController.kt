@@ -1055,11 +1055,25 @@ object WallpaperController {
                 System.currentTimeMillis(),
             )
 
-            val followUp =
+            /*
+             * Capture requests both before and immediately after
+             * releasing the priming guard. This closes the tiny race
+             * where another caller can queue a refill between the
+             * first request check and cachePriming becoming false.
+             */
+            val followUpBeforeRelease =
                 cachePrimeRequested
                     .getAndSet(false)
 
             cachePriming.set(false)
+
+            val followUpAfterRelease =
+                cachePrimeRequested
+                    .getAndSet(false)
+
+            val followUp =
+                followUpBeforeRelease ||
+                    followUpAfterRelease
 
             RuntimeStatus.set(
                 context,
@@ -1206,15 +1220,118 @@ object WallpaperController {
             return
         }
 
-        val candidates = WallpaperSourceEngine.collect(context, settings, allowNetwork = true)
+        val candidates =
+            WallpaperSourceEngine.collect(
+                context,
+                settings,
+                allowNetwork = true,
+            )
+
         if (candidates.isEmpty()) return
-        val knownHashes = (existingHashes(WallpaperFiles.currentHome, WallpaperFiles.currentLock, WallpaperFiles.nextHome, WallpaperFiles.nextLock) +
-            readSeenHashes() + existing.mapNotNull { runCatching { sha256(it) }.getOrNull() }).toMutableSet()
-        val seenIds = readLinesSet(WallpaperFiles.seenIds)
+
+        /*
+         * The public Google Photos surface may expose only a bounded
+         * candidate window even when the shared album itself is much
+         * larger. Once almost every currently discoverable candidate
+         * has been seen, strict seen-history filtering can starve cache
+         * refill below its configured target.
+         *
+         * Treat seen history as a wallpaper cycle rather than a
+         * permanent ban. Reset only when the remaining unseen pool
+         * cannot satisfy this refill pass.
+         *
+         * Current Home/Lock/Next and existing cache bytes remain
+         * protected by exact hashes, so a cycle reset cannot immediately
+         * duplicate wallpapers already active or already cached.
+         */
+        val protectedHashes =
+            (
+                existingHashes(
+                    WallpaperFiles.currentHome,
+                    WallpaperFiles.currentLock,
+                    WallpaperFiles.nextHome,
+                    WallpaperFiles.nextLock,
+                ) +
+                    existing.mapNotNull {
+                        runCatching {
+                            sha256(it)
+                        }.getOrNull()
+                    }
+            ).toMutableSet()
+
+        var seenHashes =
+            readSeenHashes()
+
+        var seenIds =
+            readLinesSet(
+                WallpaperFiles.seenIds
+            )
+
+        var seenPhash =
+            readLinesSet(
+                WallpaperFiles.seenPerceptual
+            )
+
         val cachedIds =
-            existing.mapNotNull(::cacheCandidateId)
-                .toMutableSet()
-        val knownPhash = readLinesSet(WallpaperFiles.seenPerceptual).toMutableSet()
+            existing.mapNotNull(
+                ::cacheCandidateId
+            ).toMutableSet()
+
+        val unseenAvailable =
+            candidates.count { candidate ->
+                candidate.id !in seenIds &&
+                    candidate.id !in cachedIds
+            }
+
+        if (
+            refillBatch > 0 &&
+            unseenAvailable < refillBatch &&
+            seenIds.isNotEmpty()
+        ) {
+            val previousSeen =
+                seenIds.size
+
+            clearSeenHashes()
+
+            writeLinesSet(
+                WallpaperFiles.seenIds,
+                emptySet(),
+            )
+
+            writeLinesSet(
+                WallpaperFiles.seenPerceptual,
+                emptySet(),
+            )
+
+            seenHashes = emptySet()
+            seenIds = emptySet()
+            seenPhash = emptySet()
+
+            RuntimeStatus.set(
+                context,
+                "cache_seen_cycle",
+                "reset • seen=$previousSeen" +
+                    " • pool=${candidates.size}" +
+                    " • available=$unseenAvailable",
+            )
+
+            log(
+                "CACHE seen-cycle reset: " +
+                    "seen=$previousSeen " +
+                    "pool=${candidates.size} " +
+                    "available=$unseenAvailable " +
+                    "needed=$refillBatch"
+            )
+        }
+
+        val knownHashes =
+            (
+                protectedHashes +
+                    seenHashes
+            ).toMutableSet()
+
+        val knownPhash =
+            seenPhash.toMutableSet()
         var index = existing.size
         var successfulAdds = 0
 
@@ -1449,12 +1566,13 @@ object WallpaperController {
 
         /*
          * A rapid manual burst may consume cache while this refill is
-         * downloading. If inventory finishes critically low, request
-         * exactly one additional coalesced recovery pass.
+         * downloading. Critical depletion keeps the aggressive
+         * recovery behaviour, while a partially recovered cache now
+         * continues through small coalesced passes until the configured
+         * target is reached.
          *
-         * We deliberately stop automatic chaining once at least half
-         * the configured cache is recovered. Normal callers can then
-         * top it toward the full target without one giant marathon.
+         * Automatic chaining stops when a pass makes no progress, so a
+         * network/source failure cannot create an infinite retry loop.
          */
         val criticalFloor =
             (target / 2)
@@ -1462,28 +1580,48 @@ object WallpaperController {
                     pairCost * 2
                 )
 
+        val needsMore =
+            refillFinalCount < target
+
+        val madeProgress =
+            successfulAdds > 0
+
         if (
-            refillFinalCount <
-                criticalFloor &&
-            refillFinalCount <
-                target
+            needsMore &&
+            madeProgress
         ) {
             cachePrimeRequested.set(true)
+
+            val recoveryMode =
+                if (
+                    refillFinalCount <
+                        criticalFloor
+                ) {
+                    "critical"
+                } else {
+                    "settling"
+                }
 
             RuntimeStatus.set(
                 context,
                 "cache_refill_recovery",
-                "requested • $refillFinalCount/$target",
+                "$recoveryMode • $refillFinalCount/$target",
             )
 
             log(
-                "CACHE recovery requested: $refillFinalCount/$target"
+                "CACHE recovery $recoveryMode: " +
+                    "$refillFinalCount/$target"
             )
         } else {
             RuntimeStatus.set(
                 context,
                 "cache_refill_recovery",
-                "stable • $refillFinalCount/$target",
+                if (needsMore) {
+                    "paused-no-progress • " +
+                        "$refillFinalCount/$target"
+                } else {
+                    "stable • $refillFinalCount/$target"
+                },
             )
         }
     }
