@@ -308,6 +308,13 @@ object TasteLearning {
             .putLong("event_at_$key", System.currentTimeMillis())
             .apply()
 
+        WallpaperStyleLearning.recordSignal(
+            context = context,
+            candidateId = id,
+            delta = delta,
+            event = event,
+        )
+
         RuntimeStatus.set(
             context,
             "taste_last_score",

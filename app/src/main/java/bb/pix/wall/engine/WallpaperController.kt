@@ -209,6 +209,15 @@ object WallpaperController {
                       context,
                       settings.targetMode,
                   )
+
+                  EngineExecutors.io {
+                      runCatching {
+                          WallpaperStyleLearning.analyzeCurrent(
+                              context,
+                              settings.targetMode,
+                          )
+                      }
+                  }
                 WallpaperFiles.nextHome.delete(); WallpaperFiles.nextLock.delete()
                 RuntimeStatus.success(context, "Wallpaper applied: ${settings.targetMode.label}")
                 RuntimeStatus.setLong(context, "last_change", System.currentTimeMillis())
@@ -569,6 +578,14 @@ object WallpaperController {
                 val duplicate = hash in knownHashes || perceptuallySeen(ph, knownPhash, settings.perceptualDistance)
                 if (duplicate) { tmp.delete(); continue }
                 writeMeta(tmp, candidate.source, candidate.id)
+
+                runCatching {
+                    WallpaperStyleLearning.analyzeAndStore(
+                        context,
+                        candidate.id,
+                        tmp,
+                    )
+                }
                 cachedIds += candidate.id
                 knownHashes += hash
                 if (ph.isNotBlank()) knownPhash += ph
@@ -697,6 +714,14 @@ object WallpaperController {
                     continue
                 }
                 writeMeta(dest, candidate.source, candidate.id)
+
+                runCatching {
+                    WallpaperStyleLearning.analyzeAndStore(
+                        context,
+                        candidate.id,
+                        dest,
+                    )
+                }
                 RuntimeStatus.activeSource(context, candidate.source)
                 val ids = readLinesSet(WallpaperFiles.seenIds).toMutableSet().apply { add(candidate.id) }
                 writeLinesSet(WallpaperFiles.seenIds, ids.toList().takeLast(10000).toSet())
