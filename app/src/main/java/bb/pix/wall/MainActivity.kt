@@ -124,11 +124,22 @@ class MainActivity : ComponentActivity() {
             syncLan(updated, forceRestart = true)
         }
 
+        val discoveryPipelineChanged =
+            previous.discoveryEnabled !=
+                updated.discoveryEnabled ||
+                previous.discoveryMixMode !=
+                updated.discoveryMixMode ||
+                previous.enabledDiscoveryCategoryIds !=
+                updated.enabledDiscoveryCategoryIds ||
+                previous.categoryRotationEnabled !=
+                updated.categoryRotationEnabled
+
         val webPipelineChanged =
             previous.webSourceMode !=
                 updated.webSourceMode ||
                 previous.webQualityMode !=
-                updated.webQualityMode
+                updated.webQualityMode ||
+                discoveryPipelineChanged
 
         val sourcePipelineChanged =
             previous.photosAlbumUrl !=

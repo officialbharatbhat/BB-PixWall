@@ -45,6 +45,10 @@ import bb.pix.wall.ui.theme.LocalDesignTokens
 import bb.pix.wall.ui.theme.ThemeProfile
 import bb.pix.wall.web.model.WebQualityMode
 import bb.pix.wall.web.model.WebSourceMode
+import bb.pix.wall.discovery.CategoryCatalog
+import bb.pix.wall.discovery.CustomCategoryStore
+import bb.pix.wall.discovery.model.DiscoveryMixMode
+import bb.pix.wall.discovery.model.WallpaperCategory
 import kotlin.math.roundToInt
 
 @Composable
@@ -63,7 +67,34 @@ fun HomeScreen(
     val spacing = (16 * tokens.spacingScale).dp
     val localIp = remember { LanInfo.localIpv4() }
     val storageGranted = Environment.isExternalStorageManager()
-    var portText by remember(settings.lanPort) { mutableStateOf(settings.lanPort.toString()) }
+    var portText by remember(settings.lanPort) {
+        mutableStateOf(settings.lanPort.toString())
+    }
+
+    var discoverySearch by remember {
+        mutableStateOf("")
+    }
+
+    var expandedDiscoveryGroup by remember {
+        mutableStateOf<String?>(null)
+    }
+
+    var customCategoryTitle by remember {
+        mutableStateOf("")
+    }
+
+    var customCategoryQuery by remember {
+        mutableStateOf("")
+    }
+
+    var customCategoryRevision by remember {
+        mutableIntStateOf(0)
+    }
+
+    val customCategories =
+        remember(customCategoryRevision) {
+            CustomCategoryStore.load(context)
+        }
 
     Box(Modifier.fillMaxSize().background(themeBackdrop(selectedTheme))) {
         Scaffold(containerColor = Color.Transparent, contentColor = MaterialTheme.colorScheme.onBackground) { padding ->
@@ -284,6 +315,746 @@ fun HomeScreen(
                                 MaterialTheme.typography.bodySmall,
                             color =
                                 MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+
+            SectionTitle("Discovery Categories")
+
+            Card(
+                Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    Modifier.padding(18.dp),
+                    verticalArrangement =
+                        Arrangement.spacedBy(12.dp),
+                ) {
+                    SettingHeader(
+                        Icons.Outlined.Explore,
+                        "Wallpaper Discovery Catalog",
+                    )
+
+                    Text(
+                        "454+ built-in discovery categories, country catalog and unlimited custom searches.",
+                        style =
+                            MaterialTheme.typography.bodySmall,
+                        color =
+                            MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+
+                    SettingSwitch(
+                        title = "Category discovery",
+                        subtitle =
+                            "Use selected categories for Web Discovery. When no category is selected, BB-PixWall uses the Premium Mix defaults.",
+                        checked =
+                            settings.discoveryEnabled,
+                    ) {
+                        onSettingsChange(
+                            settings.copy(
+                                discoveryEnabled = it
+                            )
+                        )
+                    }
+
+                    if (settings.discoveryEnabled) {
+                        HorizontalDivider()
+
+                        Text(
+                            "Discovery mode",
+                            fontWeight =
+                                FontWeight.SemiBold,
+                        )
+
+                        DiscoveryMixMode.entries.forEach { mode ->
+                            RadioSetting(
+                                selected =
+                                    settings.discoveryMixMode == mode,
+                                title =
+                                    mode.label,
+                                subtitle =
+                                    when (mode) {
+                                        DiscoveryMixMode.PREMIUM_MIX ->
+                                            "Prioritize premium default categories and quality-first discovery."
+
+                                        DiscoveryMixMode.SMART_MIX ->
+                                            "Rotate through your selected categories with adaptive ranking."
+
+                                        DiscoveryMixMode.SINGLE ->
+                                            "Focus discovery on one selected category at a time."
+
+                                        DiscoveryMixMode.TRENDING_FIRST ->
+                                            "Prefer fresh and popular discovery before the normal category mix."
+                                    },
+                            ) {
+                                onSettingsChange(
+                                    settings.copy(
+                                        discoveryMixMode = mode
+                                    )
+                                )
+                            }
+                        }
+
+                        SettingSwitch(
+                            title = "Category rotation",
+                            subtitle =
+                                "Avoid getting stuck on one subject when multiple categories are selected.",
+                            checked =
+                                settings.categoryRotationEnabled,
+                        ) {
+                            onSettingsChange(
+                                settings.copy(
+                                    categoryRotationEnabled = it
+                                )
+                            )
+                        }
+
+                        HorizontalDivider()
+
+                        val selectedIds =
+                            settings.enabledDiscoveryCategoryIds
+
+                        val effectiveCount =
+                            if (selectedIds.isEmpty()) {
+                                CategoryCatalog
+                                    .premiumDefaultIds
+                                    .size
+                            } else {
+                                selectedIds.size
+                            }
+
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            verticalAlignment =
+                                Alignment.CenterVertically,
+                        ) {
+                            Column(
+                                Modifier.weight(1f)
+                            ) {
+                                Text(
+                                    if (selectedIds.isEmpty()) {
+                                        "Premium defaults active"
+                                    } else {
+                                        "$effectiveCount categories selected"
+                                    },
+                                    fontWeight =
+                                        FontWeight.SemiBold,
+                                )
+
+                                Text(
+                                    if (selectedIds.isEmpty()) {
+                                        "${CategoryCatalog.premiumDefaultIds.size} premium categories are used automatically."
+                                    } else {
+                                        "Only your selected category set is used."
+                                    },
+                                    style =
+                                        MaterialTheme.typography.bodySmall,
+                                    color =
+                                        MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+
+                        Row(
+                            horizontalArrangement =
+                                Arrangement.spacedBy(8.dp),
+                        ) {
+                            OutlinedButton(
+                                onClick = {
+                                    onSettingsChange(
+                                        settings.copy(
+                                            enabledDiscoveryCategoryIds =
+                                                CategoryCatalog
+                                                    .premiumDefaultIds
+                                        )
+                                    )
+                                },
+                            ) {
+                                Text("Premium defaults")
+                            }
+
+                            OutlinedButton(
+                                onClick = {
+                                    onSettingsChange(
+                                        settings.copy(
+                                            enabledDiscoveryCategoryIds =
+                                                emptySet()
+                                        )
+                                    )
+                                },
+                            ) {
+                                Text("Auto")
+                            }
+                        }
+
+                        OutlinedTextField(
+                            value = discoverySearch,
+                            onValueChange = {
+                                discoverySearch = it
+                            },
+                            modifier =
+                                Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            leadingIcon = {
+                                Icon(
+                                    Icons.Outlined.Search,
+                                    contentDescription = null,
+                                )
+                            },
+                            trailingIcon = {
+                                if (
+                                    discoverySearch
+                                        .isNotBlank()
+                                ) {
+                                    IconButton(
+                                        onClick = {
+                                            discoverySearch = ""
+                                        }
+                                    ) {
+                                        Icon(
+                                            Icons.Outlined.Close,
+                                            contentDescription =
+                                                "Clear search",
+                                        )
+                                    }
+                                }
+                            },
+                            label = {
+                                Text(
+                                    "Search 454+ categories"
+                                )
+                            },
+                        )
+
+                        val searchQuery =
+                            discoverySearch
+                                .trim()
+                                .lowercase()
+
+                        if (searchQuery.isNotBlank()) {
+                            val searchable =
+                                (
+                                    CategoryCatalog.all +
+                                        customCategories
+                                )
+                                    .distinctBy {
+                                        it.id
+                                    }
+
+                            val searchResults =
+                                searchable
+                                    .filter { item ->
+                                        item.title
+                                            .lowercase()
+                                            .contains(searchQuery) ||
+                                            item.id
+                                                .lowercase()
+                                                .contains(searchQuery) ||
+                                            item.searchTerms
+                                                .any {
+                                                    term ->
+                                                    term.lowercase()
+                                                        .contains(
+                                                            searchQuery
+                                                        )
+                                                } ||
+                                            item.aliases
+                                                .any {
+                                                    alias ->
+                                                    alias.lowercase()
+                                                        .contains(
+                                                            searchQuery
+                                                        )
+                                                }
+                                    }
+                                    .take(60)
+
+                            Text(
+                                "${searchResults.size} result(s)",
+                                style =
+                                    MaterialTheme.typography.labelLarge,
+                                color =
+                                    MaterialTheme.colorScheme.primary,
+                            )
+
+                            if (searchResults.isEmpty()) {
+                                Text(
+                                    "No preset match. Add it below as a custom category.",
+                                    style =
+                                        MaterialTheme.typography.bodySmall,
+                                    color =
+                                        MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            } else {
+                                searchResults.forEach { item ->
+                                    DiscoveryCategoryRow(
+                                        item = item,
+                                        selected =
+                                            item.id in selectedIds,
+                                        onToggle = {
+                                            checked ->
+                                            val next =
+                                                selectedIds
+                                                    .toMutableSet()
+
+                                            if (checked) {
+                                                next += item.id
+                                            } else {
+                                                next -= item.id
+                                            }
+
+                                            onSettingsChange(
+                                                settings.copy(
+                                                    enabledDiscoveryCategoryIds =
+                                                        next
+                                                )
+                                            )
+                                        },
+                                    )
+                                }
+
+                                if (
+                                    searchable.count {
+                                        item ->
+                                        item.title
+                                            .lowercase()
+                                            .contains(searchQuery) ||
+                                            item.searchTerms
+                                                .any {
+                                                    it.lowercase()
+                                                        .contains(
+                                                            searchQuery
+                                                        )
+                                                }
+                                    } > 60
+                                ) {
+                                    Text(
+                                        "Showing first 60 matches. Refine the search for more.",
+                                        style =
+                                            MaterialTheme.typography.bodySmall,
+                                        color =
+                                            MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
+                        } else {
+                            Text(
+                                "Browse groups",
+                                fontWeight =
+                                    FontWeight.SemiBold,
+                            )
+
+                            CategoryCatalog.groups.forEach { group ->
+                                val expanded =
+                                    expandedDiscoveryGroup ==
+                                        group.id
+
+                                val groupItems =
+                                    CategoryCatalog
+                                        .categoriesForGroup(
+                                            group.id
+                                        )
+
+                                val selectedInGroup =
+                                    groupItems.count {
+                                        it.id in selectedIds
+                                    }
+
+                                Surface(
+                                    modifier =
+                                        Modifier.fillMaxWidth(),
+                                    shape =
+                                        RoundedCornerShape(
+                                            14.dp
+                                        ),
+                                    tonalElevation = 1.dp,
+                                ) {
+                                    Column {
+                                        Row(
+                                            modifier =
+                                                Modifier
+                                                    .fillMaxWidth()
+                                                    .clickable {
+                                                        expandedDiscoveryGroup =
+                                                            if (
+                                                                expanded
+                                                            ) {
+                                                                null
+                                                            } else {
+                                                                group.id
+                                                            }
+                                                    }
+                                                    .padding(
+                                                        horizontal = 14.dp,
+                                                        vertical = 12.dp,
+                                                    ),
+                                            verticalAlignment =
+                                                Alignment.CenterVertically,
+                                        ) {
+                                            Column(
+                                                Modifier.weight(1f)
+                                            ) {
+                                                Text(
+                                                    group.title,
+                                                    fontWeight =
+                                                        FontWeight.SemiBold,
+                                                )
+
+                                                Text(
+                                                    "${groupItems.size} categories • $selectedInGroup selected",
+                                                    style =
+                                                        MaterialTheme.typography.bodySmall,
+                                                    color =
+                                                        MaterialTheme.colorScheme.onSurfaceVariant,
+                                                )
+                                            }
+
+                                            Icon(
+                                                if (expanded) {
+                                                    Icons.Outlined.ExpandLess
+                                                } else {
+                                                    Icons.Outlined.ExpandMore
+                                                },
+                                                contentDescription = null,
+                                            )
+                                        }
+
+                                        if (expanded) {
+                                            HorizontalDivider()
+
+                                            Row(
+                                                modifier =
+                                                    Modifier.padding(
+                                                        horizontal = 10.dp,
+                                                        vertical = 6.dp,
+                                                    ),
+                                                horizontalArrangement =
+                                                    Arrangement.spacedBy(
+                                                        6.dp
+                                                    ),
+                                            ) {
+                                                TextButton(
+                                                    onClick = {
+                                                        val next =
+                                                            selectedIds
+                                                                .toMutableSet()
+
+                                                        next.addAll(
+                                                            groupItems.map {
+                                                                it.id
+                                                            }
+                                                        )
+
+                                                        onSettingsChange(
+                                                            settings.copy(
+                                                                enabledDiscoveryCategoryIds =
+                                                                    next
+                                                            )
+                                                        )
+                                                    }
+                                                ) {
+                                                    Text(
+                                                        "Select group"
+                                                    )
+                                                }
+
+                                                TextButton(
+                                                    onClick = {
+                                                        val next =
+                                                            selectedIds
+                                                                .toMutableSet()
+
+                                                        groupItems.forEach {
+                                                            next.remove(
+                                                                it.id
+                                                            )
+                                                        }
+
+                                                        onSettingsChange(
+                                                            settings.copy(
+                                                                enabledDiscoveryCategoryIds =
+                                                                    next
+                                                            )
+                                                        )
+                                                    }
+                                                ) {
+                                                    Text(
+                                                        "Clear group"
+                                                    )
+                                                }
+                                            }
+
+                                            val visibleItems =
+                                                groupItems.take(40)
+
+                                            visibleItems.forEach { item ->
+                                                DiscoveryCategoryRow(
+                                                    item = item,
+                                                    selected =
+                                                        item.id in selectedIds,
+                                                    onToggle = {
+                                                        checked ->
+                                                        val next =
+                                                            selectedIds
+                                                                .toMutableSet()
+
+                                                        if (checked) {
+                                                            next += item.id
+                                                        } else {
+                                                            next -= item.id
+                                                        }
+
+                                                        onSettingsChange(
+                                                            settings.copy(
+                                                                enabledDiscoveryCategoryIds =
+                                                                    next
+                                                            )
+                                                        )
+                                                    },
+                                                )
+                                            }
+
+                                            if (groupItems.size > 40) {
+                                                Text(
+                                                    "${groupItems.size - 40} more hidden here. Use Search to reach any category instantly.",
+                                                    modifier =
+                                                        Modifier.padding(
+                                                            horizontal = 14.dp,
+                                                            vertical = 8.dp,
+                                                        ),
+                                                    style =
+                                                        MaterialTheme.typography.bodySmall,
+                                                    color =
+                                                        MaterialTheme.colorScheme.onSurfaceVariant,
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        HorizontalDivider()
+
+                        Text(
+                            "Custom category",
+                            fontWeight =
+                                FontWeight.SemiBold,
+                        )
+
+                        Text(
+                            "Create any discovery subject without waiting for an app update.",
+                            style =
+                                MaterialTheme.typography.bodySmall,
+                            color =
+                                MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+
+                        OutlinedTextField(
+                            value =
+                                customCategoryTitle,
+                            onValueChange = {
+                                customCategoryTitle =
+                                    it.take(64)
+                            },
+                            modifier =
+                                Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            label = {
+                                Text("Category name")
+                            },
+                            placeholder = {
+                                Text(
+                                    "e.g. Black Porsche AMOLED"
+                                )
+                            },
+                        )
+
+                        OutlinedTextField(
+                            value =
+                                customCategoryQuery,
+                            onValueChange = {
+                                customCategoryQuery =
+                                    it.take(120)
+                            },
+                            modifier =
+                                Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            label = {
+                                Text("Search query")
+                            },
+                            placeholder = {
+                                Text(
+                                    "e.g. black Porsche cinematic amoled"
+                                )
+                            },
+                        )
+
+                        Button(
+                            modifier =
+                                Modifier.fillMaxWidth(),
+                            enabled =
+                                customCategoryTitle
+                                    .isNotBlank(),
+                            onClick = {
+                                val created =
+                                    CustomCategoryStore.add(
+                                        context = context,
+                                        title =
+                                            customCategoryTitle,
+                                        query =
+                                            customCategoryQuery
+                                                .ifBlank {
+                                                    customCategoryTitle
+                                                },
+                                    )
+
+                                if (created != null) {
+                                    val next =
+                                        settings
+                                            .enabledDiscoveryCategoryIds
+                                            .toMutableSet()
+
+                                    next += created.id
+
+                                    onSettingsChange(
+                                        settings.copy(
+                                            enabledDiscoveryCategoryIds =
+                                                next
+                                        )
+                                    )
+
+                                    customCategoryTitle = ""
+                                    customCategoryQuery = ""
+                                    customCategoryRevision++
+                                }
+                            },
+                        ) {
+                            Icon(
+                                Icons.Outlined.Add,
+                                contentDescription = null,
+                            )
+
+                            Spacer(
+                                Modifier.width(8.dp)
+                            )
+
+                            Text("Add custom category")
+                        }
+
+                        if (customCategories.isNotEmpty()) {
+                            Text(
+                                "Custom categories",
+                                fontWeight =
+                                    FontWeight.SemiBold,
+                            )
+
+                            customCategories.forEach { item ->
+                                Row(
+                                    modifier =
+                                        Modifier
+                                            .fillMaxWidth()
+                                            .padding(
+                                                vertical = 4.dp
+                                            ),
+                                    verticalAlignment =
+                                        Alignment.CenterVertically,
+                                ) {
+                                    Checkbox(
+                                        checked =
+                                            item.id in selectedIds,
+                                        onCheckedChange = {
+                                            checked ->
+                                            val next =
+                                                selectedIds
+                                                    .toMutableSet()
+
+                                            if (checked) {
+                                                next += item.id
+                                            } else {
+                                                next -= item.id
+                                            }
+
+                                            onSettingsChange(
+                                                settings.copy(
+                                                    enabledDiscoveryCategoryIds =
+                                                        next
+                                                )
+                                            )
+                                        },
+                                    )
+
+                                    Column(
+                                        Modifier.weight(1f)
+                                    ) {
+                                        Text(
+                                            item.title,
+                                            fontWeight =
+                                                FontWeight.Medium,
+                                        )
+
+                                        Text(
+                                            item.searchTerms
+                                                .firstOrNull()
+                                                .orEmpty(),
+                                            style =
+                                                MaterialTheme.typography.bodySmall,
+                                            color =
+                                                MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
+
+                                    IconButton(
+                                        onClick = {
+                                            CustomCategoryStore
+                                                .remove(
+                                                    context,
+                                                    item.id,
+                                                )
+
+                                            val next =
+                                                settings
+                                                    .enabledDiscoveryCategoryIds
+                                                    .toMutableSet()
+
+                                            next.remove(
+                                                item.id
+                                            )
+
+                                            onSettingsChange(
+                                                settings.copy(
+                                                    enabledDiscoveryCategoryIds =
+                                                        next
+                                                )
+                                            )
+
+                                            customCategoryRevision++
+                                        },
+                                    ) {
+                                        Icon(
+                                            Icons.Outlined.Delete,
+                                            contentDescription =
+                                                "Delete custom category",
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        HorizontalDivider()
+
+                        Text(
+                            "Active category: ${
+                                RuntimeStatus.get(
+                                    context,
+                                    "web_active_category",
+                                    "Waiting for provider wiring",
+                                )
+                            }",
+                            color =
+                                MaterialTheme.colorScheme.primary,
+                            fontWeight =
+                                FontWeight.SemiBold,
                         )
                     }
                 }
@@ -739,6 +1510,63 @@ fun HomeScreen(
         SettingHeader(icon, title); Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         OutlinedTextField(value = value, onValueChange = onValue, modifier = Modifier.fillMaxWidth(), label = { Text(hint) }, singleLine = true)
     } }
+}
+
+@Composable
+private fun DiscoveryCategoryRow(
+    item: WallpaperCategory,
+    selected: Boolean,
+    onToggle: (Boolean) -> Unit,
+) {
+    Row(
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .clickable {
+                    onToggle(!selected)
+                }
+                .padding(
+                    horizontal = 8.dp,
+                    vertical = 4.dp,
+                ),
+        verticalAlignment =
+            Alignment.CenterVertically,
+    ) {
+        Checkbox(
+            checked = selected,
+            onCheckedChange = onToggle,
+        )
+
+        Spacer(
+            Modifier.width(8.dp)
+        )
+
+        Column(
+            Modifier.weight(1f)
+        ) {
+            Text(
+                item.title,
+                fontWeight =
+                    FontWeight.Medium,
+            )
+
+            val query =
+                item.searchTerms
+                    .firstOrNull()
+                    .orEmpty()
+
+            if (query.isNotBlank()) {
+                Text(
+                    query,
+                    maxLines = 1,
+                    style =
+                        MaterialTheme.typography.bodySmall,
+                    color =
+                        MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
 }
 
 @Composable private fun SectionTitle(text: String) { val t = LocalDesignTokens.current; Text(if (t.sectionUppercase) text.uppercase() else text, style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onBackground) }
