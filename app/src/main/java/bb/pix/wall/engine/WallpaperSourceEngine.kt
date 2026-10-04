@@ -53,10 +53,6 @@ object WallpaperSourceEngine {
             settings.webSourceMode ==
                 WebSourceMode.WEB_ONLY
 
-        val smartMix =
-            settings.webSourceMode ==
-                WebSourceMode.SMART_MIX
-
         var photosOk = false
         var driveOk = false
         var webOk = false

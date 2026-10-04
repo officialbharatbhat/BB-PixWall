@@ -50,18 +50,34 @@ object WebNetworkClassifier {
                     Context.TELEPHONY_SERVICE
                 ) as TelephonyManager
 
-            return when (
-                @Suppress("DEPRECATION")
-                tm.dataNetworkType
-            ) {
+            val radioType =
+                runCatching {
+                    @Suppress("DEPRECATION")
+                    tm.dataNetworkType
+                }.getOrNull()
+
+            return when (radioType) {
                 TelephonyManager.NETWORK_TYPE_NR ->
                     NetworkClass.FIVE_G
 
                 TelephonyManager.NETWORK_TYPE_LTE ->
                     NetworkClass.FOUR_G
 
-                else ->
-                    NetworkClass.SLOW
+                else -> {
+                    val downstreamKbps =
+                        caps.linkDownstreamBandwidthKbps
+
+                    when {
+                        downstreamKbps >= 100_000 ->
+                            NetworkClass.FIVE_G
+
+                        downstreamKbps >= 10_000 ->
+                            NetworkClass.FOUR_G
+
+                        else ->
+                            NetworkClass.SLOW
+                    }
+                }
             }
         }
 

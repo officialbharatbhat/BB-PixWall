@@ -43,6 +43,8 @@ import bb.pix.wall.network.LanInfo
 import bb.pix.wall.settings.*
 import bb.pix.wall.ui.theme.LocalDesignTokens
 import bb.pix.wall.ui.theme.ThemeProfile
+import bb.pix.wall.web.model.WebQualityMode
+import bb.pix.wall.web.model.WebSourceMode
 import kotlin.math.roundToInt
 
 @Composable
@@ -125,8 +127,165 @@ fun HomeScreen(
                     SettingHeader(Icons.Outlined.HealthAndSafety, "Source health")
                     Text("Photos: ${RuntimeStatus.get(context, "source_photos")} • ${RuntimeStatus.get(context, "photos_last_count", "0")} items • Δ ${RuntimeStatus.get(context, "photos_delta", "-")}")
                     Text("Drive: ${RuntimeStatus.get(context, "source_drive")} • ${RuntimeStatus.get(context, "drive_last_count", "0")} items • Δ ${RuntimeStatus.get(context, "drive_delta", "-")}")
+                    Text("Web: ${RuntimeStatus.get(context, "source_web", "Off")} • ${RuntimeStatus.get(context, "web_last_count", "0")} items • Δ ${RuntimeStatus.get(context, "web_delta", "-")}")
                     Text("Local: ${RuntimeStatus.get(context, "source_local")}")
                     Text("Active: ${RuntimeStatus.get(context, "active_source", "None yet")}", color = MaterialTheme.colorScheme.primary)
+                }
+            }
+
+            SectionTitle("Web Discovery")
+            Card(Modifier.fillMaxWidth()) {
+                Column(
+                    Modifier.padding(18.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    SettingHeader(
+                        Icons.Outlined.Public,
+                        "Direct Web Wallpapers",
+                    )
+
+                    Text(
+                        "Add high-resolution SFW wallpapers from Web Discovery without replacing your existing Photos, Drive or local sources.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+
+                    HorizontalDivider(
+                        Modifier.padding(vertical = 4.dp)
+                    )
+
+                    Text(
+                        "Source mode",
+                        fontWeight = FontWeight.SemiBold,
+                    )
+
+                    WebSourceMode.entries.forEach { mode ->
+                        RadioSetting(
+                            selected =
+                                settings.webSourceMode == mode,
+                            title =
+                                when (mode) {
+                                    WebSourceMode.OFF ->
+                                        "Off"
+
+                                    WebSourceMode.SMART_MIX ->
+                                        "Smart Mix"
+
+                                    WebSourceMode.WEB_ONLY ->
+                                        "Web only"
+                                },
+                            subtitle =
+                                when (mode) {
+                                    WebSourceMode.OFF ->
+                                        "Keep the v1.0 Photos → Drive → Local source pipeline."
+
+                                    WebSourceMode.SMART_MIX ->
+                                        "Mix Web Discovery with your Google Photos pool and let the decision engine rank both."
+
+                                    WebSourceMode.WEB_ONLY ->
+                                        "Use only Web Discovery. Existing cloud/local source cache is replaced."
+                                },
+                        ) {
+                            onSettingsChange(
+                                settings.copy(
+                                    webSourceMode = mode
+                                )
+                            )
+                        }
+                    }
+
+                    if (
+                        settings.webSourceMode !=
+                        WebSourceMode.OFF
+                    ) {
+                        HorizontalDivider(
+                            Modifier.padding(vertical = 4.dp)
+                        )
+
+                        Text(
+                            "Web quality",
+                            fontWeight = FontWeight.SemiBold,
+                        )
+
+                        WebQualityMode.entries.forEach { quality ->
+                            RadioSetting(
+                                selected =
+                                    settings.webQualityMode ==
+                                        quality,
+                                title =
+                                    when (quality) {
+                                        WebQualityMode.MAXIMUM ->
+                                            "Maximum"
+
+                                        WebQualityMode.BALANCED ->
+                                            "Balanced"
+
+                                        WebQualityMode.DATA_SAVER ->
+                                            "Data Saver"
+                                    },
+                                subtitle =
+                                    when (quality) {
+                                        WebQualityMode.MAXIMUM ->
+                                            "Prefer full-resolution images at or above the detected display resolution."
+
+                                        WebQualityMode.BALANCED ->
+                                            "Allow moderately smaller images to reduce download cost."
+
+                                        WebQualityMode.DATA_SAVER ->
+                                            "Use the lightest acceptable Web candidates."
+                                    },
+                            ) {
+                                onSettingsChange(
+                                    settings.copy(
+                                        webQualityMode =
+                                            quality
+                                    )
+                                )
+                            }
+                        }
+
+                        HorizontalDivider(
+                            Modifier.padding(vertical = 4.dp)
+                        )
+
+                        Text(
+                            "Provider: Wallhaven • SFW only",
+                            color =
+                                MaterialTheme.colorScheme.primary,
+                            fontWeight =
+                                FontWeight.SemiBold,
+                        )
+
+                        Text(
+                            "Web health: ${RuntimeStatus.get(context, "source_web", "Waiting")}",
+                            style =
+                                MaterialTheme.typography.bodySmall,
+                        )
+
+                        Text(
+                            "Display: ${RuntimeStatus.get(context, "web_display_profile", "Detected on first Web fetch")}",
+                            style =
+                                MaterialTheme.typography.bodySmall,
+                            color =
+                                MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+
+                        Text(
+                            "Network: ${RuntimeStatus.get(context, "web_network_class", "Waiting")}",
+                            style =
+                                MaterialTheme.typography.bodySmall,
+                            color =
+                                MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+
+                        Text(
+                            "Prefetch: ${RuntimeStatus.get(context, "web_prefetch_policy", "Waiting")}",
+                            style =
+                                MaterialTheme.typography.bodySmall,
+                            color =
+                                MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
             }
 

@@ -124,13 +124,52 @@ class MainActivity : ComponentActivity() {
             syncLan(updated, forceRestart = true)
         }
 
-        if (previous.photosAlbumUrl != updated.photosAlbumUrl || previous.driveFolderUrl != updated.driveFolderUrl || previous.wallpaperOrder != updated.wallpaperOrder || previous.dataSaverEnabled != updated.dataSaverEnabled) {
-            if (previous.photosAlbumUrl != updated.photosAlbumUrl || previous.driveFolderUrl != updated.driveFolderUrl || previous.dataSaverEnabled != updated.dataSaverEnabled) {
-                bb.pix.wall.engine.WallpaperSourceEngine.invalidateCloudIndex()
+        val webPipelineChanged =
+            previous.webSourceMode !=
+                updated.webSourceMode ||
+                previous.webQualityMode !=
+                updated.webQualityMode
+
+        val sourcePipelineChanged =
+            previous.photosAlbumUrl !=
+                updated.photosAlbumUrl ||
+                previous.driveFolderUrl !=
+                updated.driveFolderUrl ||
+                previous.wallpaperOrder !=
+                updated.wallpaperOrder ||
+                previous.dataSaverEnabled !=
+                updated.dataSaverEnabled ||
+                webPipelineChanged
+
+        if (sourcePipelineChanged) {
+            if (
+                previous.photosAlbumUrl !=
+                updated.photosAlbumUrl ||
+                previous.driveFolderUrl !=
+                updated.driveFolderUrl ||
+                previous.dataSaverEnabled !=
+                updated.dataSaverEnabled ||
+                webPipelineChanged
+            ) {
+                bb.pix.wall.engine.WallpaperSourceEngine
+                    .invalidateCloudIndex()
             }
+
+            /*
+             * Source-mode and Web-quality changes must not consume
+             * cache prepared under the previous source contract.
+             * This makes WEB_ONLY genuinely Web-only immediately.
+             */
+            if (webPipelineChanged) {
+                WallpaperController.clearCache()
+            }
+
             WallpaperController.invalidateQueue()
+
             sourceMutationFuture?.cancel(false)
-            val generation = ++sourceMutationGeneration
+
+            val generation =
+                ++sourceMutationGeneration
             // Paste/typing used to launch a cloud parse for every character. Debounce it.
             sourceMutationFuture = bb.pix.wall.engine.EngineExecutors.scheduler.schedule({
                 if (generation != sourceMutationGeneration) return@schedule

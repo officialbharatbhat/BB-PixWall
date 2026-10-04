@@ -52,11 +52,65 @@ object WebCandidateSelector {
             return false
         }
 
+        /*
+         * BB-PixWall currently targets portrait phone displays.
+         * A giant landscape image may satisfy raw pixel minimums,
+         * but would require destructive cropping. Reject it before
+         * ranking instead of pretending resolution alone is quality.
+         */
+        if (height < width) {
+            return false
+        }
+
         val portraitWidth =
             minOf(width, height)
 
         val portraitHeight =
             maxOf(width, height)
+
+        val candidateAspect =
+            portraitWidth.toDouble() /
+                portraitHeight.toDouble()
+
+        val displayAspect =
+            display.aspectRatio
+
+        /*
+         * Estimate how much of the original image survives a
+         * center-crop to the detected screen aspect.
+         *
+         * 1.00 = exact aspect match
+         * 0.90 = roughly 90% retained
+         *
+         * Maximum mode is intentionally strict so high pixel count
+         * cannot hide destructive cropping.
+         */
+        val cropRetention =
+            minOf(
+                candidateAspect /
+                    displayAspect,
+                displayAspect /
+                    candidateAspect,
+            ).coerceIn(
+                0.0,
+                1.0,
+            )
+
+        val aspectAccepted =
+            when (qualityMode) {
+                WebQualityMode.MAXIMUM ->
+                    cropRetention >= 0.90
+
+                WebQualityMode.BALANCED ->
+                    cropRetention >= 0.82
+
+                WebQualityMode.DATA_SAVER ->
+                    cropRetention >= 0.72
+            }
+
+        if (!aspectAccepted) {
+            return false
+        }
 
         return when (qualityMode) {
             WebQualityMode.MAXIMUM ->
@@ -106,6 +160,17 @@ object WebCandidateSelector {
                     display.aspectRatio
             )
 
+        val cropRetention =
+            minOf(
+                candidateAspect /
+                    display.aspectRatio,
+                display.aspectRatio /
+                    candidateAspect,
+            ).coerceIn(
+                0.0,
+                1.0,
+            )
+
         val resolutionRatio =
             minOf(
                 portraitWidth.toDouble() /
@@ -146,9 +211,13 @@ object WebCandidateSelector {
                 WebQualityMode.DATA_SAVER -> 0.0
             }
 
+        val retentionScore =
+            cropRetention * 35.0
+
         return aspectScore +
             resolutionScore +
             orientationScore +
-            qualityBias
+            qualityBias +
+            retentionScore
     }
 }

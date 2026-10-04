@@ -51,25 +51,56 @@ object WallhavenProvider : WebWallpaperProvider {
             linkedMapOf<String, WebWallpaperCandidate>()
 
         /*
-         * Wallhaven returns a paged result set.
-         * A few pages are enough for the selector to find strong
-         * portrait/device matches without turning one cache refill
-         * into an internet archaeology expedition.
+         * Stop based on candidates that actually survive the
+         * device/quality selector, not merely raw API result count.
+         *
+         * Maximum mode can reject many otherwise-large wallpapers
+         * because their aspect would require destructive cropping.
          */
-        for (page in 1..4) {
-            if (
-                collected.size >=
-                wanted * 2
-            ) {
-                break
+        val maxPages =
+            when (qualityMode) {
+                WebQualityMode.MAXIMUM -> 8
+                WebQualityMode.BALANCED -> 6
+                WebQualityMode.DATA_SAVER -> 4
             }
 
+        var failedPages = 0
+
+        for (page in 1..maxPages) {
             val json =
-                requestPage(
-                    query = query,
-                    display = display,
-                    page = page,
-                )
+                try {
+                    requestPage(
+                        query = query,
+                        display = display,
+                        page = page,
+                    )
+                } catch (t: Throwable) {
+                    failedPages++
+
+                    /*
+                     * Preserve useful results from earlier pages.
+                     * A late-page timeout must not turn a successful
+                     * discovery pass into an empty provider failure.
+                     */
+                    if (
+                        collected.isEmpty() &&
+                        failedPages >= 2
+                    ) {
+                        throw t
+                    }
+
+                    if (failedPages >= 2) {
+                        break
+                    }
+
+                    continue
+                }
+
+            /*
+             * A successful request clears the consecutive-failure
+             * pressure and allows discovery to continue.
+             */
+            failedPages = 0
 
             val data =
                 json.optJSONArray(
@@ -95,6 +126,20 @@ object WallhavenProvider : WebWallpaperProvider {
                 collected[
                     candidate.id
                 ] = candidate
+            }
+
+            val rankedCount =
+                WebCandidateSelector
+                    .rank(
+                        candidates =
+                            collected.values.toList(),
+                        display = display,
+                        qualityMode = qualityMode,
+                    )
+                    .size
+
+            if (rankedCount >= wanted) {
+                break
             }
 
             val meta =
@@ -270,8 +315,8 @@ object WallhavenProvider : WebWallpaperProvider {
                         .openConnection()
                     as HttpURLConnection
                 ).apply {
-                    connectTimeout = 10_000
-                    readTimeout = 18_000
+                    connectTimeout = 8_000
+                    readTimeout = 10_000
                     instanceFollowRedirects = true
 
                     setRequestProperty(

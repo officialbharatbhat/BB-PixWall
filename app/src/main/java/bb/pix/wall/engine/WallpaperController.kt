@@ -916,7 +916,16 @@ object WallpaperController {
     }
 
     fun clearCache(): Int = synchronized(lock) {
-        WallpaperFiles.ensure(); var n = 0
+        /*
+         * Any refill already running under the previous source
+         * contract becomes stale immediately. primeCacheImpl checks
+         * this generation before committing downloaded bytes.
+         */
+        generation.incrementAndGet()
+
+        WallpaperFiles.ensure()
+        var n = 0
+
         cacheImageFiles().forEach { f ->
             if (f.delete()) n++
             File(f.absolutePath + ".meta").delete()
@@ -1185,6 +1194,14 @@ object WallpaperController {
 
     private fun primeCacheImpl(context: Context, settings: AppSettings) {
         requireStorage()
+
+        val primeGeneration =
+            generation.get()
+
+        fun stalePrime(): Boolean =
+            generation.get() !=
+                primeGeneration
+
         verifyCacheIntegrity()
         val reserve = settings.lowStorageReserveMb.coerceIn(256, 8192).toLong() * 1024L * 1024L
         if (freeBytes() < reserve) {
@@ -1294,12 +1311,40 @@ object WallpaperController {
             return
         }
 
+        if (stalePrime()) {
+            RuntimeStatus.set(
+                context,
+                "cache_refill_contract",
+                "stale-before-collect",
+            )
+
+            log(
+                "CACHE stale refill aborted before collect"
+            )
+
+            return
+        }
+
         val candidates =
             WallpaperSourceEngine.collect(
                 context,
                 settings,
                 allowNetwork = true,
             )
+
+        if (stalePrime()) {
+            RuntimeStatus.set(
+                context,
+                "cache_refill_contract",
+                "stale-after-collect",
+            )
+
+            log(
+                "CACHE stale refill aborted after collect"
+            )
+
+            return
+        }
 
         if (candidates.isEmpty()) return
 
@@ -1462,6 +1507,20 @@ object WallpaperController {
         var directWarm = 0
 
         for (candidate in candidates) {
+            if (stalePrime()) {
+                RuntimeStatus.set(
+                    context,
+                    "cache_refill_contract",
+                    "stale-before-fetch",
+                )
+
+                log(
+                    "CACHE stale refill stopped before ${candidate.id}"
+                )
+
+                break
+            }
+
             if (
                 successfulAdds >=
                     refillBatch
@@ -1498,6 +1557,27 @@ object WallpaperController {
 
             try {
                 fetchTo(candidate, staging)
+
+                /*
+                 * Source mode may have changed while this network
+                 * request was in flight. Never let bytes fetched
+                 * under an old contract enter Hot/Warm cache.
+                 */
+                if (stalePrime()) {
+                    staging.delete()
+
+                    RuntimeStatus.set(
+                        context,
+                        "cache_refill_contract",
+                        "stale-after-fetch",
+                    )
+
+                    log(
+                        "CACHE stale download discarded ${candidate.id}"
+                    )
+
+                    break
+                }
 
                 val hash = sha256(staging)
                 val ph = perceptualHash(staging)
@@ -1570,31 +1650,70 @@ object WallpaperController {
                         "queue_${System.currentTimeMillis()}_${index}.$ext"
                     )
 
-                val moved =
-                    staging.renameTo(cacheFile) ||
-                        runCatching {
-                            staging.copyTo(
+                val committed =
+                    synchronized(lock) {
+                        /*
+                         * invalidateQueue()/clearCache() also use this
+                         * lock, so generation check + cache commit is
+                         * atomic against a source-contract mutation.
+                         */
+                        if (stalePrime()) {
+                            false
+                        } else {
+                            val moved =
+                                staging.renameTo(cacheFile) ||
+                                    runCatching {
+                                        staging.copyTo(
+                                            cacheFile,
+                                            overwrite = false,
+                                        )
+                                        staging.delete()
+                                        true
+                                    }.getOrDefault(false)
+
+                            if (
+                                !moved ||
+                                !cacheFile.exists()
+                            ) {
+                                cacheFile.delete()
+
+                                throw IllegalStateException(
+                                    "Predictive cache finalization failed"
+                                )
+                            }
+
+                            finalFile = cacheFile
+
+                            writeMeta(
                                 cacheFile,
-                                overwrite = false,
+                                candidate.source,
+                                candidate.id,
                             )
-                            staging.delete()
+
                             true
-                        }.getOrDefault(false)
+                        }
+                    }
 
-                if (!moved || !cacheFile.exists()) {
+                if (!committed) {
+                    staging.delete()
                     cacheFile.delete()
-                    throw IllegalStateException(
-                        "Predictive cache finalization failed"
+
+                    File(
+                        cacheFile.absolutePath + ".meta"
+                    ).delete()
+
+                    RuntimeStatus.set(
+                        context,
+                        "cache_refill_contract",
+                        "stale-before-commit",
                     )
+
+                    log(
+                        "CACHE stale commit blocked ${candidate.id}"
+                    )
+
+                    break
                 }
-
-                finalFile = cacheFile
-
-                writeMeta(
-                    cacheFile,
-                    candidate.source,
-                    candidate.id,
-                )
 
                 cachedIds += candidate.id
                 knownHashes += hash
@@ -1666,6 +1785,14 @@ object WallpaperController {
                 )
             }
         }
+        if (!stalePrime()) {
+            RuntimeStatus.set(
+                context,
+                "cache_refill_contract",
+                "current",
+            )
+        }
+
         RuntimeStatus.set(
             context,
             "cache_duplicate_guard",
