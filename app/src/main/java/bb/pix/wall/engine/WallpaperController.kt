@@ -931,11 +931,15 @@ object WallpaperController {
         val now =
             System.currentTimeMillis()
 
+        /*
+         * Scan every storage area that may contain temporary engine
+         * artifacts. walkTopDown() also reaches cache/hot, cache/warm
+         * and backup/settings without needing fragile hard-coded child
+         * folder assumptions.
+         */
         val roots =
             listOf(
                 WallpaperFiles.cache,
-                WallpaperFiles.hotCache,
-                WallpaperFiles.warmCache,
                 WallpaperFiles.queue,
                 WallpaperFiles.legacyQueue,
                 WallpaperFiles.backup,
@@ -948,31 +952,96 @@ object WallpaperController {
                     )
                 }
 
-        var removed = 0
+        val visited =
+            mutableSetOf<String>()
 
-        roots.forEach { dir ->
-            dir.listFiles()
-                .orEmpty()
+        var removedTemp = 0
+        var removedMeta = 0
+
+        roots.forEach { root ->
+            if (!root.exists()) {
+                return@forEach
+            }
+
+            root.walkTopDown()
                 .filter {
-                    it.isFile &&
-                        it.name.endsWith(".part") &&
-                        now - it.lastModified() >= STALE_PART_MS
+                    it.isFile
                 }
                 .forEach { file ->
-                    if (file.delete()) {
-                        removed++
+                    val canonical =
+                        runCatching {
+                            file.canonicalPath
+                        }.getOrDefault(
+                            file.absolutePath
+                        )
+
+                    if (!visited.add(canonical)) {
+                        return@forEach
                     }
 
-                    File(
-                        file.absolutePath + ".meta"
-                    ).delete()
+                    val ageMs =
+                        now - file.lastModified()
+
+                    val isStaleTemp =
+                        (
+                            file.name.endsWith(".part") ||
+                                file.name.endsWith(".tmp")
+                        ) &&
+                            ageMs >= STALE_PART_MS
+
+                    if (isStaleTemp) {
+                        if (file.delete()) {
+                            removedTemp++
+                        }
+
+                        File(
+                            file.absolutePath + ".meta"
+                        ).delete()
+
+                        return@forEach
+                    }
+
+                    /*
+                     * Metadata is valid only while its corresponding
+                     * image exists. Remove old orphan metadata left by
+                     * interrupted moves, cache trimming or crashes.
+                     */
+                    if (
+                        file.name.endsWith(".meta") &&
+                        ageMs >= STALE_PART_MS
+                    ) {
+                        val image =
+                            File(
+                                file.absolutePath
+                                    .removeSuffix(".meta")
+                            )
+
+                        if (
+                            !image.exists() &&
+                            file.delete()
+                        ) {
+                            removedMeta++
+                        }
+                    }
                 }
         }
 
         RuntimeStatus.set(
             context,
             "stale_part_cleanup",
-            removed.toString(),
+            removedTemp.toString(),
+        )
+
+        RuntimeStatus.set(
+            context,
+            "stale_temp_cleanup",
+            removedTemp.toString(),
+        )
+
+        RuntimeStatus.set(
+            context,
+            "orphan_meta_cleanup",
+            removedMeta.toString(),
         )
 
         RuntimeStatus.setLong(
@@ -981,14 +1050,19 @@ object WallpaperController {
             now,
         )
 
-        if (removed > 0) {
+        if (
+            removedTemp > 0 ||
+            removedMeta > 0
+        ) {
             log(
-                "CLEAN stale-part removed=$removed"
+                "CLEAN stale temp=$removedTemp" +
+                    " orphan-meta=$removedMeta"
             )
         }
 
-        return removed
+        return removedTemp + removedMeta
     }
+
 
     private fun adaptiveHotTarget(
         target: Int,
@@ -1244,20 +1318,58 @@ object WallpaperController {
          * protected by exact hashes, so a cycle reset cannot immediately
          * duplicate wallpapers already active or already cached.
          */
-        val protectedHashes =
+        /*
+         * Active/current/cache files are protected independently from
+         * long-term seen history. This matters when a finite cloud
+         * discovery window exhausts and the seen cycle is reset.
+         *
+         * Exact hashes prevent byte-for-byte repeats while perceptual
+         * hashes protect against the same image arriving recompressed,
+         * resized or through another source URL.
+         */
+        val protectedFiles =
             (
-                existingHashes(
+                listOf(
                     WallpaperFiles.currentHome,
                     WallpaperFiles.currentLock,
                     WallpaperFiles.nextHome,
                     WallpaperFiles.nextLock,
                 ) +
-                    existing.mapNotNull {
-                        runCatching {
-                            sha256(it)
-                        }.getOrNull()
+                    existing
+            )
+                .filter {
+                    it.exists() &&
+                        it.isFile
+                }
+                .distinctBy {
+                    runCatching {
+                        it.canonicalPath
+                    }.getOrDefault(
+                        it.absolutePath
+                    )
+                }
+
+        val protectedHashes =
+            protectedFiles
+                .mapNotNull { file ->
+                    runCatching {
+                        sha256(file)
+                    }.getOrNull()
+                }
+                .toMutableSet()
+
+        val protectedPhash =
+            protectedFiles
+                .mapNotNull { file ->
+                    runCatching {
+                        perceptualHash(file)
                     }
-            ).toMutableSet()
+                        .getOrNull()
+                        ?.takeIf {
+                            it.isNotBlank()
+                        }
+                }
+                .toMutableSet()
 
         var seenHashes =
             readSeenHashes()
@@ -1331,9 +1443,15 @@ object WallpaperController {
             ).toMutableSet()
 
         val knownPhash =
-            seenPhash.toMutableSet()
+            (
+                protectedPhash +
+                    seenPhash
+            ).toMutableSet()
         var index = existing.size
         var successfulAdds = 0
+        var skippedSeenId = 0
+        var skippedCachedId = 0
+        var skippedDuplicate = 0
 
         var hotCount =
             existing.count {
@@ -1348,7 +1466,15 @@ object WallpaperController {
                 successfulAdds >=
                     refillBatch
             ) break
-            if (candidate.id in seenIds || candidate.id in cachedIds) continue
+            if (candidate.id in seenIds) {
+                skippedSeenId++
+                continue
+            }
+
+            if (candidate.id in cachedIds) {
+                skippedCachedId++
+                continue
+            }
 
             val ext =
                 candidate.file
@@ -1385,6 +1511,7 @@ object WallpaperController {
                         )
 
                 if (duplicate) {
+                    skippedDuplicate++
                     staging.delete()
                     continue
                 }
@@ -1539,6 +1666,15 @@ object WallpaperController {
                 )
             }
         }
+        RuntimeStatus.set(
+            context,
+            "cache_duplicate_guard",
+            "seen=$skippedSeenId" +
+                " • cached=$skippedCachedId" +
+                " • duplicate=$skippedDuplicate" +
+                " • added=$successfulAdds",
+        )
+
         trimCache(target)
         rebalancePredictiveCache(
             context,
