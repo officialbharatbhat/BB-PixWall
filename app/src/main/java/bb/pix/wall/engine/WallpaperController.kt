@@ -674,15 +674,25 @@ object WallpaperController {
                         candidate.id,
                     )
 
+                recordPredictiveSample(
+                    context,
+                    predictiveScore,
+                )
+
+                val hotThreshold =
+                    predictiveHotThreshold(
+                        context,
+                        hotTarget,
+                    )
+
                 /*
-                 * Positive predicted preference gets direct Hot placement
-                 * while capacity exists. Neutral/negative goes Warm.
+                 * Adaptive direct placement.
                  *
-                 * Final rebalance below remains the safety net and can
-                 * still promote the best entries if Hot is underfilled.
+                 * During early learning the threshold stays permissive.
+                 * As confidence/history mature it can become selective.
                  */
                 val directToHot =
-                    predictiveScore >= 0 &&
+                    predictiveScore >= hotThreshold &&
                         hotCount < hotTarget
 
                 val dir =
@@ -756,7 +766,8 @@ object WallpaperController {
                     context,
                     "cache_predictive_direct_last",
                     "${if (directToHot) "hot" else "warm"}" +
-                        " • score=$predictiveScore"
+                        " • score=$predictiveScore" +
+                        " • threshold=$hotThreshold"
                 )
 
                 RuntimeStatus.set(
@@ -768,7 +779,8 @@ object WallpaperController {
                 log(
                     "CACHE + ${cacheFile.name} <= ${candidate.id} " +
                         "tier=${if (directToHot) "hot" else "warm"} " +
-                        "predict=$predictiveScore"
+                        "predict=$predictiveScore " +
+                        "threshold=$hotThreshold"
                 )
             } catch (t: Throwable) {
                 staging.delete()
@@ -818,6 +830,273 @@ object WallpaperController {
 
         return (taste + style)
             .coerceIn(-22, 22)
+    }
+
+    private fun recordPredictiveSample(
+        context: Context,
+        score: Int,
+    ) {
+        val prefs =
+            context.getSharedPreferences(
+                "bb_pixwall_predictive_v1",
+                Context.MODE_PRIVATE,
+            )
+
+        val oldCount =
+            prefs.getInt("sample_count", 0)
+
+        val count =
+            (oldCount + 1)
+                .coerceAtMost(100000)
+
+        val oldEwma =
+            prefs.getFloat(
+                "score_ewma",
+                score.toFloat(),
+            )
+
+        val ewma =
+            if (oldCount == 0) {
+                score.toFloat()
+            } else {
+                oldEwma * 0.90f +
+                    score.toFloat() * 0.10f
+            }
+
+        val positive =
+            prefs.getInt("positive", 0) +
+                if (score > 0) 1 else 0
+
+        val neutral =
+            prefs.getInt("neutral", 0) +
+                if (score == 0) 1 else 0
+
+        val negative =
+            prefs.getInt("negative", 0) +
+                if (score < 0) 1 else 0
+
+        val oldBest =
+            if (oldCount == 0)
+                score
+            else
+                prefs.getInt("best", score)
+
+        val oldWorst =
+            if (oldCount == 0)
+                score
+            else
+                prefs.getInt("worst", score)
+
+        prefs.edit()
+            .putInt("sample_count", count)
+            .putFloat("score_ewma", ewma)
+            .putInt("positive", positive)
+            .putInt("neutral", neutral)
+            .putInt("negative", negative)
+            .putInt("best", maxOf(oldBest, score))
+            .putInt("worst", minOf(oldWorst, score))
+            .apply()
+
+        RuntimeStatus.set(
+            context,
+            "cache_predictive_history",
+            "n=$count • +" +
+                "$positive • 0=$neutral • -=$negative • " +
+                "ewma=${"%.2f".format(ewma)}"
+        )
+    }
+
+    private fun predictiveHotThreshold(
+        context: Context,
+        hotTarget: Int,
+    ): Int {
+        val allowed =
+            setOf(
+                "jpg",
+                "jpeg",
+                "png",
+                "webp",
+                "avif",
+            )
+
+        val scores =
+            listOf(
+                WallpaperFiles.hotCache,
+                WallpaperFiles.warmCache,
+            )
+                .flatMap {
+                    it.listFiles()
+                        .orEmpty()
+                        .toList()
+                }
+                .filter {
+                    it.isFile &&
+                        it.extension.lowercase() in allowed
+                }
+                .mapNotNull { file ->
+                    cacheCandidateId(file)
+                        ?.let { id ->
+                            predictiveCacheScore(
+                                context,
+                                id,
+                            )
+                        }
+                }
+                .sortedDescending()
+
+        val poolCut =
+            if (scores.isEmpty()) {
+                0
+            } else {
+                scores[
+                    minOf(
+                        hotTarget - 1,
+                        scores.lastIndex,
+                    )
+                ]
+            }
+
+        val confidence =
+            WallpaperStyleLearning
+                .profileConfidence(context)
+
+        val prefs =
+            context.getSharedPreferences(
+                "bb_pixwall_predictive_v1",
+                Context.MODE_PRIVATE,
+            )
+
+        val sampleCount =
+            prefs.getInt(
+                "sample_count",
+                0,
+            )
+
+        val ewma =
+            prefs.getFloat(
+                "score_ewma",
+                0f,
+            )
+
+        /*
+         * Early learning:
+         * neutral wallpapers are allowed into Hot.
+         *
+         * Mature learning:
+         * require a genuinely positive score when history confirms
+         * that the model can meaningfully separate preferences.
+         */
+        val maturityFloor =
+            if (
+                confidence >= 0.75f &&
+                sampleCount >= 24 &&
+                ewma >= 0.35f
+            ) {
+                1
+            } else {
+                0
+            }
+
+        return maxOf(
+            maturityFloor,
+            poolCut.coerceAtLeast(0),
+        )
+            .coerceIn(0, 6)
+    }
+
+    private fun refreshPredictiveDiagnostics(
+        context: Context,
+        hotTarget: Int = 4,
+    ) {
+        val allowed =
+            setOf(
+                "jpg",
+                "jpeg",
+                "png",
+                "webp",
+                "avif",
+            )
+
+        fun images(dir: File): List<File> =
+            dir.listFiles()
+                .orEmpty()
+                .filter {
+                    it.isFile &&
+                        it.extension.lowercase() in allowed
+                }
+
+        val hot =
+            images(WallpaperFiles.hotCache)
+
+        val warm =
+            images(WallpaperFiles.warmCache)
+
+        val scores =
+            (hot + warm)
+                .mapNotNull { file ->
+                    cacheCandidateId(file)
+                        ?.let { id ->
+                            predictiveCacheScore(
+                                context,
+                                id,
+                            )
+                        }
+                }
+
+        val positive =
+            scores.count { it > 0 }
+
+        val neutral =
+            scores.count { it == 0 }
+
+        val negative =
+            scores.count { it < 0 }
+
+        val average =
+            if (scores.isEmpty()) {
+                0f
+            } else {
+                scores.average()
+                    .toFloat()
+            }
+
+        val threshold =
+            predictiveHotThreshold(
+                context,
+                hotTarget,
+            )
+
+        val confidence =
+            WallpaperStyleLearning
+                .profileConfidence(context)
+
+        RuntimeStatus.set(
+            context,
+            "cache_actual_state",
+            "hot=${hot.size} • warm=${warm.size}"
+        )
+
+        RuntimeStatus.set(
+            context,
+            "cache_predictive_pool_stats",
+            "n=${scores.size} • +$positive • " +
+                "0=$neutral • -=$negative • " +
+                "avg=${"%.2f".format(average)} • " +
+                "best=${scores.maxOrNull() ?: 0} • " +
+                "worst=${scores.minOrNull() ?: 0}"
+        )
+
+        RuntimeStatus.set(
+            context,
+            "cache_predictive_threshold",
+            threshold.toString()
+        )
+
+        RuntimeStatus.set(
+            context,
+            "cache_predictive_confidence",
+            "%.2f".format(confidence)
+        )
     }
 
     private fun cacheCandidateId(file: File): String? {
@@ -899,6 +1178,23 @@ object WallpaperController {
             }
                 .sortedWith(
                     compareByDescending<PredictiveCacheEntry> {
+                        /*
+                         * Small retention bonus prevents 0/-1 jitter
+                         * from moving files back and forth every refresh.
+                         *
+                         * A meaningfully better Warm candidate can still
+                         * displace a weaker Hot candidate.
+                         */
+                        it.score +
+                            if (
+                                it.file.parentFile ==
+                                    WallpaperFiles.hotCache
+                            ) {
+                                2
+                            } else {
+                                0
+                            }
+                    }.thenByDescending {
                         it.score
                     }.thenBy {
                         it.file.lastModified()
@@ -1061,6 +1357,11 @@ object WallpaperController {
                 "promoted=$promoted demoted=$demoted " +
                 "best=${best?.score ?: 0}"
         )
+
+        refreshPredictiveDiagnostics(
+            context,
+            hotTarget,
+        )
     }
 
     private fun consumeCache(context: Context, dest: File, avoidHashes: Set<String>): Boolean {
@@ -1152,7 +1453,16 @@ object WallpaperController {
                     if (side.exists()) side.copyTo(File(dest.absolutePath + ".meta"), overwrite = true)
                     else writeMeta(dest, entry.source, "offline:${f.name}")
                     validateImage(dest)
-                    if (entry.consume) { f.delete(); side.delete() }
+                    if (entry.consume) {
+                        f.delete()
+                        side.delete()
+
+                        refreshPredictiveDiagnostics(
+                            context,
+                            4,
+                        )
+                    }
+
                     RuntimeStatus.set(
                         context,
                         "cache_style_last_score",

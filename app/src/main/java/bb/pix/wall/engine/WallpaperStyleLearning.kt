@@ -269,8 +269,25 @@ object WallpaperStyleLearning {
             pref("warmth") *
                 traits.warmth.coerceIn(-1f, 1f) * 0.12f
 
+        /*
+         * Style authority grows with actual learning maturity.
+         *
+         * A barely-ready profile should not have the same authority
+         * as one trained by dozens of deliberate user signals.
+         */
+        val confidence =
+            profileConfidence(
+                profileWeight = profileWeight,
+                signals = signals,
+            )
+
+        val authority =
+            0.35f + (confidence * 0.65f)
+
         val influence =
-            kotlin.math.round(raw * 10f)
+            kotlin.math.round(
+                raw * 10f * authority
+            )
                 .toInt()
                 .coerceIn(-10, 10)
 
@@ -278,6 +295,49 @@ object WallpaperStyleLearning {
             influence = influence,
             raw = raw.coerceIn(-1f, 1f),
             hue = traits.hue,
+        )
+    }
+
+    private fun profileConfidence(
+        profileWeight: Float,
+        signals: Int,
+    ): Float {
+        if (profileWeight < 20f || signals < 5) {
+            return 0f
+        }
+
+        val weightConfidence =
+            ((profileWeight - 20f) / 80f)
+                .coerceIn(0f, 1f)
+
+        val signalConfidence =
+            ((signals - 5f) / 35f)
+                .coerceIn(0f, 1f)
+
+        return minOf(
+            weightConfidence,
+            signalConfidence,
+        )
+    }
+
+    fun profileConfidence(context: Context): Float {
+        val prefs =
+            context.getSharedPreferences(
+                PREFS,
+                Context.MODE_PRIVATE,
+            )
+
+        return profileConfidence(
+            profileWeight =
+                prefs.getFloat(
+                    "profile_weight",
+                    0f,
+                ),
+            signals =
+                prefs.getInt(
+                    "profile_signals",
+                    0,
+                ),
         )
     }
 
