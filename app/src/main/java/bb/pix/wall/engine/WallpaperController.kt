@@ -604,14 +604,68 @@ object WallpaperController {
     private fun consumeCache(context: Context, dest: File, avoidHashes: Set<String>): Boolean {
         WallpaperFiles.ensure()
         val allowed = setOf("jpg","jpeg","png","webp","avif")
-        data class PoolFile(val file: File, val consume: Boolean, val source: String)
+        data class PoolFile(
+            val file: File,
+            val consume: Boolean,
+            val source: String,
+        )
+
+        val styleScoreCache = mutableMapOf<String, Int>()
+
+        fun cacheStyleScore(file: File): Int =
+            styleScoreCache.getOrPut(file.absolutePath) {
+                runCatching {
+                    val meta = File(
+                        file.absolutePath + ".meta"
+                    )
+
+                    if (!meta.exists()) {
+                        return@runCatching 0
+                    }
+
+                    val props = Properties().apply {
+                        meta.inputStream().use(::load)
+                    }
+
+                    val id =
+                        props.getProperty("id")
+                            ?.trim()
+                            ?.takeIf { it.isNotEmpty() }
+                            ?: return@runCatching 0
+
+                    WallpaperStyleLearning
+                        .decisionInfluence(
+                            context,
+                            id,
+                        )
+                        ?.influence
+                        ?: 0
+                }.getOrDefault(0)
+            }
 
         fun pool(): List<PoolFile> = buildList {
             listOf(WallpaperFiles.hotCache, WallpaperFiles.warmCache, WallpaperFiles.cache).forEach { cacheDir ->
                 cacheDir.listFiles().orEmpty()
                     .filter { it.isFile && it.extension.lowercase() in allowed }
-                    .sortedBy { it.lastModified() }
-                    .forEach { add(PoolFile(it, true, if (cacheDir == WallpaperFiles.hotCache) "HotCache" else "Cache")) }
+                    .sortedWith(
+                        compareByDescending<File> {
+                            cacheStyleScore(it)
+                        }.thenBy {
+                            it.lastModified()
+                        }
+                    )
+                    .forEach {
+                        add(
+                            PoolFile(
+                                it,
+                                true,
+                                if (cacheDir == WallpaperFiles.hotCache)
+                                    "HotCache"
+                                else
+                                    "Cache"
+                            )
+                        )
+                    }
             }
             listOf(WallpaperFiles.queue, WallpaperFiles.legacyQueue).forEach { dir ->
                 dir.listFiles().orEmpty()
@@ -627,6 +681,9 @@ object WallpaperController {
                 val f = entry.file
                 val hash = runCatching { sha256(f) }.getOrNull() ?: continue
                 if (hash in avoidHashes || hash in seen) continue
+
+                val styleScore = cacheStyleScore(f)
+
                 val ok = runCatching {
                     f.copyTo(dest, overwrite = true)
                     val side = File(f.absolutePath + ".meta")
@@ -634,8 +691,24 @@ object WallpaperController {
                     else writeMeta(dest, entry.source, "offline:${f.name}")
                     validateImage(dest)
                     if (entry.consume) { f.delete(); side.delete() }
-                    RuntimeStatus.set(context, "selection_reason", "Offline-ready ${entry.source} • unseen SHA-256 • ${dest.name}")
-                    log("QUEUE ${dest.name} <= ${entry.source}:${f.name}")
+                    RuntimeStatus.set(
+                        context,
+                        "cache_style_last_score",
+                        styleScore.toString()
+                    )
+
+                    RuntimeStatus.set(
+                        context,
+                        "selection_reason",
+                        "Offline-ready ${entry.source} • " +
+                            "style=$styleScore • unseen SHA-256 • " +
+                            dest.name
+                    )
+
+                    log(
+                        "QUEUE ${dest.name} <= ${entry.source}:${f.name} " +
+                            "style=$styleScore"
+                    )
                     true
                 }.getOrElse { dest.delete(); false }
                 if (ok) return true

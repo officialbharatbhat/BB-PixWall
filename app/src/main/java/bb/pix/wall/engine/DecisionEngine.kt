@@ -284,6 +284,29 @@ object DecisionEngine {
             }
         }
 
+        // Generalized visual-style preference.
+        //
+        // Only previously analyzed candidates receive this score.
+        // Influence is capped at ±10 and requires a mature profile.
+        val styleDecision =
+            WallpaperStyleLearning.decisionInfluence(
+                context,
+                candidate.id,
+            )
+
+        if (
+            styleDecision != null &&
+            styleDecision.influence != 0
+        ) {
+            score += styleDecision.influence
+
+            reasons += if (styleDecision.influence > 0) {
+                "style+${styleDecision.influence}(${styleDecision.hue})"
+            } else {
+                "style${styleDecision.influence}(${styleDecision.hue})"
+            }
+        }
+
         // Small deterministic novelty contribution.
         // No random() calls, so ordering remains reproducible.
         val novelty =

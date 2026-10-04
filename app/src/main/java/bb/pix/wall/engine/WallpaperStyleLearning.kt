@@ -32,6 +32,12 @@ object WallpaperStyleLearning {
         val hue: String,
     )
 
+    data class StyleDecision(
+        val influence: Int,
+        val raw: Float,
+        val hue: String,
+    )
+
     fun analyzeAndStore(
         context: Context,
         candidateId: String,
@@ -182,6 +188,113 @@ object WallpaperStyleLearning {
                 val beforeId = candidateId(file) ?: return@forEach
                 analyzeAndStore(context, beforeId, file)
             }
+    }
+
+    /**
+     * Lightweight selection-time style score.
+     *
+     * No bitmap decode and no network access occur here.
+     * Only candidates whose traits were previously analyzed can score.
+     */
+    fun decisionInfluence(
+        context: Context,
+        candidateId: String,
+    ): StyleDecision? {
+        val prefs = context.getSharedPreferences(
+            PREFS,
+            Context.MODE_PRIVATE,
+        )
+
+        val profileWeight =
+            prefs.getFloat("profile_weight", 0f)
+
+        val signals =
+            prefs.getInt("profile_signals", 0)
+
+        // Avoid steering selection while the profile is still immature.
+        if (profileWeight < 20f || signals < 5) {
+            return null
+        }
+
+        val traits =
+            readTraits(
+                prefs,
+                token(candidateId),
+            ) ?: return null
+
+        fun pref(name: String): Float =
+            (
+                prefs.getFloat("profile_$name", 0f) /
+                    profileWeight
+            ).coerceIn(-1f, 1f)
+
+        fun centered(value: Float): Float =
+            ((value - 0.5f) * 2f)
+                .coerceIn(-1f, 1f)
+
+        val huePreference =
+            if (traits.hue == "neutral") {
+                0f
+            } else {
+                (
+                    prefs.getFloat(
+                        "hue_pref_${traits.hue}",
+                        0f
+                    ) / profileWeight
+                ).coerceIn(-1f, 1f)
+            }
+
+        /*
+         * Weighted similarity:
+         *
+         * dark       28%
+         * saturation 18%
+         * hue        18%
+         * brightness 12%
+         * contrast   12%
+         * warmth     12%
+         *
+         * Total = 100%.
+         */
+        val raw =
+            pref("dark") *
+                centered(traits.darkRatio) * 0.28f +
+            pref("saturation") *
+                centered(traits.saturation) * 0.18f +
+            huePreference * 0.18f +
+            pref("brightness") *
+                centered(traits.brightness) * 0.12f +
+            pref("contrast") *
+                centered(traits.contrast) * 0.12f +
+            pref("warmth") *
+                traits.warmth.coerceIn(-1f, 1f) * 0.12f
+
+        val influence =
+            kotlin.math.round(raw * 10f)
+                .toInt()
+                .coerceIn(-10, 10)
+
+        return StyleDecision(
+            influence = influence,
+            raw = raw.coerceIn(-1f, 1f),
+            hue = traits.hue,
+        )
+    }
+
+    fun profileReady(context: Context): Boolean {
+        val prefs = context.getSharedPreferences(
+            PREFS,
+            Context.MODE_PRIVATE,
+        )
+
+        return prefs.getFloat(
+            "profile_weight",
+            0f
+        ) >= 20f &&
+            prefs.getInt(
+                "profile_signals",
+                0
+            ) >= 5
     }
 
     fun profileSummary(context: Context): String {
