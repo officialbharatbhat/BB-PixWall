@@ -21,6 +21,7 @@ import java.security.MessageDigest
 import kotlin.math.max
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.ConcurrentHashMap
 
 object WallpaperController {
     private val lock = Any()
@@ -29,6 +30,23 @@ object WallpaperController {
     private val preparingNext = AtomicBoolean(false)
     private val cachePriming = AtomicBoolean(false)
     @Volatile private var lastApplyStartedAt = 0L
+    private data class CachedMetaId(
+        val modified: Long,
+        val length: Long,
+        val id: String?,
+    )
+
+    private val metaIdCache =
+        ConcurrentHashMap<String, CachedMetaId>()
+
+    private val logLock = Any()
+
+    private const val STALE_PART_MS =
+        15L * 60L * 1000L
+
+    private const val LOG_ROTATE_BYTES =
+        2L * 1024L * 1024L
+
 
     fun state(): WallpaperState {
         WallpaperFiles.ensure()
@@ -548,6 +566,60 @@ object WallpaperController {
         log("CACHE cleared=$n"); n
     }
 
+    private fun cleanupStaleParts(
+        context: Context,
+    ): Int {
+        val now =
+            System.currentTimeMillis()
+
+        val roots =
+            listOf(
+                WallpaperFiles.cache,
+                WallpaperFiles.backup,
+            )
+
+        var removed = 0
+
+        roots.forEach { dir ->
+            dir.listFiles()
+                .orEmpty()
+                .filter {
+                    it.isFile &&
+                        it.name.endsWith(".part") &&
+                        now - it.lastModified() >= STALE_PART_MS
+                }
+                .forEach { file ->
+                    if (file.delete()) {
+                        removed++
+                    }
+
+                    File(
+                        file.absolutePath + ".meta"
+                    ).delete()
+                }
+        }
+
+        RuntimeStatus.set(
+            context,
+            "stale_part_cleanup",
+            removed.toString(),
+        )
+
+        RuntimeStatus.setLong(
+            context,
+            "stale_part_cleanup_at",
+            now,
+        )
+
+        if (removed > 0) {
+            log(
+                "CLEAN stale-part removed=$removed"
+            )
+        }
+
+        return removed
+    }
+
     fun primeCache(
         context: Context,
         settings: AppSettings = SettingsStore(context).load()
@@ -556,9 +628,32 @@ object WallpaperController {
             log("CACHE prime skipped: already running")
             return
         }
+
+        val primeStartedNs =
+            System.nanoTime()
+
         try {
+            cleanupStaleParts(context)
             primeCacheImpl(context, settings)
         } finally {
+            val elapsedMs =
+                (
+                    System.nanoTime() -
+                        primeStartedNs
+                ) / 1_000_000L
+
+            RuntimeStatus.setLong(
+                context,
+                "cache_prime_latency_ms",
+                elapsedMs,
+            )
+
+            RuntimeStatus.setLong(
+                context,
+                "cache_prime_finished_at",
+                System.currentTimeMillis(),
+            )
+
             cachePriming.set(false)
         }
     }
@@ -594,13 +689,9 @@ object WallpaperController {
         val knownHashes = (existingHashes(WallpaperFiles.currentHome, WallpaperFiles.currentLock, WallpaperFiles.nextHome, WallpaperFiles.nextLock) +
             readSeenHashes() + existing.mapNotNull { runCatching { sha256(it) }.getOrNull() }).toMutableSet()
         val seenIds = readLinesSet(WallpaperFiles.seenIds)
-        val cachedIds = existing.mapNotNull { f ->
-            runCatching {
-                val meta = File(f.absolutePath + ".meta")
-                if (!meta.exists()) null else Properties().apply { meta.inputStream().use(::load) }
-                    .getProperty("id")?.trim()?.takeIf { it.isNotEmpty() }
-            }.getOrNull()
-        }.toMutableSet()
+        val cachedIds =
+            existing.mapNotNull(::cacheCandidateId)
+                .toMutableSet()
         val knownPhash = readLinesSet(WallpaperFiles.seenPerceptual).toMutableSet()
         var index = existing.size
 
@@ -1097,20 +1188,82 @@ object WallpaperController {
             "cache_predictive_confidence",
             "%.2f".format(confidence)
         )
+
+        val snapshotAt =
+            System.currentTimeMillis()
+
+        RuntimeStatus.set(
+            context,
+            "cache_predictive_snapshot",
+            "hot=${hot.size} • warm=${warm.size} • " +
+                "n=${scores.size} • threshold=$threshold • " +
+                "confidence=${"%.2f".format(confidence)} • " +
+                "best=${scores.maxOrNull() ?: 0} • " +
+                "worst=${scores.minOrNull() ?: 0}",
+        )
+
+        RuntimeStatus.setLong(
+            context,
+            "cache_predictive_snapshot_at",
+            snapshotAt,
+        )
     }
 
-    private fun cacheCandidateId(file: File): String? {
-        val meta = File(file.absolutePath + ".meta")
-        if (!meta.exists()) return null
+    private fun cacheCandidateId(
+        file: File,
+    ): String? {
+        val meta =
+            File(
+                file.absolutePath + ".meta"
+            )
 
-        return runCatching {
-            Properties().apply {
-                meta.inputStream().use(::load)
-            }
-                .getProperty("id")
-                ?.trim()
-                ?.takeIf { it.isNotEmpty() }
-        }.getOrNull()
+        if (!meta.exists()) {
+            metaIdCache.remove(
+                meta.absolutePath
+            )
+            return null
+        }
+
+        val modified =
+            meta.lastModified()
+
+        val length =
+            meta.length()
+
+        val key =
+            meta.absolutePath
+
+        val cached =
+            metaIdCache[key]
+
+        if (
+            cached != null &&
+            cached.modified == modified &&
+            cached.length == length
+        ) {
+            return cached.id
+        }
+
+        val id =
+            runCatching {
+                Properties().apply {
+                    meta.inputStream().use(::load)
+                }
+                    .getProperty("id")
+                    ?.trim()
+                    ?.takeIf {
+                        it.isNotEmpty()
+                    }
+            }.getOrNull()
+
+        metaIdCache[key] =
+            CachedMetaId(
+                modified = modified,
+                length = length,
+                id = id,
+            )
+
+        return id
     }
 
     private data class PredictiveCacheEntry(
@@ -1852,9 +2005,39 @@ object WallpaperController {
         }
     }
 
-    private fun log(message: String) {
+    private fun log(
+        message: String,
+    ) {
         runCatching {
-            if (WallpaperFiles.ensure()) WallpaperFiles.runtimeLog.appendText("${System.currentTimeMillis()} $message\n")
+            synchronized(logLock) {
+                if (!WallpaperFiles.ensure()) {
+                    return@synchronized
+                }
+
+                val log =
+                    WallpaperFiles.runtimeLog
+
+                if (
+                    log.exists() &&
+                    log.length() >= LOG_ROTATE_BYTES
+                ) {
+                    val rotated =
+                        File(
+                            log.parentFile,
+                            "${log.name}.1",
+                        )
+
+                    rotated.delete()
+
+                    if (!log.renameTo(rotated)) {
+                        log.delete()
+                    }
+                }
+
+                log.appendText(
+                    "${System.currentTimeMillis()} $message\n"
+                )
+            }
         }
     }
 }

@@ -40,6 +40,9 @@ object DecisionEngine {
             return candidates
         }
 
+        val decisionStartedNs =
+            System.nanoTime()
+
         val recentIds = runCatching {
             if (!WallpaperFiles.seenIds.exists()) emptySet()
             else WallpaperFiles.seenIds
@@ -172,6 +175,26 @@ object DecisionEngine {
                     "score=${top.score} reason=${top.reason}"
             )
         }
+
+        val decisionElapsedMs =
+            (
+                System.nanoTime() -
+                    decisionStartedNs
+            ) / 1_000_000L
+
+        RuntimeStatus.setLong(
+            context,
+            "decision_rank_latency_ms",
+            decisionElapsedMs,
+        )
+
+        RuntimeStatus.set(
+            context,
+            "decision_rank_profile",
+            "candidates=${candidates.size} • " +
+                "styleKnown=$styleKnownCount • " +
+                "elapsed=${decisionElapsedMs}ms",
+        )
 
         return ranked.map { it.candidate }
     }

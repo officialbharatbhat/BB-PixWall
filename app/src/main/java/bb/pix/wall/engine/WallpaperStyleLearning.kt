@@ -39,6 +39,7 @@ object WallpaperStyleLearning {
         val explain: String = "",
     )
 
+    @Synchronized
     fun analyzeAndStore(
         context: Context,
         candidateId: String,
@@ -46,34 +47,129 @@ object WallpaperStyleLearning {
     ): Boolean {
         if (!file.exists()) return false
 
-        val traits = analyze(file) ?: return false
-        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val prefs =
+            context.getSharedPreferences(
+                PREFS,
+                Context.MODE_PRIVATE,
+            )
+
         val key = token(candidateId)
 
-        val isNew = !prefs.getBoolean("has_$key", false)
+        /*
+         * Traits are immutable for a candidate ID in our local model.
+         * If already known, never decode the bitmap again.
+         */
+        val existing =
+            readTraits(
+                prefs,
+                key,
+            )
 
-        prefs.edit()
-            .putBoolean("has_$key", true)
-            .putString("id_$key", candidateId.take(220))
-            .putFloat("brightness_$key", traits.brightness)
-            .putFloat("saturation_$key", traits.saturation)
-            .putFloat("contrast_$key", traits.contrast)
-            .putFloat("warmth_$key", traits.warmth)
-            .putFloat("dark_$key", traits.darkRatio)
-            .putString("hue_$key", traits.hue)
-            .putLong("analyzed_at_$key", System.currentTimeMillis())
-            .apply()
+        if (existing != null) {
+            val pending =
+                prefs.getInt(
+                    "pending_$key",
+                    0,
+                )
 
-        if (isNew) {
+            if (pending != 0) {
+                applyProfileDelta(
+                    context = context,
+                    candidateId = candidateId,
+                    traits = existing,
+                    delta = pending,
+                    event = "pending",
+                )
+
+                prefs.edit()
+                    .remove("pending_$key")
+                    .apply()
+            }
+
+            val hits =
+                prefs.getInt(
+                    "analysis_cache_hits",
+                    0,
+                ) + 1
+
             prefs.edit()
                 .putInt(
-                    "traits_count",
-                    prefs.getInt("traits_count", 0) + 1
+                    "analysis_cache_hits",
+                    hits,
                 )
                 .apply()
+
+            RuntimeStatus.set(
+                context,
+                "style_analysis_cache_hits",
+                hits.toString(),
+            )
+
+            RuntimeStatus.set(
+                context,
+                "style_analysis_last",
+                "cached • ${candidateId.take(80)}",
+            )
+
+            return true
         }
 
-        val pending = prefs.getInt("pending_$key", 0)
+        val traits =
+            analyze(file)
+                ?: return false
+
+        prefs.edit()
+            .putBoolean(
+                "has_$key",
+                true,
+            )
+            .putString(
+                "id_$key",
+                candidateId.take(220),
+            )
+            .putFloat(
+                "brightness_$key",
+                traits.brightness,
+            )
+            .putFloat(
+                "saturation_$key",
+                traits.saturation,
+            )
+            .putFloat(
+                "contrast_$key",
+                traits.contrast,
+            )
+            .putFloat(
+                "warmth_$key",
+                traits.warmth,
+            )
+            .putFloat(
+                "dark_$key",
+                traits.darkRatio,
+            )
+            .putString(
+                "hue_$key",
+                traits.hue,
+            )
+            .putLong(
+                "analyzed_at_$key",
+                System.currentTimeMillis(),
+            )
+            .putInt(
+                "traits_count",
+                prefs.getInt(
+                    "traits_count",
+                    0,
+                ) + 1,
+            )
+            .apply()
+
+        val pending =
+            prefs.getInt(
+                "pending_$key",
+                0,
+            )
+
         if (pending != 0) {
             applyProfileDelta(
                 context = context,
@@ -96,19 +192,28 @@ object WallpaperStyleLearning {
                 "con=${fmt(traits.contrast)} • " +
                 "warm=${fmt(traits.warmth)} • " +
                 "dark=${fmt(traits.darkRatio)} • " +
-                traits.hue
+                traits.hue,
         )
 
         RuntimeStatus.set(
             context,
             "style_traits_count",
-            prefs.getInt("traits_count", 0).toString()
+            prefs.getInt(
+                "traits_count",
+                0,
+            ).toString(),
         )
 
         RuntimeStatus.set(
             context,
             "style_last_id",
-            candidateId.take(180)
+            candidateId.take(180),
+        )
+
+        RuntimeStatus.set(
+            context,
+            "style_analysis_last",
+            "decoded • ${candidateId.take(80)}",
         )
 
         return true
