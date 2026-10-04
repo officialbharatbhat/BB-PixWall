@@ -176,79 +176,6 @@ fun HomeScreen(
                     Text("Prefetch cache: ${settings.cacheTarget} wallpapers", fontWeight = FontWeight.SemiBold)
                     Slider(value = settings.cacheTarget.toFloat(), onValueChange = { onSettingsChange(settings.copy(cacheTarget = it.roundToInt().coerceIn(4, 36))) }, valueRange = 4f..36f, steps = 31)
 
-                    Text(
-                        "Backup & Restore",
-                        fontWeight =
-                            FontWeight.SemiBold
-                    )
-
-                    Text(
-                        "Portable local backup includes settings and learned preferences. Runtime/cache files are not backed up.",
-                        style =
-                            MaterialTheme.typography.bodySmall,
-                        color =
-                            MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-
-                    androidx.compose.material3.Button(
-                        onClick = {
-                            val result =
-                                SettingsBackup.create(
-                                    context,
-                                    includeLearning = true,
-                                )
-
-                            android.widget.Toast
-                                .makeText(
-                                    context,
-                                    result.message,
-                                    android.widget.Toast.LENGTH_LONG,
-                                )
-                                .show()
-                        }
-                    ) {
-                        Text(
-                            "Backup settings + learning"
-                        )
-                    }
-
-                    androidx.compose.material3.OutlinedButton(
-                        onClick = {
-                            val result =
-                                SettingsBackup.restoreLatest(
-                                    context
-                                )
-
-                            android.widget.Toast
-                                .makeText(
-                                    context,
-                                    result.message,
-                                    android.widget.Toast.LENGTH_LONG,
-                                )
-                                .show()
-
-                            if (
-                                result.success
-                            ) {
-                                (
-                                    context as?
-                                        android.app.Activity
-                                )?.recreate()
-                            }
-                        }
-                    ) {
-                        Text(
-                            "Restore latest backup"
-                        )
-                    }
-
-                    Text(
-                        "Backup location: /sdcard/wallpaper/backup/settings/",
-                        style =
-                            MaterialTheme.typography.bodySmall,
-                        color =
-                            MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
                     Text(if (settings.leanStorageMode) "Lean mode: cache stays at this exact target to avoid wasting phone storage." else "Expanded mode: Advance may keep at least 16 ready wallpapers.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
@@ -444,11 +371,145 @@ fun HomeScreen(
                 }
             }
 
+            Card(
+                Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    Modifier.padding(18.dp),
+                    verticalArrangement =
+                        Arrangement.spacedBy(12.dp),
+                ) {
+                    val localBackupStatus =
+                        androidx.compose.runtime.remember {
+                            androidx.compose.runtime.mutableStateOf(
+                                SettingsBackup.latestSummary()
+                            )
+                        }
+
+                    SettingHeader(
+                        Icons.Outlined.Backup,
+                        "Backup & Restore"
+                    )
+
+                    Text(
+                        "Portable local backup keeps your settings and learned preferences. Cache images and temporary runtime files are excluded.",
+                        style =
+                            MaterialTheme.typography.bodySmall,
+                        color =
+                            MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+
+                    Button(
+                        onClick = {
+                            val result =
+                                SettingsBackup.create(
+                                    context,
+                                    includeLearning = true,
+                                )
+
+                            localBackupStatus.value =
+                                if (result.success) {
+                                    SettingsBackup.latestSummary()
+                                } else {
+                                    result.message
+                                }
+
+                            android.widget.Toast
+                                .makeText(
+                                    context,
+                                    result.message,
+                                    android.widget.Toast.LENGTH_LONG,
+                                )
+                                .show()
+                        },
+                        modifier =
+                            Modifier.fillMaxWidth(),
+                    ) {
+                        Text(
+                            "Backup settings + learning"
+                        )
+                    }
+
+                    Button(
+                        onClick = {
+                            val validation =
+                                SettingsBackup.validateLatest(
+                                    context
+                                )
+
+                            if (!validation.success) {
+                                localBackupStatus.value =
+                                    validation.message
+
+                                android.widget.Toast
+                                    .makeText(
+                                        context,
+                                        validation.message,
+                                        android.widget.Toast.LENGTH_LONG,
+                                    )
+                                    .show()
+                            } else {
+                                val result =
+                                    SettingsBackup.restoreLatest(
+                                        context
+                                    )
+
+                                localBackupStatus.value =
+                                    if (result.success) {
+                                        "Restore complete • " +
+                                            SettingsBackup.latestSummary()
+                                    } else {
+                                        result.message
+                                    }
+
+                                android.widget.Toast
+                                    .makeText(
+                                        context,
+                                        result.message,
+                                        android.widget.Toast.LENGTH_LONG,
+                                    )
+                                    .show()
+
+                                if (result.success) {
+                                    (
+                                        context as?
+                                            android.app.Activity
+                                    )?.recreate()
+                                }
+                            }
+                        },
+                        modifier =
+                            Modifier.fillMaxWidth(),
+                    ) {
+                        Text(
+                            "Restore latest backup"
+                        )
+                    }
+
+                    Text(
+                        localBackupStatus.value,
+                        style =
+                            MaterialTheme.typography.bodySmall,
+                        color =
+                            MaterialTheme.colorScheme.primary,
+                    )
+
+                    Text(
+                        "Backup location: /sdcard/wallpaper/backup/settings/",
+                        style =
+                            MaterialTheme.typography.bodySmall,
+                        color =
+                            MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+
             SectionTitle("Developer")
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(18.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text("DEVELOPER", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
                     Text("Bharat Bhat", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+
                     HorizontalDivider()
                     CompactSocialButton(R.drawable.ic_social_email, "bkbhatinfo@gmail.com") { context.startActivity(Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:bkbhatinfo@gmail.com"))) }
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {

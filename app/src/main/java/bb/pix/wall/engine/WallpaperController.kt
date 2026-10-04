@@ -539,8 +539,24 @@ object WallpaperController {
                           )
                       }
                   }
-                WallpaperFiles.nextHome.delete(); WallpaperFiles.nextLock.delete()
+                WallpaperFiles.nextHome.delete()
+                File(
+                    WallpaperFiles.nextHome.absolutePath +
+                        ".meta"
+                ).delete()
+
+                WallpaperFiles.nextLock.delete()
+                File(
+                    WallpaperFiles.nextLock.absolutePath +
+                        ".meta"
+                ).delete()
                 RuntimeStatus.success(context, "Wallpaper applied: ${settings.targetMode.label}")
+
+                RuntimeStatus.set(
+                    context,
+                    "next_state",
+                    "Ready",
+                )
                 RuntimeStatus.setLong(context, "last_change", System.currentTimeMillis())
                 EngineExecutors.io {
                     /*
@@ -918,8 +934,19 @@ object WallpaperController {
         val roots =
             listOf(
                 WallpaperFiles.cache,
+                WallpaperFiles.hotCache,
+                WallpaperFiles.warmCache,
+                WallpaperFiles.queue,
+                WallpaperFiles.legacyQueue,
                 WallpaperFiles.backup,
             )
+                .distinctBy {
+                    runCatching {
+                        it.canonicalPath
+                    }.getOrDefault(
+                        it.absolutePath
+                    )
+                }
 
         var removed = 0
 

@@ -22,7 +22,7 @@ import java.util.Locale
  */
 object SettingsBackup {
 
-    private const val SCHEMA_VERSION = 1
+    private const val SCHEMA_VERSION = 2
 
     private val excludedPrefs =
         setOf(
@@ -380,6 +380,34 @@ object SettingsBackup {
             )
         }
 
+    fun latestSummary(): String {
+        val file =
+            latest()
+                ?: return "No local backup yet"
+
+        val stamp =
+            runCatching {
+                java.text.SimpleDateFormat(
+                    "dd MMM yyyy • hh:mm a",
+                    java.util.Locale.getDefault(),
+                ).format(
+                    java.util.Date(
+                        file.lastModified()
+                    )
+                )
+            }.getOrDefault(
+                "Unknown time"
+            )
+
+        val kb =
+            (
+                file.length() /
+                    1024L
+            ).coerceAtLeast(1L)
+
+        return "Latest: $stamp • ${kb} KB"
+    }
+
     fun latest(): File? {
         val direct =
             latestFile()
@@ -404,6 +432,91 @@ object SettingsBackup {
             .maxByOrNull {
                 it.lastModified()
             }
+    }
+
+    fun validateLatest(
+        context: Context,
+    ): Result {
+        val source =
+            latest()
+                ?: return Result(
+                    false,
+                    "No BB-PixWall backup found",
+                )
+
+        return runCatching {
+            require(
+                source.exists() &&
+                    source.length() > 0L
+            ) {
+                "Backup file missing or empty"
+            }
+
+            require(
+                source.length() <=
+                    8L * 1024L * 1024L
+            ) {
+                "Backup file is unexpectedly large"
+            }
+
+            val root =
+                JSONObject(
+                    source.readText()
+                )
+
+            val schema =
+                root.optInt(
+                    "schemaVersion",
+                    -1,
+                )
+
+            require(
+                schema in 1..SCHEMA_VERSION
+            ) {
+                "Unsupported backup schema: $schema"
+            }
+
+            val packageName =
+                root.optString(
+                    "packageName",
+                    "",
+                )
+
+            require(
+                packageName.isBlank() ||
+                    packageName ==
+                        context.packageName
+            ) {
+                "Backup belongs to another app"
+            }
+
+            val prefs =
+                root.optJSONObject(
+                    "preferences"
+                )
+
+            require(
+                prefs != null &&
+                    prefs.length() > 0
+            ) {
+                "Backup contains no preferences"
+            }
+
+            Result(
+                true,
+                "Backup valid • schema $schema",
+                source,
+            )
+        }.getOrElse {
+            Result(
+                false,
+                "Invalid backup: ${
+                    it.message
+                        ?: it.javaClass.simpleName
+                }",
+                source,
+            )
+        }
     }
 
     fun restoreLatest(
