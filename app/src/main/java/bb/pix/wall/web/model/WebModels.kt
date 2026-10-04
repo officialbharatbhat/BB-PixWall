@@ -26,6 +26,7 @@ enum class WebQualityMode {
 }
 
 enum class WebSourceMode {
+    OFF,
     WEB_ONLY,
     SMART_MIX,
 }

@@ -7,6 +7,12 @@ import android.os.Environment
 import bb.pix.wall.settings.AppSettings
 import bb.pix.wall.settings.AspectPreference
 import bb.pix.wall.settings.WallpaperOrder
+import bb.pix.wall.web.model.WebSourceMode
+import bb.pix.wall.web.provider.WebProviderRegistry
+import bb.pix.wall.web.runtime.DeviceDisplayProfile
+import bb.pix.wall.web.runtime.WebCandidateBridge
+import bb.pix.wall.web.runtime.WebNetworkClassifier
+import bb.pix.wall.web.runtime.WebNetworkPolicy
 import java.io.BufferedReader
 import java.io.File
 import java.io.InputStreamReader
@@ -38,63 +44,271 @@ object WallpaperSourceEngine {
 
     fun collect(context: Context, settings: AppSettings, allowNetwork: Boolean = true): List<Candidate> {
         val all = mutableListOf<Candidate>()
-        val network = allowNetwork && networkAvailable(context) && networkPolicyAllows(context, settings)
+        val network =
+            allowNetwork &&
+                networkAvailable(context) &&
+                networkPolicyAllows(context, settings)
+
+        val webOnly =
+            settings.webSourceMode ==
+                WebSourceMode.WEB_ONLY
+
+        val smartMix =
+            settings.webSourceMode ==
+                WebSourceMode.SMART_MIX
+
         var photosOk = false
         var driveOk = false
+        var webOk = false
 
+        if (!webOnly) {
         if (settings.photosAlbumUrl.isNotBlank()) {
-            if (!network) RuntimeStatus.source(context, "photos", "Offline")
-            else if (!sourceBackoffExpired(context, "photos")) RuntimeStatus.source(context, "photos", "Backoff")
-            else {
-                val started = System.currentTimeMillis()
-                runCatching { googlePhotos(settings.photosAlbumUrl, settings.dataSaverEnabled) }
-                    .onSuccess {
-                        all += it
-                        photosOk = it.isNotEmpty()
-                        sourceSuccess(
-                            context,
-                            "photos",
-                            System.currentTimeMillis() - started,
-                            it,
-                        )
-                    }
-                    .onFailure { sourceFailure(context, "photos", it, System.currentTimeMillis() - started); log("Google Photos: ${it.message}") }
-            }
-        } else RuntimeStatus.source(context, "photos", "Not configured")
+                if (!network) RuntimeStatus.source(context, "photos", "Offline")
+                else if (!sourceBackoffExpired(context, "photos")) RuntimeStatus.source(context, "photos", "Backoff")
+                else {
+                    val started = System.currentTimeMillis()
+                    runCatching { googlePhotos(settings.photosAlbumUrl, settings.dataSaverEnabled) }
+                        .onSuccess {
+                            all += it
+                            photosOk = it.isNotEmpty()
+                            sourceSuccess(
+                                context,
+                                "photos",
+                                System.currentTimeMillis() - started,
+                                it,
+                            )
+                        }
+                        .onFailure { sourceFailure(context, "photos", it, System.currentTimeMillis() - started); log("Google Photos: ${it.message}") }
+                }
+            } else RuntimeStatus.source(context, "photos", "Not configured")
+            } else {
+            RuntimeStatus.source(
+                context,
+                "photos",
+                "Disabled by Web only",
+            )
+        }
 
+        if (!webOnly) {
         if (settings.driveFolderUrl.isNotBlank()) {
-            // Drive is a mirror/fallback, not a second source to poll on every healthy Photos cycle.
-            // This keeps network and storage churn low for the user's cloud-first setup.
-            if (photosOk) RuntimeStatus.source(context, "drive", "Standby mirror")
-            else if (!network) RuntimeStatus.source(context, "drive", "Offline")
-            else if (!sourceBackoffExpired(context, "drive")) RuntimeStatus.source(context, "drive", "Backoff")
-            else {
-                val started = System.currentTimeMillis()
-                runCatching { googleDriveFolder(settings.driveFolderUrl, settings.dataSaverEnabled) }
-                    .onSuccess {
-                        all += it
-                        driveOk = it.isNotEmpty()
-                        sourceSuccess(
-                            context,
-                            "drive",
-                            System.currentTimeMillis() - started,
-                            it,
-                            fallback = true,
-                        )
-                    }
-                    .onFailure { sourceFailure(context, "drive", it, System.currentTimeMillis() - started); log("Google Drive: ${it.message}") }
-            }
-        } else RuntimeStatus.source(context, "drive", "Not configured")
+                // Drive is a mirror/fallback, not a second source to poll on every healthy Photos cycle.
+                // This keeps network and storage churn low for the user's cloud-first setup.
+                if (photosOk) RuntimeStatus.source(context, "drive", "Standby mirror")
+                else if (!network) RuntimeStatus.source(context, "drive", "Offline")
+                else if (!sourceBackoffExpired(context, "drive")) RuntimeStatus.source(context, "drive", "Backoff")
+                else {
+                    val started = System.currentTimeMillis()
+                    runCatching { googleDriveFolder(settings.driveFolderUrl, settings.dataSaverEnabled) }
+                        .onSuccess {
+                            all += it
+                            driveOk = it.isNotEmpty()
+                            sourceSuccess(
+                                context,
+                                "drive",
+                                System.currentTimeMillis() - started,
+                                it,
+                                fallback = true,
+                            )
+                        }
+                        .onFailure { sourceFailure(context, "drive", it, System.currentTimeMillis() - started); log("Google Drive: ${it.message}") }
+                }
+            } else RuntimeStatus.source(context, "drive", "Not configured")
+            } else {
+            RuntimeStatus.source(
+                context,
+                "drive",
+                "Disabled by Web only",
+            )
+        }
 
-        if (Environment.isExternalStorageManager()) {
-            val local = localFiles(settings)
-            if (!photosOk && !driveOk) all += local
-            RuntimeStatus.source(context, "local", when {
-                local.isEmpty() -> "Empty"
-                !photosOk && !driveOk -> "Fallback active"
-                else -> "Standby local"
-            })
-        } else RuntimeStatus.source(context, "local", "Permission required")
+        if (
+            settings.webSourceMode !=
+            WebSourceMode.OFF
+        ) {
+            when {
+                !network -> {
+                    RuntimeStatus.source(
+                        context,
+                        "web",
+                        "Offline",
+                    )
+                }
+
+                !sourceBackoffExpired(
+                    context,
+                    "web",
+                ) -> {
+                    RuntimeStatus.source(
+                        context,
+                        "web",
+                        "Backoff",
+                    )
+                }
+
+                else -> {
+                    val started =
+                        System.currentTimeMillis()
+
+                    runCatching {
+                        val display =
+                            DeviceDisplayProfile.detect(
+                                context
+                            )
+
+                        val networkClass =
+                            WebNetworkClassifier.detect(
+                                context
+                            )
+
+                        val policy =
+                            WebNetworkPolicy.resolve(
+                                networkClass =
+                                    networkClass,
+                                qualityMode =
+                                    settings.webQualityMode,
+                            )
+
+                        RuntimeStatus.set(
+                            context,
+                            "web_network_class",
+                            networkClass.name,
+                        )
+
+                        RuntimeStatus.set(
+                            context,
+                            "web_display_profile",
+                            "${display.portraitWidth}x" +
+                                "${display.portraitHeight}" +
+                                " @${display.densityDpi}dpi",
+                        )
+
+                        RuntimeStatus.set(
+                            context,
+                            "web_prefetch_policy",
+                            "concurrency=${policy.concurrency}" +
+                                " target=${policy.desiredCacheTarget}" +
+                                " maxQuality=${policy.preserveMaximumQuality}",
+                        )
+
+                        val limit =
+                            maxOf(
+                                settings.cacheTarget,
+                                policy.desiredCacheTarget,
+                            ).coerceIn(
+                                12,
+                                40,
+                            )
+
+                        WebProviderRegistry
+                            .all()
+                            .flatMap { provider ->
+                                provider.search(
+                                    category = null,
+                                    customQuery = null,
+                                    display = display,
+                                    qualityMode =
+                                        settings.webQualityMode,
+                                    limit = limit,
+                                )
+                            }
+                            .distinctBy {
+                                it.id
+                            }
+                            .let {
+                                WebCandidateBridge
+                                    .toEngineCandidates(
+                                        candidates = it,
+                                        /*
+                                         * SMART_MIX shares priority
+                                         * with Photos so DecisionEngine
+                                         * can genuinely mix both pools.
+                                         */
+                                        priority = 0,
+                                    )
+                            }
+                    }
+                        .onSuccess { items ->
+                            all += items
+
+                            webOk =
+                                items.isNotEmpty()
+
+                            sourceSuccess(
+                                context = context,
+                                source = "web",
+                                ms =
+                                    System.currentTimeMillis() -
+                                        started,
+                                items = items,
+                            )
+                        }
+                        .onFailure { error ->
+                            sourceFailure(
+                                context = context,
+                                source = "web",
+                                error = error,
+                                ms =
+                                    System.currentTimeMillis() -
+                                        started,
+                            )
+
+                            log(
+                                "Web Discovery: " +
+                                    error.message
+                            )
+                        }
+                }
+            }
+        } else {
+            RuntimeStatus.source(
+                context,
+                "web",
+                "Off",
+            )
+        }
+
+        if (!webOnly) {
+            if (Environment.isExternalStorageManager()) {
+                val local =
+                    localFiles(settings)
+
+                val localFallbackActive =
+                    !photosOk &&
+                        !driveOk &&
+                        !webOk
+
+                if (localFallbackActive) {
+                    all += local
+                }
+
+                RuntimeStatus.source(
+                    context,
+                    "local",
+                    when {
+                        local.isEmpty() ->
+                            "Empty"
+
+                        localFallbackActive ->
+                            "Fallback active"
+
+                        else ->
+                            "Standby local"
+                    }
+                )
+            } else {
+                RuntimeStatus.source(
+                    context,
+                    "local",
+                    "Permission required"
+                )
+            }
+        } else {
+            RuntimeStatus.source(
+                context,
+                "local",
+                "Disabled by Web only",
+            )
+        }
 
         val seed = stableSeed(context)
 

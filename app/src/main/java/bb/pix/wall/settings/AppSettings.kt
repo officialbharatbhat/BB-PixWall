@@ -1,5 +1,8 @@
 package bb.pix.wall.settings
 
+import bb.pix.wall.web.model.WebQualityMode
+import bb.pix.wall.web.model.WebSourceMode
+
 enum class WallpaperTargetMode(val label: String) {
     HOME("Home only"), LOCK("Lock only"), BOTH_SAME("Home + Lock (same)"), BOTH_DIFFERENT("Home + Lock (different)"),
 }
@@ -64,4 +67,8 @@ data class AppSettings(
     // Intelligent ordering for Random Shuffle / Surprise only.
     // Explicit A-Z/date/size orders are never overridden.
     val decisionEngineEnabled: Boolean = true,
+
+    // v1.1 Web Discovery. OFF preserves the v1.0 source pipeline.
+    val webSourceMode: WebSourceMode = WebSourceMode.OFF,
+    val webQualityMode: WebQualityMode = WebQualityMode.MAXIMUM,
 )

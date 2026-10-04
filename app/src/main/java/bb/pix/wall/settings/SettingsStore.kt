@@ -1,6 +1,8 @@
 package bb.pix.wall.settings
 
 import android.content.Context
+import bb.pix.wall.web.model.WebQualityMode
+import bb.pix.wall.web.model.WebSourceMode
 
 class SettingsStore(context: Context) {
     private val prefs = context.getSharedPreferences("bb_pixwall_settings", Context.MODE_PRIVATE)
@@ -42,6 +44,14 @@ class SettingsStore(context: Context) {
         smartCropTolerancePct = prefs.getFloat("smart_crop_tolerance_pct", 1.5f).coerceIn(0.2f, 5f),
         leanStorageMode = prefs.getBoolean("lean_storage_mode", true),
         decisionEngineEnabled = prefs.getBoolean("decision_engine_enabled", true),
+        webSourceMode = enumOrDefault(
+            prefs.getString("web_source_mode", null),
+            WebSourceMode.OFF,
+        ),
+        webQualityMode = enumOrDefault(
+            prefs.getString("web_quality_mode", null),
+            WebQualityMode.MAXIMUM,
+        ),
     )
 
     fun save(settings: AppSettings) {
@@ -81,7 +91,9 @@ class SettingsStore(context: Context) {
             .putBoolean("smart_crop_enabled", settings.smartCropEnabled)
             .putFloat("smart_crop_tolerance_pct", settings.smartCropTolerancePct.coerceIn(0.2f, 5f))
             .putBoolean("lean_storage_mode", settings.leanStorageMode)
-              .putBoolean("decision_engine_enabled", settings.decisionEngineEnabled)
+            .putBoolean("decision_engine_enabled", settings.decisionEngineEnabled)
+            .putString("web_source_mode", settings.webSourceMode.name)
+            .putString("web_quality_mode", settings.webQualityMode.name)
             .apply()
     }
 
