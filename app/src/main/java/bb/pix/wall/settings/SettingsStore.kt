@@ -3,6 +3,7 @@ package bb.pix.wall.settings
 import android.content.Context
 import bb.pix.wall.web.model.WebQualityMode
 import bb.pix.wall.web.model.WebSourceMode
+import bb.pix.wall.discovery.model.DiscoveryMixMode
 
 class SettingsStore(context: Context) {
     private val prefs = context.getSharedPreferences("bb_pixwall_settings", Context.MODE_PRIVATE)
@@ -52,6 +53,30 @@ class SettingsStore(context: Context) {
             prefs.getString("web_quality_mode", null),
             WebQualityMode.MAXIMUM,
         ),
+        discoveryEnabled =
+            prefs.getBoolean(
+                "discovery_enabled",
+                true,
+            ),
+        discoveryMixMode =
+            enumOrDefault(
+                prefs.getString(
+                    "discovery_mix_mode",
+                    null,
+                ),
+                DiscoveryMixMode.PREMIUM_MIX,
+            ),
+        enabledDiscoveryCategoryIds =
+            prefs.getStringSet(
+                "discovery_category_ids",
+                emptySet(),
+            )?.toSet()
+                ?: emptySet(),
+        categoryRotationEnabled =
+            prefs.getBoolean(
+                "category_rotation_enabled",
+                true,
+            ),
     )
 
     fun save(settings: AppSettings) {
@@ -94,6 +119,22 @@ class SettingsStore(context: Context) {
             .putBoolean("decision_engine_enabled", settings.decisionEngineEnabled)
             .putString("web_source_mode", settings.webSourceMode.name)
             .putString("web_quality_mode", settings.webQualityMode.name)
+            .putBoolean(
+                "discovery_enabled",
+                settings.discoveryEnabled,
+            )
+            .putString(
+                "discovery_mix_mode",
+                settings.discoveryMixMode.name,
+            )
+            .putStringSet(
+                "discovery_category_ids",
+                settings.enabledDiscoveryCategoryIds,
+            )
+            .putBoolean(
+                "category_rotation_enabled",
+                settings.categoryRotationEnabled,
+            )
             .apply()
     }
 
