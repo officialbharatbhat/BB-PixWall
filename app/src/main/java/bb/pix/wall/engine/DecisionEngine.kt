@@ -59,6 +59,41 @@ object DecisionEngine {
             seed
         }
 
+        val learnedTaste = candidates.mapNotNull { candidate ->
+            val raw = TasteLearning.score(
+                context,
+                candidate.id,
+            )
+
+            if (raw != 0) {
+                candidate.id to raw
+            } else {
+                null
+            }
+        }
+
+        RuntimeStatus.set(
+            context,
+            "decision_taste_learned_count",
+            learnedTaste.size.toString()
+        )
+
+        learnedTaste.maxByOrNull { it.second }?.let { best ->
+            RuntimeStatus.set(
+                context,
+                "decision_taste_best_positive",
+                "${best.second} • ${best.first.take(120)}"
+            )
+        }
+
+        learnedTaste.minByOrNull { it.second }?.let { worst ->
+            RuntimeStatus.set(
+                context,
+                "decision_taste_best_negative",
+                "${worst.second} • ${worst.first.take(120)}"
+            )
+        }
+
         val ranked: List<Ranked> = candidates.map { candidate ->
             score(
                 context = context,
@@ -218,6 +253,35 @@ object DecisionEngine {
         ) {
             score += 8
             reasons += "resolution+8"
+        }
+
+        // Local Taste Learning influence.
+        //
+        // TasteLearning stores a bounded raw score (-24..+24).
+        // Decision influence is deliberately capped at ±12 so a few
+        // Save/Skip actions cannot overpower source health, 9:20 quality,
+        // anti-repeat or novelty.
+        val tasteRaw = TasteLearning.score(
+            context,
+            candidate.id,
+        )
+
+        if (tasteRaw != 0) {
+            val tasteInfluence =
+                (tasteRaw * 2).coerceIn(-12, 12)
+
+            score += tasteInfluence
+
+            reasons += when {
+                tasteInfluence > 0 ->
+                    "taste+$tasteInfluence(raw=$tasteRaw)"
+
+                tasteInfluence < 0 ->
+                    "taste$tasteInfluence(raw=$tasteRaw)"
+
+                else ->
+                    "taste=neutral"
+            }
         }
 
         // Small deterministic novelty contribution.
