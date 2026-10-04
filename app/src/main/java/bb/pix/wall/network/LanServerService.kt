@@ -200,7 +200,7 @@ class LanServerService : Service() {
         val mutationAllowed = method == "POST" && headers["x-bbpixwall-token"] == token
         when (path) {
             "/health" -> sendJson(s, 200, "{\"ok\":true,\"port\":$boundPort,\"ip\":${quote(LanInfo.localIpv4())},\"state\":${quote(bb.pix.wall.engine.RuntimeStatus.get(this, "lan_state"))}}")
-            "/api/next" -> sendJson(s, if (mutationAllowed) 200 else 403, if (mutationAllowed) "{\"ok\":${WallpaperController.nextWall(this)}}" else "{\"error\":\"forbidden\"}")
+            "/api/next" -> sendJson(s, if (mutationAllowed) 200 else 403, if (mutationAllowed) "{\"ok\":${WallpaperController.nextWall(this, userInitiated = true)}}" else "{\"error\":\"forbidden\"}")
             "/api/save" -> if (mutationAllowed) {
                 val n = runCatching { WallpaperController.saveCurrent(this).size }.getOrDefault(0); sendJson(s, 200, "{\"saved\":$n}")
             } else sendJson(s, 403, "{\"error\":\"forbidden\"}")

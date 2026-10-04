@@ -110,13 +110,23 @@ object WallpaperController {
         return made || WallpaperFiles.nextHome.exists() || WallpaperFiles.nextLock.exists()
     }
 
-    fun nextWall(context: Context, allowNetwork: Boolean = true): Boolean {
+    fun nextWall(
+        context: Context,
+        allowNetwork: Boolean = true,
+        userInitiated: Boolean = false,
+    ): Boolean {
         val now = System.currentTimeMillis()
         if (now - lastApplyStartedAt < 900L) return false
         if (!applying.compareAndSet(false, true)) return false
         lastApplyStartedAt = now
         return try {
             val settings = SettingsStore(context).load()
+
+            val previousTasteIds = if (userInitiated) {
+                TasteLearning.currentIds(settings.targetMode)
+            } else {
+                emptySet()
+            }
 
             // Fast path only: current trigger must never wait for cloud/network.
             // Consume already prepared/cache/local content synchronously.
@@ -187,6 +197,18 @@ object WallpaperController {
             }
             if (changed) {
                 recordSeenForCurrent(settings.targetMode)
+
+                  if (userInitiated) {
+                      TasteLearning.recordManualAdvance(
+                          context,
+                          previousTasteIds,
+                      )
+                  }
+
+                  TasteLearning.recordAppliedCurrent(
+                      context,
+                      settings.targetMode,
+                  )
                 WallpaperFiles.nextHome.delete(); WallpaperFiles.nextLock.delete()
                 RuntimeStatus.success(context, "Wallpaper applied: ${settings.targetMode.label}")
                 RuntimeStatus.setLong(context, "last_change", System.currentTimeMillis())
@@ -245,9 +267,17 @@ object WallpaperController {
                 save(WallpaperFiles.currentLock, "lock", settings.lockBlurEnabled, settings.lockBlurRadius)
             }
         }
-        log("SAVE ${out.size} file(s)")
-        out
-    }
+
+          if (out.isNotEmpty()) {
+              TasteLearning.recordSaveCurrent(
+                  context,
+                  settings.targetMode,
+              )
+          }
+
+          log("SAVE ${out.size} file(s)")
+          out
+      }
 
     fun toggleBlur(context: Context): Boolean = synchronized(lock) {
         val settings = SettingsStore(context).load()
