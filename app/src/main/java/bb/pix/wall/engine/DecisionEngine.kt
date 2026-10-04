@@ -59,6 +59,35 @@ object DecisionEngine {
             seed
         }
 
+        val currentIds =
+            TasteLearning.currentIds(
+                settings.targetMode
+            )
+
+        val styleConfidence =
+            WallpaperStyleLearning
+                .profileConfidence(context)
+
+        val styleKnownCount =
+            candidates.count { candidate ->
+                WallpaperStyleLearning.hasTraits(
+                    context,
+                    candidate.id,
+                )
+            }
+
+        RuntimeStatus.set(
+            context,
+            "decision_style_known_count",
+            styleKnownCount.toString(),
+        )
+
+        RuntimeStatus.set(
+            context,
+            "decision_style_confidence",
+            "%.2f".format(styleConfidence),
+        )
+
         val learnedTaste = candidates.mapNotNull { candidate ->
             val raw = TasteLearning.score(
                 context,
@@ -100,6 +129,8 @@ object DecisionEngine {
                 settings = settings,
                 candidate = candidate,
                 recentIds = recentIds,
+                currentIds = currentIds,
+                styleConfidence = styleConfidence,
                 salt = salt,
             )
         }.sortedWith(
@@ -150,6 +181,8 @@ object DecisionEngine {
         settings: AppSettings,
         candidate: WallpaperSourceEngine.Candidate,
         recentIds: Set<String>,
+        currentIds: Set<String>,
+        styleConfidence: Float,
         salt: Long,
     ): Ranked {
         var score = 0
@@ -301,10 +334,72 @@ object DecisionEngine {
             score += styleDecision.influence
 
             reasons += if (styleDecision.influence > 0) {
-                "style+${styleDecision.influence}(${styleDecision.hue})"
+                "style+${styleDecision.influence}" +
+                    "(${styleDecision.hue}; ${styleDecision.explain})"
             } else {
-                "style${styleDecision.influence}(${styleDecision.hue})"
+                "style${styleDecision.influence}" +
+                    "(${styleDecision.hue}; ${styleDecision.explain})"
             }
+        }
+
+        /*
+         * Consecutive visual diversity.
+         */
+        val diversitySimilarity =
+            currentIds
+                .asSequence()
+                .filter { it != candidate.id }
+                .mapNotNull { currentId ->
+                    WallpaperStyleLearning
+                        .visualSimilarity(
+                            context,
+                            candidate.id,
+                            currentId,
+                        )
+                }
+                .maxOrNull()
+
+        if (diversitySimilarity != null) {
+            val diversityPenalty =
+                when {
+                    diversitySimilarity >= 0.92f -> 8
+                    diversitySimilarity >= 0.84f -> 4
+                    diversitySimilarity >= 0.78f -> 2
+                    else -> 0
+                }
+
+            if (diversityPenalty > 0) {
+                score -= diversityPenalty
+
+                reasons +=
+                    "diversity-$diversityPenalty" +
+                        "(sim=${"%.2f".format(diversitySimilarity)})"
+            }
+        }
+
+        /*
+         * Deterministic exploration quota.
+         * Roughly 20% of unknown-style candidates get a tiny bonus.
+         */
+        val styleKnown =
+            WallpaperStyleLearning.hasTraits(
+                context,
+                candidate.id,
+            )
+
+        val explorationBucket =
+            (
+                (stableTie(candidate.id, salt) ushr 1) %
+                    5L
+            ).toInt()
+
+        if (
+            !styleKnown &&
+            styleConfidence >= 0.65f &&
+            explorationBucket == 0
+        ) {
+            score += 4
+            reasons += "explore+4"
         }
 
         // Small deterministic novelty contribution.

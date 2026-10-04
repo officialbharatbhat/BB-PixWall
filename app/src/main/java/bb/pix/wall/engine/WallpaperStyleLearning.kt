@@ -36,6 +36,7 @@ object WallpaperStyleLearning {
         val influence: Int,
         val raw: Float,
         val hue: String,
+        val explain: String = "",
     )
 
     fun analyzeAndStore(
@@ -211,7 +212,6 @@ object WallpaperStyleLearning {
         val signals =
             prefs.getInt("profile_signals", 0)
 
-        // Avoid steering selection while the profile is still immature.
         if (profileWeight < 20f || signals < 5) {
             return null
         }
@@ -222,15 +222,102 @@ object WallpaperStyleLearning {
                 token(candidateId),
             ) ?: return null
 
+        fun centered(value: Float): Float =
+            ((value - 0.5f) * 2f)
+                .coerceIn(-1f, 1f)
+
         fun pref(name: String): Float =
             (
                 prefs.getFloat("profile_$name", 0f) /
                     profileWeight
             ).coerceIn(-1f, 1f)
 
-        fun centered(value: Float): Float =
-            ((value - 0.5f) * 2f)
-                .coerceIn(-1f, 1f)
+        fun positivePref(name: String): Float {
+            val weight =
+                prefs.getFloat(
+                    "positive_weight",
+                    0f,
+                )
+
+            if (weight < 5f) return 0f
+
+            return (
+                prefs.getFloat(
+                    "positive_$name",
+                    0f,
+                ) / weight
+            ).coerceIn(-1f, 1f)
+        }
+
+        fun negativePref(name: String): Float {
+            val weight =
+                prefs.getFloat(
+                    "negative_weight",
+                    0f,
+                )
+
+            if (weight < 5f) return 0f
+
+            return (
+                prefs.getFloat(
+                    "negative_$name",
+                    0f,
+                ) / weight
+            ).coerceIn(-1f, 1f)
+        }
+
+        val features =
+            linkedMapOf(
+                "brightness" to centered(traits.brightness),
+                "saturation" to centered(traits.saturation),
+                "contrast" to centered(traits.contrast),
+                "warmth" to traits.warmth.coerceIn(-1f, 1f),
+                "dark" to centered(traits.darkRatio),
+            )
+
+        val baseWeights =
+            mapOf(
+                "brightness" to 0.16f,
+                "saturation" to 0.18f,
+                "contrast" to 0.16f,
+                "warmth" to 0.14f,
+                "dark" to 0.24f,
+            )
+
+        val confidence =
+            profileConfidence(
+                profileWeight = profileWeight,
+                signals = signals,
+            )
+
+        /*
+         * Per-feature confidence:
+         * weak / noisy preferences should contribute less than
+         * repeatedly confirmed strong preferences.
+         */
+        var weightedRaw = 0f
+        var weightedDenom = 0f
+
+        features.forEach { (name, feature) ->
+            val preference = pref(name)
+
+            val featureConfidence =
+                (
+                    0.25f +
+                        abs(preference) * 0.75f
+                ) * confidence
+
+            val weight =
+                (baseWeights[name] ?: 0f) *
+                    featureConfidence
+
+            weightedRaw +=
+                preference *
+                    feature *
+                    weight
+
+            weightedDenom += weight
+        }
 
         val huePreference =
             if (traits.hue == "neutral") {
@@ -239,63 +326,245 @@ object WallpaperStyleLearning {
                 (
                     prefs.getFloat(
                         "hue_pref_${traits.hue}",
-                        0f
+                        0f,
                     ) / profileWeight
                 ).coerceIn(-1f, 1f)
             }
 
-        /*
-         * Weighted similarity:
-         *
-         * dark       28%
-         * saturation 18%
-         * hue        18%
-         * brightness 12%
-         * contrast   12%
-         * warmth     12%
-         *
-         * Total = 100%.
-         */
-        val raw =
-            pref("dark") *
-                centered(traits.darkRatio) * 0.28f +
-            pref("saturation") *
-                centered(traits.saturation) * 0.18f +
-            huePreference * 0.18f +
-            pref("brightness") *
-                centered(traits.brightness) * 0.12f +
-            pref("contrast") *
-                centered(traits.contrast) * 0.12f +
-            pref("warmth") *
-                traits.warmth.coerceIn(-1f, 1f) * 0.12f
+        weightedRaw +=
+            huePreference *
+                0.12f *
+                confidence
+
+        weightedDenom +=
+            0.12f *
+                confidence
+
+        val baseRaw =
+            if (weightedDenom <= 0.0001f) {
+                0f
+            } else {
+                (weightedRaw / weightedDenom)
+                    .coerceIn(-1f, 1f)
+            }
 
         /*
-         * Style authority grows with actual learning maturity.
-         *
-         * A barely-ready profile should not have the same authority
-         * as one trained by dozens of deliberate user signals.
+         * Positive profile gives a gentle boost.
+         * Negative profile is intentionally stronger when a candidate
+         * resembles repeatedly skipped visual traits.
          */
-        val confidence =
-            profileConfidence(
-                profileWeight = profileWeight,
-                signals = signals,
-            )
+        fun profileMatch(
+            positive: Boolean,
+        ): Float {
+            var sum = 0f
+            var denom = 0f
+
+            features.forEach { (name, feature) ->
+                val preference =
+                    if (positive) {
+                        positivePref(name)
+                    } else {
+                        negativePref(name)
+                    }
+
+                val weight =
+                    baseWeights[name] ?: 0f
+
+                sum +=
+                    preference *
+                        feature *
+                        weight
+
+                denom += weight
+            }
+
+            if (denom <= 0f) return 0f
+
+            return (sum / denom)
+                .coerceIn(-1f, 1f)
+        }
+
+        val positiveMatch =
+            profileMatch(true)
+
+        val dislikedMatch =
+            profileMatch(false)
 
         val authority =
-            0.35f + (confidence * 0.65f)
+            0.35f +
+                confidence * 0.65f
+
+        val baseInfluence =
+            kotlin.math.round(
+                baseRaw *
+                    7f *
+                    authority
+            ).toInt()
+
+        val positiveBonus =
+            kotlin.math.round(
+                maxOf(
+                    0f,
+                    positiveMatch,
+                ) * 3f * authority
+            ).toInt()
+
+        val dislikePenalty =
+            kotlin.math.round(
+                maxOf(
+                    0f,
+                    dislikedMatch,
+                ) * 5f * authority
+            ).toInt()
 
         val influence =
-            kotlin.math.round(
-                raw * 10f * authority
-            )
-                .toInt()
-                .coerceIn(-10, 10)
+            (
+                baseInfluence +
+                    positiveBonus -
+                    dislikePenalty
+            ).coerceIn(-10, 10)
+
+        val strongestFeature =
+            features.keys
+                .maxByOrNull { name ->
+                    abs(
+                        pref(name) *
+                            (features[name] ?: 0f)
+                    )
+                }
+                ?: "neutral"
+
+        val explain =
+            buildString {
+                append(strongestFeature)
+
+                if (positiveBonus > 0) {
+                    append(
+                        " • liked+$positiveBonus"
+                    )
+                }
+
+                if (dislikePenalty > 0) {
+                    append(
+                        " • avoid-$dislikePenalty"
+                    )
+                }
+
+                append(
+                    " • conf=" +
+                        "%.2f".format(confidence)
+                )
+            }
 
         return StyleDecision(
             influence = influence,
-            raw = raw.coerceIn(-1f, 1f),
+            raw = baseRaw,
             hue = traits.hue,
+            explain = explain,
         )
+    }
+
+    fun hasTraits(
+        context: Context,
+        candidateId: String,
+    ): Boolean {
+        val prefs =
+            context.getSharedPreferences(
+                PREFS,
+                Context.MODE_PRIVATE,
+            )
+
+        return prefs.getBoolean(
+            "has_${token(candidateId)}",
+            false,
+        )
+    }
+
+    fun visualSimilarity(
+        context: Context,
+        firstId: String,
+        secondId: String,
+    ): Float? {
+        if (firstId == secondId) return 1f
+
+        val prefs =
+            context.getSharedPreferences(
+                PREFS,
+                Context.MODE_PRIVATE,
+            )
+
+        val a =
+            readTraits(
+                prefs,
+                token(firstId),
+            ) ?: return null
+
+        val b =
+            readTraits(
+                prefs,
+                token(secondId),
+            ) ?: return null
+
+        fun distance01(
+            x: Float,
+            y: Float,
+        ): Float =
+            abs(x - y)
+                .coerceIn(0f, 1f)
+
+        val brightness =
+            distance01(
+                a.brightness,
+                b.brightness,
+            )
+
+        val saturation =
+            distance01(
+                a.saturation,
+                b.saturation,
+            )
+
+        val contrast =
+            distance01(
+                a.contrast,
+                b.contrast,
+            )
+
+        val dark =
+            distance01(
+                a.darkRatio,
+                b.darkRatio,
+            )
+
+        val warmth =
+            (
+                abs(a.warmth - b.warmth) /
+                    2f
+            ).coerceIn(0f, 1f)
+
+        val hueDistance =
+            when {
+                a.hue == b.hue ->
+                    0f
+
+                a.hue == "neutral" ||
+                    b.hue == "neutral" ->
+                    0.45f
+
+                else ->
+                    1f
+            }
+
+        val distance =
+            brightness * 0.18f +
+                saturation * 0.18f +
+                contrast * 0.16f +
+                dark * 0.18f +
+                warmth * 0.12f +
+                hueDistance * 0.18f
+
+        return (1f - distance)
+            .coerceIn(0f, 1f)
     }
 
     private fun profileConfidence(
@@ -396,6 +665,15 @@ object WallpaperStyleLearning {
         val darkFeature = centered(traits.darkRatio)
         val warmthFeature = traits.warmth.coerceIn(-1f, 1f)
 
+        val featureMap =
+            mapOf(
+                "brightness" to brightnessFeature,
+                "saturation" to saturationFeature,
+                "contrast" to contrastFeature,
+                "warmth" to warmthFeature,
+                "dark" to darkFeature,
+            )
+
         val edit = prefs.edit()
 
         edit.putFloat(
@@ -439,6 +717,51 @@ object WallpaperStyleLearning {
             hueKey,
             prefs.getFloat(hueKey, 0f) + strength
         )
+
+        if (delta > 0) {
+            featureMap.forEach { (name, feature) ->
+                edit.putFloat(
+                    "positive_$name",
+                    prefs.getFloat(
+                        "positive_$name",
+                        0f,
+                    ) + feature * strength
+                )
+            }
+
+            edit.putFloat(
+                "positive_weight",
+                (
+                    prefs.getFloat(
+                        "positive_weight",
+                        0f,
+                    ) + weightAdd
+                ).coerceAtMost(10_000f)
+            )
+        } else if (delta < 0) {
+            val dislikeStrength =
+                abs(strength)
+
+            featureMap.forEach { (name, feature) ->
+                edit.putFloat(
+                    "negative_$name",
+                    prefs.getFloat(
+                        "negative_$name",
+                        0f,
+                    ) + feature * dislikeStrength
+                )
+            }
+
+            edit.putFloat(
+                "negative_weight",
+                (
+                    prefs.getFloat(
+                        "negative_weight",
+                        0f,
+                    ) + weightAdd
+                ).coerceAtMost(10_000f)
+            )
+        }
 
         edit.putInt(
             "profile_signals",
