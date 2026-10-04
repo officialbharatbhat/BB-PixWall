@@ -603,38 +603,192 @@ object WallpaperController {
         }.toMutableSet()
         val knownPhash = readLinesSet(WallpaperFiles.seenPerceptual).toMutableSet()
         var index = existing.size
+
+        var hotCount =
+            existing.count {
+                it.parentFile == WallpaperFiles.hotCache
+            }
+
+        var directHot = 0
+        var directWarm = 0
+
         for (candidate in candidates) {
             if (index >= target) break
             if (candidate.id in seenIds || candidate.id in cachedIds) continue
-            val dir = if (index < hotTarget) WallpaperFiles.hotCache else WallpaperFiles.warmCache
-            dir.mkdirs()
-            val ext = candidate.file?.extension?.takeIf { it.isNotBlank() } ?: "jpg"
-            val tmp = File(dir, "queue_${System.currentTimeMillis()}_${index}.$ext")
-            try {
-                fetchTo(candidate, tmp)
-                val hash = sha256(tmp)
-                val ph = perceptualHash(tmp)
-                val duplicate = hash in knownHashes || perceptuallySeen(ph, knownPhash, settings.perceptualDistance)
-                if (duplicate) { tmp.delete(); continue }
-                writeMeta(tmp, candidate.source, candidate.id)
 
+            val ext =
+                candidate.file
+                    ?.extension
+                    ?.takeIf { it.isNotBlank() }
+                    ?: "jpg"
+
+            /*
+             * Stage outside hot/warm so we can analyze the freshly
+             * downloaded image before choosing its final cache tier.
+             *
+             * ".part" keeps this invisible to normal cache consumers.
+             */
+            val staging =
+                File(
+                    WallpaperFiles.cache,
+                    ".prime_${System.currentTimeMillis()}_${index}.$ext.part"
+                )
+
+            var finalFile: File? = null
+
+            try {
+                fetchTo(candidate, staging)
+
+                val hash = sha256(staging)
+                val ph = perceptualHash(staging)
+
+                val duplicate =
+                    hash in knownHashes ||
+                        perceptuallySeen(
+                            ph,
+                            knownPhash,
+                            settings.perceptualDistance,
+                        )
+
+                if (duplicate) {
+                    staging.delete()
+                    continue
+                }
+
+                /*
+                 * Analyze the already-downloaded bytes first.
+                 * No additional network and no second decode is required
+                 * later merely to decide Hot vs Warm.
+                 */
                 runCatching {
                     WallpaperStyleLearning.analyzeAndStore(
                         context,
                         candidate.id,
-                        tmp,
+                        staging,
                     )
                 }
+
+                val predictiveScore =
+                    predictiveCacheScore(
+                        context,
+                        candidate.id,
+                    )
+
+                /*
+                 * Positive predicted preference gets direct Hot placement
+                 * while capacity exists. Neutral/negative goes Warm.
+                 *
+                 * Final rebalance below remains the safety net and can
+                 * still promote the best entries if Hot is underfilled.
+                 */
+                val directToHot =
+                    predictiveScore >= 0 &&
+                        hotCount < hotTarget
+
+                val dir =
+                    if (directToHot)
+                        WallpaperFiles.hotCache
+                    else
+                        WallpaperFiles.warmCache
+
+                dir.mkdirs()
+
+                val cacheFile =
+                    File(
+                        dir,
+                        "queue_${System.currentTimeMillis()}_${index}.$ext"
+                    )
+
+                val moved =
+                    staging.renameTo(cacheFile) ||
+                        runCatching {
+                            staging.copyTo(
+                                cacheFile,
+                                overwrite = false,
+                            )
+                            staging.delete()
+                            true
+                        }.getOrDefault(false)
+
+                if (!moved || !cacheFile.exists()) {
+                    cacheFile.delete()
+                    throw IllegalStateException(
+                        "Predictive cache finalization failed"
+                    )
+                }
+
+                finalFile = cacheFile
+
+                writeMeta(
+                    cacheFile,
+                    candidate.source,
+                    candidate.id,
+                )
+
                 cachedIds += candidate.id
                 knownHashes += hash
-                if (ph.isNotBlank()) knownPhash += ph
+
+                if (ph.isNotBlank()) {
+                    knownPhash += ph
+                }
+
+                if (directToHot) {
+                    hotCount++
+                    directHot++
+                } else {
+                    directWarm++
+                }
+
                 index++
-                RuntimeStatus.activeSource(context, candidate.source)
-                RuntimeStatus.set(context, "cache_progress", "$index/$target")
-                log("CACHE + ${tmp.name} <= ${candidate.id}")
+
+                RuntimeStatus.activeSource(
+                    context,
+                    candidate.source
+                )
+
+                RuntimeStatus.set(
+                    context,
+                    "cache_progress",
+                    "$index/$target"
+                )
+
+                RuntimeStatus.set(
+                    context,
+                    "cache_predictive_direct_last",
+                    "${if (directToHot) "hot" else "warm"}" +
+                        " • score=$predictiveScore"
+                )
+
+                RuntimeStatus.set(
+                    context,
+                    "cache_predictive_direct_counts",
+                    "hot=$directHot • warm=$directWarm"
+                )
+
+                log(
+                    "CACHE + ${cacheFile.name} <= ${candidate.id} " +
+                        "tier=${if (directToHot) "hot" else "warm"} " +
+                        "predict=$predictiveScore"
+                )
             } catch (t: Throwable) {
-                quarantine(tmp, "cache_${candidate.source}")
-                log("CACHE fail ${candidate.id}: ${t.message}")
+                staging.delete()
+
+                finalFile?.let { file ->
+                    if (file.exists()) {
+                        quarantine(
+                            file,
+                            "cache_${candidate.source}"
+                        )
+                    }
+
+                    File(
+                        file.absolutePath + ".meta"
+                    ).delete()
+                }
+
+                log(
+                    "CACHE fail ${candidate.id}: ${t.message}"
+                )
             }
         }
         trimCache(target)
