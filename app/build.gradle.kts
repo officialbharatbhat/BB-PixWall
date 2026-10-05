@@ -4,6 +4,20 @@ plugins {
 }
 
 android {
+    signingConfigs {
+        create("release") {
+            storeFile = file(
+                providers.gradleProperty("BBPIX_STORE_FILE").get()
+            )
+            storePassword =
+                providers.gradleProperty("BBPIX_STORE_PASSWORD").get()
+            keyAlias =
+                providers.gradleProperty("BBPIX_KEY_ALIAS").get()
+            keyPassword =
+                providers.gradleProperty("BBPIX_KEY_PASSWORD").get()
+        }
+    }
+
     namespace = "bb.pix.wall"
     compileSdk = 37
 
@@ -22,6 +36,7 @@ android {
 
     buildTypes {
         release {
+            signingConfig = signingConfigs.getByName("release")
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(
