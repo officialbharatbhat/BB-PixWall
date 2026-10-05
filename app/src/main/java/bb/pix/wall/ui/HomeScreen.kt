@@ -121,6 +121,7 @@ fun HomeScreen(
                 Arrangement.spacedBy(tokens.sectionGap),
         ) {
             PremiumAppHeader(
+                context = context,
                 engineMode = settings.engineMode,
                 theme = selectedTheme,
             )
@@ -1522,28 +1523,17 @@ fun HomeScreen(
 
             }
 
-            SectionTitle("Developer")
-            Card(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(18.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("DEVELOPER", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
-                    Text("Bharat Bhat", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            DeveloperIdentityCard(
+                context = context,
+                theme = selectedTheme,
+                youtubeUrl = "",
+                instagramUrl = "",
+                telegramUrl = "https://t.me/BharatBhat",
+            )
 
-                    HorizontalDivider()
-                    CompactSocialButton(R.drawable.ic_social_email, "bkbhatinfo@gmail.com") { context.startActivity(Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:bkbhatinfo@gmail.com"))) }
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        CompactSocialButton(R.drawable.ic_social_instagram, "@officialbharatbhat", Modifier.weight(1f)) { openUrl(context, "https://instagram.com/officialbharatbhat") }
-                        CompactSocialButton(R.drawable.ic_social_facebook, "@officialbharatbhat", Modifier.weight(1f)) { openUrl(context, "https://facebook.com/officialbharatbhat") }
-                    }
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        CompactSocialButton(R.drawable.ic_social_youtube, "@sloverbofficial", Modifier.weight(1f)) { openUrl(context, "https://youtube.com/@sloverbofficial") }
-                        CompactSocialButton(R.drawable.ic_social_telegram, "@BharatBhat", Modifier.weight(1f)) { openUrl(context, "https://t.me/BharatBhat") }
-                    }
-                }
-            }
-            Spacer(Modifier.height(28.dp))
-        }
-        }
-    }
+}
+}
+}
 }
 
 @Composable private fun PreviewGrid(state: WallpaperState, refresh: () -> Unit, prepare: () -> Unit) {
@@ -1834,170 +1824,6 @@ private fun PremiumAppHeader(
     }
 }
 
-@Composable
-private fun CollapsibleSection(
-    title: String,
-    summary: String = "",
-    initiallyExpanded: Boolean = false,
-    content: @Composable ColumnScope.() -> Unit,
-) {
-    val tokens =
-        LocalDesignTokens.current
-
-    var expanded by
-        rememberSaveable(title) {
-            mutableStateOf(
-                initiallyExpanded
-            )
-        }
-
-    val rotation by
-        androidx.compose.animation.core
-            .animateFloatAsState(
-                targetValue =
-                    if (expanded) 180f else 0f,
-                animationSpec =
-                    tween(
-                        durationMillis =
-                            tokens.motionDurationMs,
-                        easing = tokens.easing,
-                    ),
-                label =
-                    "accordion_$title",
-            )
-
-    Surface(
-        modifier =
-            Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 0.dp)
-                .animateContentSize(
-                    animationSpec =
-                        tween(
-                            durationMillis =
-                                tokens.motionDurationMs,
-                            easing =
-                                tokens.easing,
-                        )
-                ),
-        shape =
-            RoundedCornerShape(
-                if (tokens.sharpControls) {
-                    0.dp
-                } else {
-                    tokens.cardRadius
-                }
-            ),
-        color =
-            MaterialTheme.colorScheme
-                .surface
-                .copy(alpha = .90f),
-        border =
-            androidx.compose.foundation.BorderStroke(
-                tokens.borderWidth,
-                MaterialTheme.colorScheme
-                    .outline
-                    .copy(
-                        alpha =
-                            tokens.cardBorderAlpha
-                    ),
-            ),
-    ) {
-        Column {
-            Row(
-                modifier =
-                    Modifier
-                        .fillMaxWidth()
-                        .clickable {
-                            expanded =
-                                !expanded
-                        }
-                        .padding(
-                            horizontal =
-                                tokens.contentPadding,
-                            vertical = 10.dp,
-                        ),
-                verticalAlignment =
-                    Alignment.CenterVertically,
-            ) {
-                Column(
-                    Modifier.weight(1f)
-                ) {
-                    Text(
-                        if (
-                            tokens.sectionUppercase
-                        ) {
-                            title.uppercase()
-                        } else {
-                            title
-                        },
-                        style =
-                            MaterialTheme.typography
-                                .titleMedium,
-                        fontWeight =
-                            FontWeight.SemiBold,
-                    )
-
-                    if (
-                        !expanded &&
-                        summary.isNotBlank()
-                    ) {
-                        Text(
-                            summary,
-                            style =
-                                MaterialTheme
-                                    .typography
-                                    .bodySmall,
-                            color =
-                                MaterialTheme
-                                    .colorScheme
-                                    .onSurfaceVariant,
-                            maxLines = 1,
-                        )
-                    }
-                }
-
-                Icon(
-                    imageVector =
-                        Icons.Outlined
-                            .KeyboardArrowDown,
-                    contentDescription =
-                        if (expanded) {
-                            "Collapse"
-                        } else {
-                            "Expand"
-                        },
-                    modifier =
-                        Modifier.rotate(rotation),
-                )
-            }
-
-            AnimatedVisibility(
-                visible = expanded
-            ) {
-                Column(
-                    modifier =
-                        Modifier
-                            .fillMaxWidth()
-                            .padding(
-                                start =
-                                    tokens
-                                        .contentPadding,
-                                end =
-                                    tokens
-                                        .contentPadding,
-                                bottom = 10.dp,
-                            ),
-                    verticalArrangement =
-                        Arrangement.spacedBy(
-                            tokens.sectionGap
-                        ),
-                    content = content,
-                )
-            }
-        }
-    }
-}
 
 @Composable private fun SectionTitle(text: String) { val t = LocalDesignTokens.current; Text(if (t.sectionUppercase) text.uppercase() else text, style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onBackground) }
 @Composable private fun SettingHeader(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String) { Row(verticalAlignment = Alignment.CenterVertically) { Icon(icon, null); Spacer(Modifier.width(10.dp)); Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold) } }
