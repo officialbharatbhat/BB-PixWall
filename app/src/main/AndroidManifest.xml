@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
@@ -65,8 +66,5 @@
         <service android:name=".tiles.BlurWallTileService" android:exported="true" android:icon="@drawable/ic_tile_blur" android:label="Blur Wall" android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
             <intent-filter><action android:name="android.service.quicksettings.action.QS_TILE" /></intent-filter>
         </service>
-        <service android:name=".tiles.WebTileService" android:exported="true" android:icon="@drawable/ic_tile_web" android:label="BB-PixWall Web" android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
-            <intent-filter><action android:name="android.service.quicksettings.action.QS_TILE" /></intent-filter>
-        </service>
-    </application>
+</application>
 </manifest>

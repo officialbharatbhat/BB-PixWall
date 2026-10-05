@@ -124,33 +124,11 @@ class MainActivity : ComponentActivity() {
             syncLan(updated, forceRestart = true)
         }
 
-        val discoveryPipelineChanged =
-            previous.discoveryEnabled !=
-                updated.discoveryEnabled ||
-                previous.discoveryMixMode !=
-                updated.discoveryMixMode ||
-                previous.enabledDiscoveryCategoryIds !=
-                updated.enabledDiscoveryCategoryIds ||
-                previous.categoryRotationEnabled !=
-                updated.categoryRotationEnabled
-
-        val webPipelineChanged =
-            previous.webSourceMode !=
-                updated.webSourceMode ||
-                previous.webQualityMode !=
-                updated.webQualityMode ||
-                discoveryPipelineChanged
-
         val sourcePipelineChanged =
-            previous.photosAlbumUrl !=
-                updated.photosAlbumUrl ||
-                previous.driveFolderUrl !=
-                updated.driveFolderUrl ||
-                previous.wallpaperOrder !=
-                updated.wallpaperOrder ||
-                previous.dataSaverEnabled !=
-                updated.dataSaverEnabled ||
-                webPipelineChanged
+            previous.photosAlbumUrl != updated.photosAlbumUrl ||
+                previous.driveFolderUrl != updated.driveFolderUrl ||
+                previous.wallpaperOrder != updated.wallpaperOrder ||
+                previous.dataSaverEnabled != updated.dataSaverEnabled
 
         if (sourcePipelineChanged) {
             if (
@@ -159,21 +137,14 @@ class MainActivity : ComponentActivity() {
                 previous.driveFolderUrl !=
                 updated.driveFolderUrl ||
                 previous.dataSaverEnabled !=
-                updated.dataSaverEnabled ||
-                webPipelineChanged
+                updated.dataSaverEnabled
             ) {
                 bb.pix.wall.engine.WallpaperSourceEngine
                     .invalidateCloudIndex()
             }
 
-            /*
-             * Source-mode and Web-quality changes must not consume
-             * cache prepared under the previous source contract.
-             * This makes WEB_ONLY genuinely Web-only immediately.
-             */
-            if (webPipelineChanged) {
-                WallpaperController.clearCache()
-            }
+
+
 
             WallpaperController.invalidateQueue()
 

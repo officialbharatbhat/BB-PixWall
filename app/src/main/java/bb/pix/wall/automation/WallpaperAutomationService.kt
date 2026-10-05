@@ -30,7 +30,24 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 class WallpaperAutomationService : Service() {
     private val handler = Handler(Looper.getMainLooper())
-    private val applyWorker = Executors.newSingleThreadExecutor { r -> Thread(r, "bbpix-apply").apply { priority = Thread.NORM_PRIORITY + 1 } }
+    private val applyWorker =
+        Executors.newSingleThreadExecutor { r ->
+            Thread(r, "bbpix-apply").apply {
+                priority = Thread.NORM_PRIORITY + 1
+            }
+        }
+
+    /*
+     * SCREEN_OFF must never wait behind startup/cache maintenance.
+     * Keep this lane dedicated to the latency-sensitive apply path.
+     */
+    private val screenApplyWorker =
+        Executors.newSingleThreadExecutor { r ->
+            Thread(r, "bbpix-screen-apply").apply {
+                priority = Thread.MAX_PRIORITY
+            }
+        }
+
     private val applying = AtomicBoolean(false)
     private var screenRegistered = false
     @Volatile private var lastApplyStartedAt = 0L
@@ -54,9 +71,46 @@ class WallpaperAutomationService : Service() {
         override fun run() {
             val latest = SettingsStore(this@WallpaperAutomationService).load()
             EngineExecutors.io {
-                runCatching { EngineHealth.auditAndRepair(applicationContext, latest, allowNetworkRefill = true) }
+                runCatching {
+                    EngineHealth.auditAndRepair(
+                        applicationContext,
+                        latest,
+                        allowNetworkRefill = true,
+                    )
+                }
+
+                /*
+                 * Advanced Background Guard periodically re-verifies only
+                 * app-scoped root tuning. Do not hammer su every health pass.
+                 */
+                if (
+                    latest.engineMode == EngineMode.ADVANCED &&
+                    latest.backgroundGuardEnabled
+                ) {
+                    val lastTune =
+                        RuntimeStatus.getLong(
+                            applicationContext,
+                            "root_last_tune",
+                            0L,
+                        )
+
+                    if (
+                        System.currentTimeMillis() - lastTune >=
+                        30L * 60L * 1000L
+                    ) {
+                        runCatching {
+                            RootAccess.tuneBackground(
+                                applicationContext
+                            )
+                        }
+                    }
+                }
             }
-            handler.postDelayed(this, 15 * 60_000L)
+
+            handler.postDelayed(
+                this,
+                15 * 60_000L,
+            )
         }
     }
 
@@ -97,11 +151,45 @@ class WallpaperAutomationService : Service() {
         applyWorker.execute {
             runCatching { WallpaperController.verifyCacheIntegrity() }
             runCatching { WallpaperController.ensureNext(applicationContext, s, allowNetwork = false) }
+            EngineExecutors.io {
+                runCatching {
+                    WallpaperController.warmApplyCaches(
+                        applicationContext,
+                        s,
+                    )
+                }
+            }
         }
         // Slow/network work is separate and never blocks the apply worker.
         EngineExecutors.io {
-            runCatching { WallpaperController.primeCache(applicationContext, s) }
-            runCatching { WallpaperController.ensureNext(applicationContext, s, allowNetwork = true) }
+            runCatching {
+                WallpaperController.warmBlurCaches(
+                    applicationContext,
+                    s,
+                )
+            }
+
+            runCatching {
+                WallpaperController.primeCache(
+                    applicationContext,
+                    s,
+                )
+            }
+
+            runCatching {
+                WallpaperController.ensureNext(
+                    applicationContext,
+                    s,
+                    allowNetwork = true,
+                )
+            }
+
+            runCatching {
+                WallpaperController.warmApplyCaches(
+                    applicationContext,
+                    s,
+                )
+            }
         }
 
         if (s.triggerMode == TriggerMode.INTERVAL) {
@@ -128,38 +216,218 @@ class WallpaperAutomationService : Service() {
         }
     }
 
-    private fun applyIfAllowed(s: AppSettings, reason: String) {
-        val now = System.currentTimeMillis()
-        if (now - lastApplyStartedAt < 1200L) { recordTrigger(reason, "debounced"); return }
-        val denied = conditionsDeniedReason(s)
-        if (denied != null) { recordTrigger(reason, "blocked:$denied"); return }
-        if (!applying.compareAndSet(false, true)) { recordTrigger(reason, "busy"); return }
+    private fun applyIfAllowed(
+        s: AppSettings,
+        reason: String,
+    ) {
+        val now =
+            System.currentTimeMillis()
+
+        if (now - lastApplyStartedAt < 1200L) {
+            recordTrigger(reason, "debounced")
+            return
+        }
+
+        val denied =
+            conditionsDeniedReason(s)
+
+        if (denied != null) {
+            recordTrigger(
+                reason,
+                "blocked:$denied",
+            )
+            return
+        }
+
+        if (!applying.compareAndSet(false, true)) {
+            recordTrigger(reason, "busy")
+            return
+        }
+
         lastApplyStartedAt = now
-        RuntimeStatus.set(applicationContext, "automation_state", "Applying")
+
+        val screenOff =
+            reason == "event:SCREEN_OFF"
+
+        if (screenOff) {
+            RuntimeStatus.setLong(
+                applicationContext,
+                "screen_event_received",
+                now,
+            )
+        }
+
+        RuntimeStatus.set(
+            applicationContext,
+            "automation_state",
+            "Applying",
+        )
+
         recordTrigger(reason, "start")
 
-        applyWorker.execute {
-            try {
-                // Screen/event path is deliberately network-free. It must consume already prepared assets only.
-                var changed = WallpaperController.nextWall(applicationContext, allowNetwork = false)
-                if (!changed) {
-                    runCatching { WallpaperController.ensureNext(applicationContext, s, allowNetwork = false) }
-                    changed = WallpaperController.nextWall(applicationContext, allowNetwork = false)
-                }
-                recordTrigger(reason, if (changed) "applied" else "no-ready-wall")
-                RuntimeStatus.set(applicationContext, "automation_state", if (changed) "Ready" else "Waiting for cache")
+        val wakeLock =
+            if (screenOff) {
+                (
+                    getSystemService(POWER_SERVICE)
+                        as PowerManager
+                )
+                    .newWakeLock(
+                        PowerManager.PARTIAL_WAKE_LOCK,
+                        "$packageName:screenOffApply",
+                    )
+                    .apply {
+                        setReferenceCounted(false)
+                        acquire(15_000L)
+                    }
+            } else {
+                null
+            }
 
-                // Immediately prepare another local next item, then refill network cache separately.
-                runCatching { WallpaperController.ensureNext(applicationContext, SettingsStore(this).load(), allowNetwork = false) }
-                EngineExecutors.io {
-                    val latest = SettingsStore(this).load()
-                    runCatching { WallpaperController.primeCache(applicationContext, latest) }
-                    runCatching { WallpaperController.ensureNext(applicationContext, latest, allowNetwork = true) }
+        val worker =
+            if (screenOff) {
+                screenApplyWorker
+            } else {
+                applyWorker
+            }
+
+        try {
+            worker.execute {
+                if (screenOff) {
+                    RuntimeStatus.setLong(
+                        applicationContext,
+                        "screen_apply_worker_started",
+                        System.currentTimeMillis(),
+                    )
                 }
-            } catch (t: Throwable) {
-                RuntimeStatus.failure(applicationContext, "Automation: ${t.message ?: t.javaClass.simpleName}")
-                recordTrigger(reason, "error:${t.javaClass.simpleName}")
-            } finally { applying.set(false) }
+
+                try {
+                    /*
+                     * Screen/event path is deliberately network-free.
+                     * Consume a prepared wallpaper immediately.
+                     */
+                    var changed =
+                        WallpaperController.nextWall(
+                            applicationContext,
+                            allowNetwork = false,
+                        )
+
+                    if (!changed) {
+                        runCatching {
+                            WallpaperController.ensureNext(
+                                applicationContext,
+                                s,
+                                allowNetwork = false,
+                            )
+                        }
+
+                        changed =
+                            WallpaperController.nextWall(
+                                applicationContext,
+                                allowNetwork = false,
+                            )
+                    }
+
+                    recordTrigger(
+                        reason,
+                        if (changed) {
+                            "applied"
+                        } else {
+                            "no-ready-wall"
+                        },
+                    )
+
+                    RuntimeStatus.set(
+                        applicationContext,
+                        "automation_state",
+                        if (changed) {
+                            "Ready"
+                        } else {
+                            "Waiting for cache"
+                        },
+                    )
+
+                    /*
+                     * Local preparation happens after the visible apply.
+                     * Network refill remains completely outside the
+                     * SCREEN_OFF critical path.
+                     */
+                    runCatching {
+                        WallpaperController.ensureNext(
+                            applicationContext,
+                            SettingsStore(
+                                applicationContext
+                            ).load(),
+                            allowNetwork = false,
+                        )
+                    }
+
+                    EngineExecutors.io {
+                        val latest =
+                            SettingsStore(
+                                applicationContext
+                            ).load()
+
+                        runCatching {
+                            WallpaperController.primeCache(
+                                applicationContext,
+                                latest,
+                            )
+                        }
+
+                        runCatching {
+                            WallpaperController.ensureNext(
+                                applicationContext,
+                                latest,
+                                allowNetwork = true,
+                            )
+                        }
+                    }
+                } catch (t: Throwable) {
+                    RuntimeStatus.failure(
+                        applicationContext,
+                        "Automation: ${
+                            t.message
+                                ?: t.javaClass.simpleName
+                        }",
+                    )
+
+                    recordTrigger(
+                        reason,
+                        "error:${t.javaClass.simpleName}",
+                    )
+                } finally {
+                    if (screenOff) {
+                        RuntimeStatus.setLong(
+                            applicationContext,
+                            "screen_apply_finished",
+                            System.currentTimeMillis(),
+                        )
+                    }
+
+                    if (
+                        wakeLock != null &&
+                        wakeLock.isHeld
+                    ) {
+                        runCatching {
+                            wakeLock.release()
+                        }
+                    }
+
+                    applying.set(false)
+                }
+            }
+        } catch (t: Throwable) {
+            if (
+                wakeLock != null &&
+                wakeLock.isHeld
+            ) {
+                runCatching {
+                    wakeLock.release()
+                }
+            }
+
+            applying.set(false)
+            throw t
         }
     }
 
@@ -198,6 +466,7 @@ class WallpaperAutomationService : Service() {
         handler.removeCallbacksAndMessages(null)
         if (screenRegistered) runCatching { unregisterReceiver(screenReceiver) }
         applyWorker.shutdownNow()
+        screenApplyWorker.shutdownNow()
         super.onDestroy()
     }
 

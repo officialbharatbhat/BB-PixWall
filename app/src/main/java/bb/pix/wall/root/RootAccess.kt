@@ -76,17 +76,50 @@ object RootAccess {
             return caps
         }
 
-        fun has(command: String): Boolean = runCommand(command, 1800L).granted
-        val provider = runCommand("su --version 2>/dev/null || su -V 2>/dev/null || echo root", 1800L)
-            .detail.lineSequence().firstOrNull()?.take(80)?.ifBlank { "su" } ?: "su"
+        fun has(command: String): Boolean =
+            runCommand(
+                command,
+                1800L,
+            ).granted
 
+        val pkg =
+            context.packageName
+
+        val provider =
+            runCommand(
+                "su --version 2>/dev/null || su -V 2>/dev/null || echo root",
+                1800L,
+            ).detail
+                .lineSequence()
+                .firstOrNull()
+                ?.take(80)
+                ?.ifBlank { "su" }
+                ?: "su"
+
+        /*
+         * Do not rely on "help" exit codes.
+         * Several Android/custom-ROM cmd services print valid help/status
+         * while returning a non-zero status.
+         */
         val caps = Capabilities(
             root = true,
             provider = provider,
-            renice = has("command -v renice >/dev/null 2>&1"),
-            deviceIdle = has("cmd deviceidle help >/dev/null 2>&1"),
-            appOps = has("cmd appops help >/dev/null 2>&1"),
-            oomScore = has("test -w /proc/${Process.myPid()}/oom_score_adj"),
+            renice =
+                has(
+                    "command -v renice >/dev/null 2>&1"
+                ),
+            deviceIdle =
+                has(
+                    "cmd deviceidle whitelist >/dev/null 2>&1"
+                ),
+            appOps =
+                has(
+                    "cmd appops get $pkg RUN_IN_BACKGROUND >/dev/null 2>&1"
+                ),
+            oomScore =
+                has(
+                    "test -w /proc/${Process.myPid()}/oom_score_adj"
+                ),
             checkedAt = now,
             latencyMs = rootProbe.latencyMs,
             detail = "Capability scan complete",
@@ -114,51 +147,307 @@ object RootAccess {
         return Result(true, "Root granted; ${tuned.detail}", System.currentTimeMillis() - started)
     }
 
-    fun tuneBackground(context: Context): Result {
-        val caps = capabilities(context)
-        if (!caps.root) return Result(false, "Root unavailable")
+    fun tuneBackground(
+        context: Context,
+    ): Result {
+        val caps =
+            capabilities(context)
 
-        val pkg = context.packageName
-        val actions = mutableListOf<String>()
-        fun runVerified(label: String, command: String): Result {
-            val r = runCommand(command, 2500L)
-            actions += "$label=${if (r.granted) "ok" else "fail"}"
-            rootLog("ROOT action $label granted=${r.granted} latency=${r.latencyMs}ms detail=${r.detail.take(90)}")
-            return r
+        if (!caps.root) {
+            return Result(
+                false,
+                "Root unavailable",
+            )
         }
 
-        if (caps.renice) runVerified(
-            "renice",
-            "renice -n -10 -p ${Process.myPid()} 2>/dev/null || " +
-                "renice -n -10 ${Process.myPid()} 2>/dev/null || " +
-                "renice -10 ${Process.myPid()} 2>/dev/null"
+        val pkg =
+            context.packageName
+
+        val pid =
+            Process.myPid()
+
+        val actions =
+            mutableListOf<String>()
+
+        fun runVerified(
+            label: String,
+            command: String,
+            timeoutMs: Long = 2500L,
+        ): Result {
+            val result =
+                runCommand(
+                    command,
+                    timeoutMs,
+                )
+
+            actions +=
+                "$label=${
+                    if (result.granted) {
+                        "ok"
+                    } else {
+                        "fail"
+                    }
+                }"
+
+            rootLog(
+                "ROOT action $label " +
+                    "granted=${result.granted} " +
+                    "latency=${result.latencyMs}ms " +
+                    "detail=${result.detail.take(90)}"
+            )
+
+            return result
+        }
+
+        /*
+         * Everything below is app-scoped and capability/failure tolerant.
+         * No global CPU/GPU/thermal/governor modifications.
+         */
+
+        if (caps.renice) {
+            runVerified(
+                "renice",
+                "renice -n -10 -p $pid 2>/dev/null || " +
+                    "renice -n -10 $pid 2>/dev/null || " +
+                    "renice -10 $pid 2>/dev/null"
+            )
+        }
+
+        /*
+         * Prefer higher I/O priority where toybox/util-linux provides
+         * ionice. Unsupported devices simply skip it.
+         */
+        runVerified(
+            "ionice",
+            "if command -v ionice >/dev/null 2>&1; then " +
+                "ionice -c 2 -n 0 -p $pid; " +
+                "else exit 0; fi"
         )
-        if (caps.deviceIdle) runVerified("doze-whitelist", "cmd deviceidle whitelist +$pkg")
-        if (caps.appOps) {
-            runVerified("appops-bg", "cmd appops set $pkg RUN_IN_BACKGROUND allow")
-            runVerified("appops-any-bg", "cmd appops set $pkg RUN_ANY_IN_BACKGROUND allow")
+
+        if (caps.deviceIdle) {
+            runVerified(
+                "doze-whitelist",
+                "cmd deviceidle whitelist +$pkg"
+            )
         }
-        if (caps.oomScore) runVerified("oom-score", "echo -800 > /proc/${Process.myPid()}/oom_score_adj")
 
-        val nice = if (caps.renice) runCommand(
-            "cut -d ' ' -f 19 /proc/${Process.myPid()}/stat 2>/dev/null",
-            1800L
-        ).detail.trim() else "unsupported"
-        val dozeVerified = if (caps.deviceIdle) runCommand("cmd deviceidle whitelist | grep -F '$pkg'", 1800L).granted else false
-        val appOpsVerified = if (caps.appOps) {
-            val check = runCommand("cmd appops get $pkg RUN_IN_BACKGROUND 2>/dev/null | grep -qi allow", 1800L)
-            check.granted
-        } else false
-        val oom = if (caps.oomScore) runCommand("cat /proc/${Process.myPid()}/oom_score_adj 2>/dev/null", 1800L).detail.trim() else "unsupported"
+        /*
+         * Keep the package in the active standby bucket and explicitly
+         * clear its inactive state. Both commands are app-scoped.
+         */
+        runVerified(
+            "standby-active",
+            "am set-standby-bucket $pkg active"
+        )
 
-        RuntimeStatus.set(context, "root_priority", "nice=${nice.ifBlank { "unknown" }}")
-        RuntimeStatus.set(context, "root_doze_whitelist", dozeVerified.toString())
-        RuntimeStatus.set(context, "root_appops_verified", appOpsVerified.toString())
-        RuntimeStatus.set(context, "root_oom_score", oom.ifBlank { "unknown" })
-        RuntimeStatus.setLong(context, "root_last_tune", System.currentTimeMillis())
-        RuntimeStatus.set(context, "root_last_result", if (actions.isEmpty()) "No supported tuning hooks" else actions.joinToString(", "))
+        runVerified(
+            "inactive-false",
+            "cmd activity set-inactive $pkg false 2>/dev/null || " +
+                "am set-inactive $pkg false 2>/dev/null"
+        )
 
-        return Result(true, RuntimeStatus.get(context, "root_last_result", "Tuned"))
+        if (caps.appOps) {
+            runVerified(
+                "appops-bg",
+                "cmd appops set $pkg RUN_IN_BACKGROUND allow"
+            )
+
+            runVerified(
+                "appops-any-bg",
+                "cmd appops set $pkg RUN_ANY_IN_BACKGROUND allow"
+            )
+        }
+
+        if (caps.oomScore) {
+            runVerified(
+                "oom-score",
+                "echo -800 > /proc/$pid/oom_score_adj"
+            )
+        }
+
+        val nice =
+            if (caps.renice) {
+                runCommand(
+                    "cut -d ' ' -f 19 /proc/$pid/stat 2>/dev/null",
+                    1800L,
+                ).detail.trim()
+            } else {
+                "unsupported"
+            }
+
+        val dozeVerified =
+            if (caps.deviceIdle) {
+                runCommand(
+                    "cmd deviceidle whitelist 2>/dev/null | " +
+                        "grep -F '$pkg'",
+                    1800L,
+                ).granted
+            } else {
+                false
+            }
+
+        val appOpsVerified =
+            if (caps.appOps) {
+                runCommand(
+                    "cmd appops get $pkg RUN_IN_BACKGROUND " +
+                        "2>/dev/null | grep -Eqi " +
+                        "'allow|default mode:[[:space:]]*allow'",
+                    1800L,
+                ).granted
+            } else {
+                false
+            }
+
+        val standby =
+            runCommand(
+                "am get-standby-bucket $pkg 2>/dev/null",
+                1800L,
+            ).detail.trim()
+
+        val inactive =
+            runCommand(
+                "cmd activity get-inactive $pkg 2>/dev/null || " +
+                    "am get-inactive $pkg 2>/dev/null",
+                1800L,
+            ).detail.trim()
+
+        val oom =
+            if (caps.oomScore) {
+                runCommand(
+                    "cat /proc/$pid/oom_score_adj 2>/dev/null",
+                    1800L,
+                ).detail.trim()
+            } else {
+                "unsupported"
+            }
+
+        RuntimeStatus.set(
+            context,
+            "root_priority",
+            "nice=${nice.ifBlank { "unknown" }}",
+        )
+
+        RuntimeStatus.set(
+            context,
+            "root_doze_whitelist",
+            dozeVerified.toString(),
+        )
+
+        RuntimeStatus.set(
+            context,
+            "root_appops_verified",
+            appOpsVerified.toString(),
+        )
+
+        RuntimeStatus.set(
+            context,
+            "root_standby_bucket",
+            standby.ifBlank { "unknown" },
+        )
+
+        RuntimeStatus.set(
+            context,
+            "root_inactive",
+            inactive.ifBlank { "unknown" },
+        )
+
+        RuntimeStatus.set(
+            context,
+            "root_oom_score",
+            oom.ifBlank { "unknown" },
+        )
+
+        RuntimeStatus.setLong(
+            context,
+            "root_last_tune",
+            System.currentTimeMillis(),
+        )
+
+        RuntimeStatus.set(
+            context,
+            "root_last_result",
+            if (actions.isEmpty()) {
+                "No supported tuning hooks"
+            } else {
+                actions.joinToString(", ")
+            },
+        )
+
+        return Result(
+            true,
+            RuntimeStatus.get(
+                context,
+                "root_last_result",
+                "Tuned",
+            ),
+        )
+    }
+
+    /*
+     * Advanced settings are intentionally app-scoped.
+     * This gives us a clean way to undo persistent exemptions.
+     */
+    fun restoreBackground(
+        context: Context,
+    ): Result {
+        val caps =
+            capabilities(context)
+
+        if (!caps.root) {
+            return Result(
+                false,
+                "Root unavailable",
+            )
+        }
+
+        val pkg =
+            context.packageName
+
+        val results =
+            mutableListOf<String>()
+
+        fun restore(
+            label: String,
+            command: String,
+        ) {
+            val result =
+                runCommand(
+                    command,
+                    2500L,
+                )
+
+            results +=
+                "$label=${
+                    if (result.granted) {
+                        "ok"
+                    } else {
+                        "skip"
+                    }
+                }"
+        }
+
+        if (caps.deviceIdle) {
+            restore(
+                "doze",
+                "cmd deviceidle whitelist -$pkg"
+            )
+        }
+
+        restore(
+            "standby",
+            "am set-standby-bucket $pkg working_set"
+        )
+
+        RuntimeStatus.set(
+            context,
+            "root_restore_result",
+            results.joinToString(", "),
+        )
+
+        return Result(
+            true,
+            results.joinToString(", "),
+        )
     }
 
     fun diagnosticsText(context: Context): String {
@@ -174,6 +463,8 @@ object RootAccess {
             appendLine("Priority: ${RuntimeStatus.get(context, "root_priority", "Not tuned")}")
             appendLine("Doze whitelist verified: ${RuntimeStatus.get(context, "root_doze_whitelist", "Unknown")}")
             appendLine("AppOps verified: ${RuntimeStatus.get(context, "root_appops_verified", "Unknown")}")
+            appendLine("Standby bucket: ${RuntimeStatus.get(context, "root_standby_bucket", "Unknown")}")
+            appendLine("Inactive state: ${RuntimeStatus.get(context, "root_inactive", "Unknown")}")
             appendLine("OOM score: ${RuntimeStatus.get(context, "root_oom_score", "Unknown")}")
             appendLine("Last tune: ${RuntimeStatus.get(context, "root_last_result", "Not tuned")}")
         }.trim()

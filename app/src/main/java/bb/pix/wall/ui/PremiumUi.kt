@@ -36,9 +36,11 @@ import androidx.compose.ui.graphics.PathMeasure
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.withTransform
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import bb.pix.wall.R
 import bb.pix.wall.settings.EngineMode
 import bb.pix.wall.ui.theme.LocalDesignTokens
 import bb.pix.wall.ui.theme.ThemeProfile
@@ -713,6 +715,86 @@ private fun BrandButton(
     }
 }
 
+
+@Composable
+private fun BrandDrawableButton(
+    label: String,
+    iconRes: Int,
+    colors: List<Color>,
+    preserveIconColors: Boolean = false,
+    enabled: Boolean = true,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    val shape =
+        RoundedCornerShape(10.dp)
+
+    Box(
+        modifier =
+            modifier
+                .wrapContentWidth()
+                .clip(shape)
+                .background(
+                    Brush.horizontalGradient(
+                        colors
+                    )
+                )
+                .padding(1.dp)
+                .clip(shape)
+                .background(
+                    MaterialTheme.colorScheme
+                        .surface
+                        .copy(alpha = .97f)
+                )
+                .clickable(
+                    enabled = enabled,
+                    onClick = onClick,
+                )
+                .padding(
+                    horizontal = 10.dp,
+                    vertical = 8.dp,
+                ),
+    ) {
+        Row(
+            verticalAlignment =
+                Alignment.CenterVertically,
+        ) {
+            if (preserveIconColors) {
+                androidx.compose.foundation.Image(
+                    painter =
+                        painterResource(iconRes),
+                    contentDescription = null,
+                    modifier =
+                        Modifier.size(19.dp),
+                )
+            } else {
+                Icon(
+                    painter =
+                        painterResource(iconRes),
+                    contentDescription = null,
+                    tint =
+                        MaterialTheme.colorScheme
+                            .onSurface,
+                    modifier =
+                        Modifier.size(19.dp),
+                )
+            }
+
+            Spacer(
+                Modifier.width(7.dp)
+            )
+
+            Text(
+                text = label,
+                style =
+                    MaterialTheme.typography
+                        .labelMedium,
+                maxLines = 1,
+            )
+        }
+    }
+}
+
 private fun openUri(
     context: Context,
     uri: String,
@@ -826,15 +908,13 @@ fun DeveloperIdentityCard(
                     prominent = true,
                 )
 
-                BrandButton(
+                BrandDrawableButton(
                     label =
                         "bkbhatinfo@gmail.com",
-                    icon =
-                        Icons.Outlined.Email,
+                    iconRes =
+                        R.drawable.ic_brand_gmail,
                     colors = gmailColors,
-                    enabled = true,
-                    modifier =
-                        Modifier.fillMaxWidth(),
+                    preserveIconColors = true,
                 ) {
                     openUri(
                         context,
@@ -842,15 +922,12 @@ fun DeveloperIdentityCard(
                     )
                 }
 
-                BrandButton(
+                BrandDrawableButton(
                     label =
                         "@officialbharatbhat",
-                    icon =
-                        Icons.Outlined.Code,
+                    iconRes =
+                        R.drawable.ic_brand_github,
                     colors = githubColors,
-                    enabled = true,
-                    modifier =
-                        Modifier.fillMaxWidth(),
                 ) {
                     openUri(
                         context,
