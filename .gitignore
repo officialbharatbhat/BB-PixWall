@@ -9,33 +9,12 @@ local.properties
 *.aab
 *.dex
 *.class
-
 *.bak
 *.bak-*
 *~
 .DS_Store
-
 # Android build outputs
-.gradle/
-build/
-app/build/
-
 # Local Android config
-local.properties
-
-# Signing secrets
-*.jks
-*.keystore
-keystore.properties
-
-# Android build outputs
-.gradle/
-build/
-app/build/
-
-# Local Android config
-local.properties
-
 # Signing secrets
 *.jks
 *.keystore
