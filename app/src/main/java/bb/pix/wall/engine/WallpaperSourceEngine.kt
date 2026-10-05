@@ -53,6 +53,18 @@ object WallpaperSourceEngine {
             settings.webSourceMode ==
                 WebSourceMode.WEB_ONLY
 
+        if (webOnly) {
+            /*
+             * Do not leave a stale Photos label visible after
+             * switching to a strict Web-only source contract.
+             */
+            RuntimeStatus.set(
+                context,
+                "active_source",
+                "Web only",
+            )
+        }
+
         var photosOk = false
         var driveOk = false
         var webOk = false

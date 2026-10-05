@@ -72,6 +72,22 @@ object WallpaperController {
 
     fun ensureNext(context: Context, settings: AppSettings = SettingsStore(context).load(), allowNetwork: Boolean = true): Boolean {
         requireStorage()
+
+        /*
+         * Capture the queue generation for this entire preparation pass.
+         *
+         * invalidateQueue() increments generation whenever the source
+         * contract changes. A network request started under Photos must
+         * never be allowed to commit its result after switching to
+         * WEB_ONLY.
+         */
+        val ensureGeneration =
+            generation.get()
+
+        fun staleEnsure(): Boolean =
+            generation.get() !=
+                ensureGeneration
+
         var made = false
         synchronized(lock) {
             if (!WallpaperFiles.nextHome.exists()) {
@@ -92,28 +108,114 @@ object WallpaperController {
             return synchronized(lock) { made || WallpaperFiles.nextHome.exists() || WallpaperFiles.nextLock.exists() }
         }
         try {
-            val candidates = WallpaperSourceEngine.collect(context, settings, allowNetwork = true)
-            if (candidates.isEmpty()) return made
+            if (staleEnsure()) {
+                log(
+                    "PREPARE stale pass stopped before collect"
+                )
+                return made
+            }
 
-            fun prepare(dest: File, avoid: Set<String>): Boolean {
-                if (dest.exists()) return true
-                val tmp = File(WallpaperFiles.backup, ".${dest.name}.${System.nanoTime()}.part")
+            val candidates =
+                WallpaperSourceEngine.collect(
+                    context,
+                    settings,
+                    allowNetwork = true,
+                )
+
+            if (staleEnsure()) {
+                log(
+                    "PREPARE stale pass stopped after collect"
+                )
+                return made
+            }
+
+            if (candidates.isEmpty()) {
+                return made
+            }
+
+            fun prepare(
+                dest: File,
+                avoid: Set<String>,
+            ): Boolean {
+                if (dest.exists()) {
+                    return true
+                }
+
+                if (staleEnsure()) {
+                    log(
+                        "PREPARE stale ${dest.name} stopped before fetch"
+                    )
+                    return false
+                }
+
+                val tmp =
+                    File(
+                        WallpaperFiles.backup,
+                        ".${dest.name}.${System.nanoTime()}.part",
+                    )
+
                 return try {
-                    fetchWithHistoryReset(context, candidates, tmp, avoid)
-                    validateImage(tmp)
-                    synchronized(lock) {
-                        if (!dest.exists()) {
-                            tmp.copyTo(dest, overwrite = true)
-                            val tm = File(tmp.absolutePath + ".meta")
-                            if (tm.exists()) tm.copyTo(File(dest.absolutePath + ".meta"), overwrite = true)
+                    fetchWithHistoryReset(
+                        context,
+                        candidates,
+                        tmp,
+                        avoid,
+                    )
+
+                    if (staleEnsure()) {
+                        log(
+                            "PREPARE stale download discarded ${dest.name}"
+                        )
+                        false
+                    } else {
+                        validateImage(tmp)
+
+                        synchronized(lock) {
+                            if (staleEnsure()) {
+                                log(
+                                    "PREPARE stale commit blocked ${dest.name}"
+                                )
+                                false
+                            } else {
+                                if (!dest.exists()) {
+                                    tmp.copyTo(
+                                        dest,
+                                        overwrite = true,
+                                    )
+
+                                    val tm =
+                                        File(
+                                            tmp.absolutePath +
+                                                ".meta"
+                                        )
+
+                                    if (tm.exists()) {
+                                        tm.copyTo(
+                                            File(
+                                                dest.absolutePath +
+                                                    ".meta"
+                                            ),
+                                            overwrite = true,
+                                        )
+                                    }
+                                }
+
+                                true
+                            }
                         }
                     }
-                    true
                 } catch (t: Throwable) {
-                    log("PREPARE ${dest.name} failed: ${t.message}")
+                    log(
+                        "PREPARE ${dest.name} failed: ${t.message}"
+                    )
                     false
                 } finally {
-                    tmp.delete(); File(tmp.absolutePath + ".meta").delete()
+                    tmp.delete()
+
+                    File(
+                        tmp.absolutePath +
+                            ".meta"
+                    ).delete()
                 }
             }
 
@@ -161,12 +263,63 @@ object WallpaperController {
             return true
         }
 
+        fun cacheSourceCompatible(
+            file: File,
+        ): Boolean {
+            if (
+                settings.webSourceMode !=
+                bb.pix.wall.web.model.WebSourceMode.WEB_ONLY
+            ) {
+                return true
+            }
+
+            val meta =
+                File(
+                    file.absolutePath +
+                        ".meta"
+                )
+
+            if (!meta.exists()) {
+                return false
+            }
+
+            val source =
+                runCatching {
+                    meta.useLines { lines ->
+                        lines.firstOrNull {
+                            it.startsWith(
+                                "source="
+                            )
+                        }
+                            ?.substringAfter(
+                                "source="
+                            )
+                            ?.trim()
+                    }
+                }.getOrNull()
+                    .orEmpty()
+
+            return source.startsWith(
+                "Web",
+                ignoreCase = true,
+            ) ||
+                source.contains(
+                    "wallhaven",
+                    ignoreCase = true,
+                )
+        }
+
         /*
          * HOT first, then WARM.
-         * cacheImageFiles() only returns actual image files, not .meta.
+         *
+         * Strict WEB_ONLY mode must never consume a Photos/Drive cache
+         * entry left behind by an older asynchronous refill.
          */
         val cached =
             cacheImageFiles()
+                .filter {
+                    cacheSourceCompatible(it)
+                }
                 .sortedWith(
                     compareBy<File> {
                         when (it.parentFile) {
@@ -356,7 +509,82 @@ object WallpaperController {
         if (!applying.compareAndSet(false, true)) return false
         lastApplyStartedAt = now
         return try {
-            val settings = SettingsStore(context).load()
+            val settings =
+                SettingsStore(context).load()
+
+            /*
+             * Defense in depth for strict Web-only mode.
+             *
+             * Even if an old build or interrupted source switch left a
+             * prepared Photos/Drive .next file behind, never apply it.
+             */
+            if (
+                settings.webSourceMode ==
+                bb.pix.wall.web.model.WebSourceMode.WEB_ONLY
+            ) {
+                synchronized(lock) {
+                    fun discardNonWebNext(
+                        file: File,
+                    ) {
+                        if (!file.exists()) {
+                            return
+                        }
+
+                        val meta =
+                            File(
+                                file.absolutePath +
+                                    ".meta"
+                            )
+
+                        val source =
+                            if (meta.exists()) {
+                                runCatching {
+                                    meta.useLines { lines ->
+                                        lines.firstOrNull {
+                                            it.startsWith(
+                                                "source="
+                                            )
+                                        }
+                                            ?.substringAfter(
+                                                "source="
+                                            )
+                                            ?.trim()
+                                    }
+                                }.getOrNull()
+                                    .orEmpty()
+                            } else {
+                                ""
+                            }
+
+                        val web =
+                            source.startsWith(
+                                "Web",
+                                ignoreCase = true,
+                            ) ||
+                                source.contains(
+                                    "wallhaven",
+                                    ignoreCase = true,
+                                )
+
+                        if (!web) {
+                            log(
+                                "NEXT WEB_ONLY rejected ${file.name} source=${source.ifBlank { "unknown" }}"
+                            )
+
+                            file.delete()
+                            meta.delete()
+                        }
+                    }
+
+                    discardNonWebNext(
+                        WallpaperFiles.nextHome
+                    )
+
+                    discardNonWebNext(
+                        WallpaperFiles.nextLock
+                    )
+                }
+            }
 
             val previousTasteIds = if (userInitiated) {
                 TasteLearning.currentIds(settings.targetMode)

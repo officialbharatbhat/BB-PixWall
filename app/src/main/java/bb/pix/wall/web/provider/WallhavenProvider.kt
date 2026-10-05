@@ -59,9 +59,9 @@ object WallhavenProvider : WebWallpaperProvider {
          */
         val maxPages =
             when (qualityMode) {
-                WebQualityMode.MAXIMUM -> 8
-                WebQualityMode.BALANCED -> 6
-                WebQualityMode.DATA_SAVER -> 4
+                WebQualityMode.MAXIMUM -> 12
+                WebQualityMode.BALANCED -> 8
+                WebQualityMode.DATA_SAVER -> 5
             }
 
         var failedPages = 0
@@ -173,16 +173,33 @@ object WallhavenProvider : WebWallpaperProvider {
         display: DisplayProfile,
         page: Int,
     ): JSONObject {
+        /*
+         * The device is ~9:20. Wallhaven exposes 9:18 as its
+         * closest portrait bucket.
+         *
+         * Fetch slightly below final device height so the API
+         * does not eliminate otherwise-large portrait sources.
+         * WebCandidateSelector still enforces the real
+         * resolution + crop-retention contract afterwards.
+         */
+        val relaxedHeight =
+            (display.portraitHeight * 0.90)
+                .toInt()
+                .coerceAtLeast(
+                    display.portraitWidth
+                )
+
         val minimum =
             "${display.portraitWidth}" +
-                "x${display.portraitHeight}"
+                "x$relaxedHeight"
 
         val rawUrl =
             "https://wallhaven.cc/api/v1/search" +
                 "?categories=111" +
                 "&purity=100" +
-                "&sorting=toplist" +
+                "&sorting=date_added" +
                 "&order=desc" +
+                "&ratios=9x18" +
                 "&atleast=$minimum" +
                 "&page=$page"
 
