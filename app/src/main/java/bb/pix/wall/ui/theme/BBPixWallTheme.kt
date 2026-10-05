@@ -20,80 +20,605 @@ import bb.pix.wall.settings.AppearanceMode
 data class BBPixWallDesignTokens(
     val cardRadius: Dp,
     val controlRadius: Dp,
+
+    /*
+     * Density is deliberately compact across every profile.
+     * Theme personality comes from geometry/motion/type,
+     * not from wasting half the display with padding.
+     */
     val spacingScale: Float,
+    val contentPadding: Dp,
+    val sectionGap: Dp,
+
     val motionDurationMs: Int,
     val easing: Easing,
+
     val sliderHeight: Dp,
     val cardBorderAlpha: Float,
+    val borderWidth: Dp,
+
     val sectionUppercase: Boolean,
+
+    /*
+     * Theme-level visual behavior consumed by reusable UI.
+     */
+    val glowEnabled: Boolean,
+    val glowSweepMs: Int,
+    val sharpControls: Boolean,
 )
 
-val LocalDesignTokens = staticCompositionLocalOf {
-    BBPixWallDesignTokens(24.dp,18.dp,1f,280,CubicBezierEasing(.2f,0f,0f,1f),4.dp,.22f,false)
-}
+val LocalDesignTokens =
+    staticCompositionLocalOf {
+        BBPixWallDesignTokens(
+            cardRadius = 14.dp,
+            controlRadius = 10.dp,
+            spacingScale = .82f,
+            contentPadding = 11.dp,
+            sectionGap = 7.dp,
+            motionDurationMs = 260,
+            easing =
+                CubicBezierEasing(
+                    .2f,
+                    0f,
+                    0f,
+                    1f,
+                ),
+            sliderHeight = 3.dp,
+            cardBorderAlpha = .22f,
+            borderWidth = 1.dp,
+            sectionUppercase = false,
+            glowEnabled = true,
+            glowSweepMs = 2600,
+            sharpControls = false,
+        )
+    }
 
-private fun profileScheme(p: ThemeProfile, dark: Boolean): ColorScheme = when (p) {
-    ThemeProfile.SIGNATURE -> if (dark) darkColorScheme(primary=Color(0xFFFF6258),secondary=Color(0xFFE7B72F),tertiary=Color(0xFFFFD86A),background=Color(0xFF101114),surface=Color(0xFF17181C),surfaceVariant=Color(0xFF23252B)) else lightColorScheme(primary=Color(0xFFB4231D),secondary=Color(0xFF8A6412),background=Color(0xFFF8F6F2),surface=Color.White,surfaceVariant=Color(0xFFF0ECE5))
-    ThemeProfile.MINIMAL -> if (dark) darkColorScheme(primary=Color(0xFFF0F0F0),secondary=Color(0xFFAAAAAA),background=Color(0xFF0C0C0C),surface=Color(0xFF121212),surfaceVariant=Color(0xFF1A1A1A)) else lightColorScheme(primary=Color(0xFF111111),secondary=Color(0xFF555555),background=Color(0xFFFCFCFC),surface=Color.White,surfaceVariant=Color(0xFFF1F1F1))
-    ThemeProfile.GLASS -> if (dark) darkColorScheme(primary=Color(0xFF9EDCFF),secondary=Color(0xFFB0F1D2),tertiary=Color(0xFFD4B9FF),background=Color(0xFF0B1117),surface=Color(0xFF121C25),surfaceVariant=Color(0xFF1B2A36)) else lightColorScheme(primary=Color(0xFF216387),secondary=Color(0xFF39745D),tertiary=Color(0xFF755A9B),background=Color(0xFFF2F8FC),surface=Color(0xFFF9FCFF),surfaceVariant=Color(0xFFE3EFF6))
-    ThemeProfile.EDITORIAL -> if (dark) darkColorScheme(primary=Color(0xFFE9B86B),secondary=Color(0xFFD86B5D),background=Color(0xFF15110D),surface=Color(0xFF1E1813),surfaceVariant=Color(0xFF2C241C)) else lightColorScheme(primary=Color(0xFF6D4720),secondary=Color(0xFF9B3C32),background=Color(0xFFFBF5E9),surface=Color(0xFFFFFBF3),surfaceVariant=Color(0xFFF0E4D2))
-    ThemeProfile.MATERIAL_YOU -> if (dark) darkColorScheme(primary=Color(0xFFCCB8FF),secondary=Color(0xFFFFB0C8),tertiary=Color(0xFFFFC66E),background=Color(0xFF121017),surface=Color(0xFF1B1821),surfaceVariant=Color(0xFF292431)) else lightColorScheme(primary=Color(0xFF675087),secondary=Color(0xFF8C4A5F),tertiary=Color(0xFF7B5900),background=Color(0xFFFFF7FF),surface=Color(0xFFFFFBFF),surfaceVariant=Color(0xFFF1E8F4))
-}
+private fun profileScheme(
+    profile: ThemeProfile,
+    dark: Boolean,
+): ColorScheme =
+    when (profile) {
+        ThemeProfile.SIGNATURE ->
+            if (dark) {
+                darkColorScheme(
+                    primary = Color(0xFF8EEBFF),
+                    secondary = Color(0xFFAE91FF),
+                    tertiary = Color(0xFFFF76BE),
+                    background = Color(0xFF080A0E),
+                    surface = Color(0xFF101319),
+                    surfaceVariant = Color(0xFF181D26),
+                    outline = Color(0xFF33404F),
+                )
+            } else {
+                lightColorScheme(
+                    primary = Color(0xFF00677A),
+                    secondary = Color(0xFF6750A4),
+                    tertiary = Color(0xFFA93674),
+                    background = Color(0xFFF8FAFC),
+                    surface = Color(0xFFFFFFFF),
+                    surfaceVariant = Color(0xFFEEF2F6),
+                    outline = Color(0xFFBCC7D1),
+                )
+            }
 
-private fun enforceReadableContent(base: ColorScheme, dark: Boolean): ColorScheme {
-    val main = if (dark) Color(0xFFF4F1F6) else Color(0xFF18151B)
-    val muted = if (dark) Color(0xFFC9C3CE) else Color(0xFF5F5964)
+        ThemeProfile.CINEMATIC ->
+            if (dark) {
+                darkColorScheme(
+                    primary = Color(0xFFECC77C),
+                    secondary = Color(0xFFCDA46B),
+                    tertiary = Color(0xFFD9D0C1),
+                    background = Color(0xFF090908),
+                    surface = Color(0xFF11110F),
+                    surfaceVariant = Color(0xFF1B1A17),
+                    outline = Color(0xFF3B352C),
+                )
+            } else {
+                lightColorScheme(
+                    primary = Color(0xFF755316),
+                    secondary = Color(0xFF795B31),
+                    tertiary = Color(0xFF60584C),
+                    background = Color(0xFFF8F5EE),
+                    surface = Color(0xFFFFFCF5),
+                    surfaceVariant = Color(0xFFF0EBDF),
+                    outline = Color(0xFFC9BEAA),
+                )
+            }
+
+        ThemeProfile.CYBER ->
+            if (dark) {
+                darkColorScheme(
+                    primary = Color(0xFF66FFD1),
+                    secondary = Color(0xFF68C7FF),
+                    tertiary = Color(0xFFB6FF65),
+                    background = Color(0xFF050908),
+                    surface = Color(0xFF09110F),
+                    surfaceVariant = Color(0xFF0E1B18),
+                    outline = Color(0xFF1E5B4C),
+                )
+            } else {
+                lightColorScheme(
+                    primary = Color(0xFF006B54),
+                    secondary = Color(0xFF006493),
+                    tertiary = Color(0xFF496700),
+                    background = Color(0xFFF5FBF8),
+                    surface = Color(0xFFFFFFFF),
+                    surfaceVariant = Color(0xFFE5F4EF),
+                    outline = Color(0xFFA8C9BF),
+                )
+            }
+
+        ThemeProfile.LUXE ->
+            if (dark) {
+                darkColorScheme(
+                    primary = Color(0xFFDCC7FF),
+                    secondary = Color(0xFFFFC0D8),
+                    tertiary = Color(0xFFFFD59A),
+                    background = Color(0xFF0C0A0E),
+                    surface = Color(0xFF151218),
+                    surfaceVariant = Color(0xFF211C25),
+                    outline = Color(0xFF403846),
+                )
+            } else {
+                lightColorScheme(
+                    primary = Color(0xFF6A4F86),
+                    secondary = Color(0xFF8B5169),
+                    tertiary = Color(0xFF765A29),
+                    background = Color(0xFFFBF8FC),
+                    surface = Color(0xFFFFFFFF),
+                    surfaceVariant = Color(0xFFF3EDF5),
+                    outline = Color(0xFFCEC3D1),
+                )
+            }
+
+        ThemeProfile.MATERIAL_PRO ->
+            if (dark) {
+                darkColorScheme(
+                    primary = Color(0xFFBFD3FF),
+                    secondary = Color(0xFFC4C7D0),
+                    tertiary = Color(0xFFDEC5FF),
+                    background = Color(0xFF101114),
+                    surface = Color(0xFF17181C),
+                    surfaceVariant = Color(0xFF22242A),
+                    outline = Color(0xFF45474F),
+                )
+            } else {
+                lightColorScheme(
+                    primary = Color(0xFF3E5F8F),
+                    secondary = Color(0xFF565E71),
+                    tertiary = Color(0xFF70558B),
+                    background = Color(0xFFF8F9FC),
+                    surface = Color(0xFFFFFFFF),
+                    surfaceVariant = Color(0xFFEFEFF4),
+                    outline = Color(0xFFC3C5CC),
+                )
+            }
+    }
+
+private fun enforceReadableContent(
+    base: ColorScheme,
+    dark: Boolean,
+): ColorScheme {
+    val main =
+        if (dark) {
+            Color(0xFFF3F2F5)
+        } else {
+            Color(0xFF17171A)
+        }
+
+    val muted =
+        if (dark) {
+            Color(0xFFC5C3C9)
+        } else {
+            Color(0xFF5D5C63)
+        }
+
     return base.copy(
         onBackground = main,
         onSurface = main,
         onSurfaceVariant = muted,
-        onPrimary = if (dark) Color(0xFF180503) else Color.White,
-        onSecondary = if (dark) Color(0xFF171006) else Color.White,
     )
 }
 
-private fun pitchBlack(base: ColorScheme, profile: ThemeProfile) = base.copy(
-    background=Color.Black,
-    surface=Color(0xFF030303),
-    surfaceVariant=Color(0xFF0A0A0A),
-    surfaceContainer=Color(0xFF060606),
-    surfaceContainerLow=Color(0xFF030303),
-    surfaceContainerHigh=Color(0xFF090909),
-    surfaceContainerHighest=Color(0xFF0B0B0B),
-    surfaceDim=Color(0xFF000000),
-    surfaceBright=Color(0xFF0D0D0D),
-    outline=Color(0xFF151515), outlineVariant=Color(0xFF0F0F0F),
-    onBackground=Color(0xFFF3F0F4), onSurface=Color(0xFFF3F0F4), onSurfaceVariant=Color(0xFFBDB7C2),
-    primary=when(profile){ThemeProfile.SIGNATURE->Color(0xFFFF5147);ThemeProfile.MINIMAL->Color(0xFFE8E8E8);ThemeProfile.GLASS->Color(0xFF8FD6FF);ThemeProfile.EDITORIAL->Color(0xFFE2A84C);ThemeProfile.MATERIAL_YOU->Color(0xFFC7AEFF)},
-    secondary=when(profile){ThemeProfile.SIGNATURE->Color(0xFFD4A927);ThemeProfile.MINIMAL->Color(0xFF9A9A9A);ThemeProfile.GLASS->Color(0xFF93E5C2);ThemeProfile.EDITORIAL->Color(0xFFD85F52);ThemeProfile.MATERIAL_YOU->Color(0xFFFF9FBD)}
-)
+private fun pitchBlack(
+    base: ColorScheme,
+): ColorScheme =
+    base.copy(
+        background = Color.Black,
+        surface = Color(0xFF030303),
+        surfaceVariant = Color(0xFF090909),
+        surfaceContainer = Color(0xFF050505),
+        surfaceContainerLow = Color(0xFF020202),
+        surfaceContainerHigh = Color(0xFF080808),
+        surfaceContainerHighest = Color(0xFF0B0B0B),
+        surfaceDim = Color.Black,
+        surfaceBright = Color(0xFF0D0D0D),
+        outline = Color(0xFF242424),
+        outlineVariant = Color(0xFF151515),
+        onBackground = Color(0xFFF5F3F6),
+        onSurface = Color(0xFFF5F3F6),
+        onSurfaceVariant = Color(0xFFC0BBC4),
+    )
 
-private fun tokens(p: ThemeProfile)=when(p){
-    ThemeProfile.SIGNATURE->BBPixWallDesignTokens(24.dp,18.dp,1f,260,CubicBezierEasing(.2f,0f,0f,1f),4.dp,.22f,false)
-    ThemeProfile.MINIMAL->BBPixWallDesignTokens(8.dp,6.dp,.78f,120,CubicBezierEasing(.2f,0f,.2f,1f),2.dp,.10f,true)
-    ThemeProfile.GLASS->BBPixWallDesignTokens(34.dp,28.dp,1.08f,420,CubicBezierEasing(.16f,1f,.3f,1f),6.dp,.34f,false)
-    ThemeProfile.EDITORIAL->BBPixWallDesignTokens(2.dp,2.dp,1.18f,200,CubicBezierEasing(.3f,0f,0f,1f),3.dp,.28f,true)
-    ThemeProfile.MATERIAL_YOU->BBPixWallDesignTokens(30.dp,22.dp,1.02f,320,CubicBezierEasing(.2f,0f,0f,1f),5.dp,.20f,false)
-}
+private fun tokens(
+    profile: ThemeProfile,
+): BBPixWallDesignTokens =
+    when (profile) {
+        ThemeProfile.SIGNATURE ->
+            BBPixWallDesignTokens(
+                cardRadius = 14.dp,
+                controlRadius = 10.dp,
+                spacingScale = .82f,
+                contentPadding = 11.dp,
+                sectionGap = 7.dp,
+                motionDurationMs = 260,
+                easing =
+                    CubicBezierEasing(
+                        .2f,
+                        0f,
+                        0f,
+                        1f,
+                    ),
+                sliderHeight = 3.dp,
+                cardBorderAlpha = .34f,
+                borderWidth = 1.dp,
+                sectionUppercase = false,
+                glowEnabled = true,
+                glowSweepMs = 2400,
+                sharpControls = false,
+            )
 
-@Composable private fun typography(p: ThemeProfile): Typography {
-    val base=Typography()
-    return when(p){
-        ThemeProfile.SIGNATURE->base.copy(headlineLarge=base.headlineLarge.copy(fontFamily=FontFamily.SansSerif,fontSize=38.sp,fontWeight=FontWeight.ExtraBold,letterSpacing=(-1).sp),titleLarge=base.titleLarge.copy(fontWeight=FontWeight.Bold),bodyLarge=base.bodyLarge.copy(fontSize=16.sp))
-        ThemeProfile.MINIMAL->base.copy(headlineLarge=base.headlineLarge.copy(fontFamily=FontFamily.Monospace,fontSize=28.sp,fontWeight=FontWeight.Medium,letterSpacing=(-.5).sp),titleLarge=base.titleLarge.copy(fontFamily=FontFamily.Monospace,fontSize=18.sp,fontWeight=FontWeight.Medium),titleMedium=base.titleMedium.copy(fontFamily=FontFamily.Monospace),bodyLarge=base.bodyLarge.copy(fontFamily=FontFamily.Monospace,fontSize=14.sp),bodyMedium=base.bodyMedium.copy(fontFamily=FontFamily.Monospace,fontSize=13.sp),labelLarge=base.labelLarge.copy(fontFamily=FontFamily.Monospace))
-        ThemeProfile.GLASS->base.copy(headlineLarge=base.headlineLarge.copy(fontFamily=FontFamily.SansSerif,fontSize=40.sp,fontWeight=FontWeight.Light,letterSpacing=1.sp),titleLarge=base.titleLarge.copy(fontWeight=FontWeight.Medium,letterSpacing=.6.sp),bodyLarge=base.bodyLarge.copy(fontSize=17.sp,fontWeight=FontWeight.Light))
-        ThemeProfile.EDITORIAL->base.copy(headlineLarge=base.headlineLarge.copy(fontFamily=FontFamily.Serif,fontSize=46.sp,fontWeight=FontWeight.Bold,letterSpacing=(-1.2).sp),titleLarge=base.titleLarge.copy(fontFamily=FontFamily.Serif,fontSize=28.sp,fontWeight=FontWeight.Bold),titleMedium=base.titleMedium.copy(fontFamily=FontFamily.Serif,fontWeight=FontWeight.Bold),bodyLarge=base.bodyLarge.copy(fontFamily=FontFamily.Serif,fontSize=18.sp),bodyMedium=base.bodyMedium.copy(fontFamily=FontFamily.Serif,fontSize=16.sp))
-        ThemeProfile.MATERIAL_YOU->base.copy(headlineLarge=base.headlineLarge.copy(fontFamily=FontFamily.SansSerif,fontSize=42.sp,fontWeight=FontWeight.Black),titleLarge=base.titleLarge.copy(fontWeight=FontWeight.Bold),bodyLarge=base.bodyLarge.copy(fontSize=16.sp))
+        ThemeProfile.CINEMATIC ->
+            BBPixWallDesignTokens(
+                cardRadius = 10.dp,
+                controlRadius = 7.dp,
+                spacingScale = .78f,
+                contentPadding = 10.dp,
+                sectionGap = 6.dp,
+                motionDurationMs = 420,
+                easing =
+                    CubicBezierEasing(
+                        .16f,
+                        1f,
+                        .3f,
+                        1f,
+                    ),
+                sliderHeight = 2.dp,
+                cardBorderAlpha = .30f,
+                borderWidth = 1.dp,
+                sectionUppercase = true,
+                glowEnabled = true,
+                glowSweepMs = 3600,
+                sharpControls = false,
+            )
+
+        ThemeProfile.CYBER ->
+            BBPixWallDesignTokens(
+                cardRadius = 4.dp,
+                controlRadius = 3.dp,
+                spacingScale = .72f,
+                contentPadding = 9.dp,
+                sectionGap = 5.dp,
+                motionDurationMs = 140,
+                easing =
+                    CubicBezierEasing(
+                        .2f,
+                        0f,
+                        .2f,
+                        1f,
+                    ),
+                sliderHeight = 2.dp,
+                cardBorderAlpha = .48f,
+                borderWidth = 1.dp,
+                sectionUppercase = true,
+                glowEnabled = true,
+                glowSweepMs = 1500,
+                sharpControls = true,
+            )
+
+        ThemeProfile.LUXE ->
+            BBPixWallDesignTokens(
+                cardRadius = 18.dp,
+                controlRadius = 13.dp,
+                spacingScale = .84f,
+                contentPadding = 12.dp,
+                sectionGap = 8.dp,
+                motionDurationMs = 520,
+                easing =
+                    CubicBezierEasing(
+                        .16f,
+                        1f,
+                        .3f,
+                        1f,
+                    ),
+                sliderHeight = 3.dp,
+                cardBorderAlpha = .20f,
+                borderWidth = 1.dp,
+                sectionUppercase = false,
+                glowEnabled = true,
+                glowSweepMs = 4200,
+                sharpControls = false,
+            )
+
+        ThemeProfile.MATERIAL_PRO ->
+            BBPixWallDesignTokens(
+                cardRadius = 12.dp,
+                controlRadius = 10.dp,
+                spacingScale = .78f,
+                contentPadding = 10.dp,
+                sectionGap = 6.dp,
+                motionDurationMs = 240,
+                easing =
+                    CubicBezierEasing(
+                        .2f,
+                        0f,
+                        0f,
+                        1f,
+                    ),
+                sliderHeight = 3.dp,
+                cardBorderAlpha = .18f,
+                borderWidth = 1.dp,
+                sectionUppercase = false,
+                glowEnabled = false,
+                glowSweepMs = 2600,
+                sharpControls = false,
+            )
+    }
+
+@Composable
+private fun typography(
+    profile: ThemeProfile,
+): Typography {
+    val base =
+        Typography()
+
+    return when (profile) {
+        ThemeProfile.SIGNATURE ->
+            base.copy(
+                headlineLarge =
+                    base.headlineLarge.copy(
+                        fontFamily =
+                            FontFamily.SansSerif,
+                        fontSize = 30.sp,
+                        fontWeight =
+                            FontWeight.ExtraBold,
+                        letterSpacing =
+                            (-.7).sp,
+                    ),
+                titleLarge =
+                    base.titleLarge.copy(
+                        fontSize = 18.sp,
+                        fontWeight =
+                            FontWeight.Bold,
+                    ),
+                bodyLarge =
+                    base.bodyLarge.copy(
+                        fontSize = 14.sp,
+                    ),
+            )
+
+        ThemeProfile.CINEMATIC ->
+            base.copy(
+                headlineLarge =
+                    base.headlineLarge.copy(
+                        fontFamily =
+                            FontFamily.Serif,
+                        fontSize = 30.sp,
+                        fontWeight =
+                            FontWeight.Bold,
+                        letterSpacing =
+                            .8.sp,
+                    ),
+                titleLarge =
+                    base.titleLarge.copy(
+                        fontFamily =
+                            FontFamily.Serif,
+                        fontSize = 18.sp,
+                        fontWeight =
+                            FontWeight.Bold,
+                        letterSpacing =
+                            .6.sp,
+                    ),
+                bodyLarge =
+                    base.bodyLarge.copy(
+                        fontSize = 14.sp,
+                    ),
+            )
+
+        ThemeProfile.CYBER ->
+            base.copy(
+                headlineLarge =
+                    base.headlineLarge.copy(
+                        fontFamily =
+                            FontFamily.Monospace,
+                        fontSize = 26.sp,
+                        fontWeight =
+                            FontWeight.Bold,
+                    ),
+                titleLarge =
+                    base.titleLarge.copy(
+                        fontFamily =
+                            FontFamily.Monospace,
+                        fontSize = 16.sp,
+                        fontWeight =
+                            FontWeight.Bold,
+                    ),
+                titleMedium =
+                    base.titleMedium.copy(
+                        fontFamily =
+                            FontFamily.Monospace,
+                    ),
+                bodyLarge =
+                    base.bodyLarge.copy(
+                        fontFamily =
+                            FontFamily.Monospace,
+                        fontSize = 13.sp,
+                    ),
+                bodyMedium =
+                    base.bodyMedium.copy(
+                        fontFamily =
+                            FontFamily.Monospace,
+                        fontSize = 12.sp,
+                    ),
+                labelLarge =
+                    base.labelLarge.copy(
+                        fontFamily =
+                            FontFamily.Monospace,
+                    ),
+            )
+
+        ThemeProfile.LUXE ->
+            base.copy(
+                headlineLarge =
+                    base.headlineLarge.copy(
+                        fontFamily =
+                            FontFamily.Serif,
+                        fontSize = 31.sp,
+                        fontWeight =
+                            FontWeight.SemiBold,
+                        letterSpacing =
+                            .2.sp,
+                    ),
+                titleLarge =
+                    base.titleLarge.copy(
+                        fontFamily =
+                            FontFamily.Serif,
+                        fontSize = 19.sp,
+                        fontWeight =
+                            FontWeight.SemiBold,
+                    ),
+                bodyLarge =
+                    base.bodyLarge.copy(
+                        fontSize = 14.sp,
+                    ),
+            )
+
+        ThemeProfile.MATERIAL_PRO ->
+            base.copy(
+                headlineLarge =
+                    base.headlineLarge.copy(
+                        fontSize = 29.sp,
+                        fontWeight =
+                            FontWeight.Bold,
+                    ),
+                titleLarge =
+                    base.titleLarge.copy(
+                        fontSize = 18.sp,
+                        fontWeight =
+                            FontWeight.SemiBold,
+                    ),
+                bodyLarge =
+                    base.bodyLarge.copy(
+                        fontSize = 14.sp,
+                    ),
+            )
     }
 }
 
-@Composable fun BBPixWallTheme(profile: ThemeProfile, appearanceMode: AppearanceMode, content: @Composable () -> Unit){
-    val context=LocalContext.current; val systemDark=isSystemInDarkTheme()
-    val dark=when(appearanceMode){AppearanceMode.LIGHT->false;AppearanceMode.DARK,AppearanceMode.PITCH_BLACK->true;AppearanceMode.SYSTEM,AppearanceMode.SYSTEM_MONET->systemDark}
-    var colors=if(appearanceMode==AppearanceMode.SYSTEM_MONET && Build.VERSION.SDK_INT>=Build.VERSION_CODES.S){if(dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)} else profileScheme(profile,dark)
-    colors = enforceReadableContent(colors, dark)
-    if(appearanceMode==AppearanceMode.PITCH_BLACK) colors=pitchBlack(colors,profile)
-    CompositionLocalProvider(LocalDesignTokens provides tokens(profile)){
-        MaterialTheme(colorScheme=colors,typography=typography(profile),shapes=MaterialTheme.shapes.copy(large=RoundedCornerShape(LocalDesignTokens.current.cardRadius),medium=RoundedCornerShape(LocalDesignTokens.current.controlRadius),small=RoundedCornerShape((LocalDesignTokens.current.controlRadius.value*.55f).dp)),content=content)
+@Composable
+fun BBPixWallTheme(
+    profile: ThemeProfile,
+    appearanceMode: AppearanceMode,
+    content: @Composable () -> Unit,
+) {
+    val context =
+        LocalContext.current
+
+    val systemDark =
+        isSystemInDarkTheme()
+
+    val dark =
+        when (appearanceMode) {
+            AppearanceMode.LIGHT ->
+                false
+
+            AppearanceMode.DARK,
+            AppearanceMode.PITCH_BLACK ->
+                true
+
+            AppearanceMode.SYSTEM,
+            AppearanceMode.SYSTEM_MONET ->
+                systemDark
+        }
+
+    var colors =
+        if (
+            appearanceMode ==
+                AppearanceMode.SYSTEM_MONET &&
+            Build.VERSION.SDK_INT >=
+                Build.VERSION_CODES.S
+        ) {
+            if (dark) {
+                dynamicDarkColorScheme(
+                    context
+                )
+            } else {
+                dynamicLightColorScheme(
+                    context
+                )
+            }
+        } else {
+            profileScheme(
+                profile,
+                dark,
+            )
+        }
+
+    colors =
+        enforceReadableContent(
+            colors,
+            dark,
+        )
+
+    if (
+        appearanceMode ==
+        AppearanceMode.PITCH_BLACK
+    ) {
+        colors =
+            pitchBlack(
+                colors
+            )
+    }
+
+    val designTokens =
+        tokens(
+            profile
+        )
+
+    CompositionLocalProvider(
+        LocalDesignTokens provides
+            designTokens
+    ) {
+        MaterialTheme(
+            colorScheme = colors,
+            typography =
+                typography(profile),
+            shapes =
+                MaterialTheme.shapes.copy(
+                    large =
+                        RoundedCornerShape(
+                            designTokens.cardRadius
+                        ),
+                    medium =
+                        RoundedCornerShape(
+                            designTokens.controlRadius
+                        ),
+                    small =
+                        RoundedCornerShape(
+                            if (
+                                designTokens.sharpControls
+                            ) {
+                                2.dp
+                            } else {
+                                (
+                                    designTokens
+                                        .controlRadius
+                                        .value *
+                                        .55f
+                                ).dp
+                            }
+                        ),
+                ),
+            content = content,
+        )
     }
 }

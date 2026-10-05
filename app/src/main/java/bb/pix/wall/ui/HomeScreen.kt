@@ -14,6 +14,15 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.draw.rotate
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
@@ -99,28 +108,29 @@ fun HomeScreen(
     Box(Modifier.fillMaxSize().background(themeBackdrop(selectedTheme))) {
         Scaffold(containerColor = Color.Transparent, contentColor = MaterialTheme.colorScheme.onBackground) { padding ->
         Column(
-            modifier = Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState())
-                .padding(horizontal = (20 * tokens.spacingScale).dp, vertical = 24.dp),
-            verticalArrangement = Arrangement.spacedBy(spacing),
+            modifier =
+                Modifier
+                    .fillMaxSize()
+                    .padding(padding)
+                    .verticalScroll(rememberScrollState())
+                    .padding(
+                        horizontal = 0.dp,
+                        vertical = 8.dp,
+                    ),
+            verticalArrangement =
+                Arrangement.spacedBy(tokens.sectionGap),
         ) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text("BB-PixWall", style = MaterialTheme.typography.headlineLarge, color = MaterialTheme.colorScheme.onBackground, modifier = Modifier.weight(1f))
-                Surface(
-                    shape = RoundedCornerShape(999.dp),
-                    color = if (settings.engineMode == EngineMode.ADVANCED) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant
-                ) {
-                    Row(Modifier.padding(horizontal = 11.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Box(Modifier.size(7.dp).clip(RoundedCornerShape(99.dp)).background(if (settings.engineMode == EngineMode.ADVANCED) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant))
-                        Spacer(Modifier.width(7.dp))
-                        Text(settings.engineMode.label, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
-                    }
-                }
-            }
-            Text("Reliable wallpaper rotation with mirrored cloud sources and local fallback.", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            PremiumAppHeader(
+                engineMode = settings.engineMode,
+                theme = selectedTheme,
+            )
 
             PreviewGrid(wallpaperState, onRefreshPreviews, onPrepareNext)
 
-            SectionTitle("Sources")
+            CollapsibleSection(
+                title = "Sources",
+                summary = "Cloud • Local • Health",
+            ) {
             SourceConfigCard(
                 title = "Google Photos",
                 subtitle = "Primary public shared-album source",
@@ -164,7 +174,12 @@ fun HomeScreen(
                 }
             }
 
-            SectionTitle("Web Discovery")
+            }
+
+            CollapsibleSection(
+                title = "Web Discovery",
+                summary = "Source • Quality • Web",
+            ) {
             Card(Modifier.fillMaxWidth()) {
                 Column(
                     Modifier.padding(18.dp),
@@ -320,7 +335,12 @@ fun HomeScreen(
                 }
             }
 
-            SectionTitle("Discovery Categories")
+            }
+
+            CollapsibleSection(
+                title = "Discovery Categories",
+                summary = "Active category • Custom",
+            ) {
 
             Card(
                 Modifier.fillMaxWidth()
@@ -1060,7 +1080,12 @@ fun HomeScreen(
                 }
             }
 
-            SectionTitle("Wallpaper order")
+            }
+
+            CollapsibleSection(
+                title = "Wallpaper order",
+                summary = "Rotation strategy",
+            ) {
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     SettingHeader(Icons.Outlined.Sort, "Choose how the next wallpaper is picked")
@@ -1079,7 +1104,12 @@ fun HomeScreen(
                 }
             }
 
-            SectionTitle("Engine mode")
+            }
+
+            CollapsibleSection(
+                title = "Engine mode",
+                summary = "Standard • Advanced",
+            ) {
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     SettingHeader(Icons.Outlined.Speed, "Standard / Advance")
@@ -1094,7 +1124,12 @@ fun HomeScreen(
                 }
             }
 
-            SectionTitle("Network & cache")
+            }
+
+            CollapsibleSection(
+                title = "Network & cache",
+                summary = "Wi-Fi • Cache",
+            ) {
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                     SettingSwitch("Data Saver", "When ON, cloud sources request reduced-resolution images where supported. Local wallpapers stay untouched.", settings.dataSaverEnabled) { onSettingsChange(settings.copy(dataSaverEnabled = it)) }
@@ -1110,7 +1145,12 @@ fun HomeScreen(
                 }
             }
 
-            SectionTitle("Background reliability")
+            }
+
+            CollapsibleSection(
+                title = "Background reliability",
+                summary = "Recovery • Background",
+            ) {
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     SettingSwitch("Background guard", "Keep the automation foreground service sticky; Advance mode also applies root-only app-specific background tuning.", settings.backgroundGuardEnabled) { onSettingsChange(settings.copy(backgroundGuardEnabled = it)) }
@@ -1134,7 +1174,12 @@ fun HomeScreen(
                 }
             }
 
-            SectionTitle("Wallpaper automation")
+            }
+
+            CollapsibleSection(
+                title = "Wallpaper automation",
+                summary = "Schedule • Trigger",
+            ) {
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                     SettingSwitch("Automatic wallpaper change", "Run the selected trigger automatically.", settings.autoChange) { onSettingsChange(settings.copy(autoChange = it)) }
@@ -1163,7 +1208,12 @@ fun HomeScreen(
                 }
             }
 
-            SectionTitle("Wallpaper target")
+            }
+
+            CollapsibleSection(
+                title = "Wallpaper target",
+                summary = "Home • Lock",
+            ) {
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     SettingHeader(Icons.Outlined.Home, "Where should it change?")
@@ -1178,7 +1228,12 @@ fun HomeScreen(
                 }
             }
 
-            SectionTitle("Quality & aspect")
+            }
+
+            CollapsibleSection(
+                title = "Quality & aspect",
+                summary = "Smart Crop • Quality",
+            ) {
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     SettingHeader(Icons.Outlined.HighQuality, "9:20 quality-first pipeline")
@@ -1195,7 +1250,12 @@ fun HomeScreen(
                 }
             }
 
-            SectionTitle("Blur")
+            }
+
+            CollapsibleSection(
+                title = "Blur",
+                summary = "Home • Lock blur",
+            ) {
             BlurCard("Home screen blur", settings.homeBlurEnabled, settings.homeBlurRadius,
                 { onSettingsChange(settings.copy(homeBlurEnabled = it)) },
                 { onSettingsChange(settings.copy(homeBlurRadius = it)) })
@@ -1203,7 +1263,12 @@ fun HomeScreen(
                 { onSettingsChange(settings.copy(lockBlurEnabled = it)) },
                 { onSettingsChange(settings.copy(lockBlurRadius = it)) })
 
-            SectionTitle("Remote access")
+            }
+
+            CollapsibleSection(
+                title = "Remote access",
+                summary = "LAN dashboard",
+            ) {
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                     SettingHeader(Icons.Outlined.Language, "Wi-Fi dashboard")
@@ -1228,7 +1293,12 @@ fun HomeScreen(
                 }
             }
 
-            SectionTitle("Appearance")
+            }
+
+            CollapsibleSection(
+                title = "Appearance",
+                summary = "Mode • Theme",
+            ) {
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     SettingHeader(Icons.Outlined.Contrast, "Color mode")
@@ -1249,7 +1319,12 @@ fun HomeScreen(
                 }
             }
 
-            SectionTitle("Quick Settings tiles")
+            }
+
+            CollapsibleSection(
+                title = "Quick Settings tiles",
+                summary = "Next • Save • Blur • Web",
+            ) {
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     TileInfo(Icons.Outlined.SkipNext, "Next Wall", "Apply the queued wallpaper using the selected target mode.")
@@ -1260,7 +1335,12 @@ fun HomeScreen(
                 }
             }
 
-            SectionTitle("Diagnostics")
+            }
+
+            CollapsibleSection(
+                title = "Diagnostics",
+                summary = "Engine • Cache • Runtime",
+            ) {
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
                     Text("Engine: ${settings.engineMode.label}", fontWeight = FontWeight.SemiBold)
@@ -1301,6 +1381,10 @@ fun HomeScreen(
                 }
             }
 
+            CollapsibleSection(
+                title = "Backup & Restore",
+                summary = "Settings • Learning",
+            ) {
             Card(
                 Modifier.fillMaxWidth()
             ) {
@@ -1432,6 +1516,10 @@ fun HomeScreen(
                             MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
+            }
+            }
+
+
             }
 
             SectionTitle("Developer")
@@ -1569,6 +1657,348 @@ private fun DiscoveryCategoryRow(
     }
 }
 
+
+@Composable
+private fun PremiumAppHeader(
+    engineMode: EngineMode,
+    theme: ThemeProfile,
+) {
+    val context = LocalContext.current
+    val tokens = LocalDesignTokens.current
+
+    val version =
+        remember {
+            runCatching {
+                context.packageManager
+                    .getPackageInfo(
+                        context.packageName,
+                        0,
+                    )
+                    .versionName
+                    ?: "dev"
+            }.getOrDefault("dev")
+        }
+
+    val transition =
+        rememberInfiniteTransition(
+            label = "bb_header_glow"
+        )
+
+    val glow by transition.animateFloat(
+        initialValue = .18f,
+        targetValue = .85f,
+        animationSpec =
+            infiniteRepeatable(
+                animation =
+                    tween(
+                        durationMillis =
+                            tokens.glowSweepMs,
+                        easing = tokens.easing,
+                    ),
+                repeatMode =
+                    RepeatMode.Reverse,
+            ),
+        label = "header_glow",
+    )
+
+    val accent =
+        when (theme) {
+            ThemeProfile.SIGNATURE ->
+                MaterialTheme.colorScheme.primary
+
+            ThemeProfile.CINEMATIC ->
+                MaterialTheme.colorScheme.tertiary
+
+            ThemeProfile.CYBER ->
+                MaterialTheme.colorScheme.primary
+
+            ThemeProfile.LUXE ->
+                MaterialTheme.colorScheme.secondary
+
+            ThemeProfile.MATERIAL_PRO ->
+                MaterialTheme.colorScheme.primary
+        }
+
+    Surface(
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp),
+        shape =
+            RoundedCornerShape(
+                tokens.cardRadius
+            ),
+        color =
+            MaterialTheme.colorScheme
+                .surface
+                .copy(alpha = .92f),
+        border =
+            androidx.compose.foundation.BorderStroke(
+                tokens.borderWidth,
+                accent.copy(
+                    alpha =
+                        if (tokens.glowEnabled) {
+                            .18f + glow * .42f
+                        } else {
+                            .16f
+                        }
+                ),
+            ),
+    ) {
+        Column(
+            modifier =
+                Modifier.padding(
+                    horizontal = 12.dp,
+                    vertical = 9.dp,
+                ),
+            verticalArrangement =
+                Arrangement.spacedBy(3.dp),
+        ) {
+            Row(
+                modifier =
+                    Modifier.fillMaxWidth(),
+                verticalAlignment =
+                    Alignment.CenterVertically,
+            ) {
+                Text(
+                    "BB-PixWall",
+                    style =
+                        MaterialTheme.typography
+                            .headlineLarge,
+                    modifier =
+                        Modifier.weight(1f),
+                )
+
+                Surface(
+                    shape =
+                        RoundedCornerShape(999.dp),
+                    color =
+                        MaterialTheme.colorScheme
+                            .surfaceVariant,
+                ) {
+                    Text(
+                        "v$version",
+                        modifier =
+                            Modifier.padding(
+                                horizontal = 8.dp,
+                                vertical = 4.dp,
+                            ),
+                        style =
+                            MaterialTheme.typography
+                                .labelSmall,
+                    )
+                }
+            }
+
+            Row(
+                verticalAlignment =
+                    Alignment.CenterVertically,
+            ) {
+                Box(
+                    Modifier
+                        .size(6.dp)
+                        .clip(
+                            RoundedCornerShape(
+                                99.dp
+                            )
+                        )
+                        .background(
+                            if (
+                                engineMode ==
+                                EngineMode.ADVANCED
+                            ) {
+                                accent
+                            } else {
+                                MaterialTheme
+                                    .colorScheme
+                                    .onSurfaceVariant
+                            }
+                        )
+                )
+
+                Spacer(
+                    Modifier.width(6.dp)
+                )
+
+                Text(
+                    engineMode.label,
+                    style =
+                        MaterialTheme.typography
+                            .labelMedium,
+                    color =
+                        MaterialTheme.colorScheme
+                            .onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun CollapsibleSection(
+    title: String,
+    summary: String = "",
+    initiallyExpanded: Boolean = false,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    val tokens =
+        LocalDesignTokens.current
+
+    var expanded by
+        rememberSaveable(title) {
+            mutableStateOf(
+                initiallyExpanded
+            )
+        }
+
+    val rotation by
+        androidx.compose.animation.core
+            .animateFloatAsState(
+                targetValue =
+                    if (expanded) 180f else 0f,
+                animationSpec =
+                    tween(
+                        durationMillis =
+                            tokens.motionDurationMs,
+                        easing = tokens.easing,
+                    ),
+                label =
+                    "accordion_$title",
+            )
+
+    Surface(
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 0.dp)
+                .animateContentSize(
+                    animationSpec =
+                        tween(
+                            durationMillis =
+                                tokens.motionDurationMs,
+                            easing =
+                                tokens.easing,
+                        )
+                ),
+        shape =
+            RoundedCornerShape(
+                if (tokens.sharpControls) {
+                    0.dp
+                } else {
+                    tokens.cardRadius
+                }
+            ),
+        color =
+            MaterialTheme.colorScheme
+                .surface
+                .copy(alpha = .90f),
+        border =
+            androidx.compose.foundation.BorderStroke(
+                tokens.borderWidth,
+                MaterialTheme.colorScheme
+                    .outline
+                    .copy(
+                        alpha =
+                            tokens.cardBorderAlpha
+                    ),
+            ),
+    ) {
+        Column {
+            Row(
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            expanded =
+                                !expanded
+                        }
+                        .padding(
+                            horizontal =
+                                tokens.contentPadding,
+                            vertical = 10.dp,
+                        ),
+                verticalAlignment =
+                    Alignment.CenterVertically,
+            ) {
+                Column(
+                    Modifier.weight(1f)
+                ) {
+                    Text(
+                        if (
+                            tokens.sectionUppercase
+                        ) {
+                            title.uppercase()
+                        } else {
+                            title
+                        },
+                        style =
+                            MaterialTheme.typography
+                                .titleMedium,
+                        fontWeight =
+                            FontWeight.SemiBold,
+                    )
+
+                    if (
+                        !expanded &&
+                        summary.isNotBlank()
+                    ) {
+                        Text(
+                            summary,
+                            style =
+                                MaterialTheme
+                                    .typography
+                                    .bodySmall,
+                            color =
+                                MaterialTheme
+                                    .colorScheme
+                                    .onSurfaceVariant,
+                            maxLines = 1,
+                        )
+                    }
+                }
+
+                Icon(
+                    imageVector =
+                        Icons.Outlined
+                            .KeyboardArrowDown,
+                    contentDescription =
+                        if (expanded) {
+                            "Collapse"
+                        } else {
+                            "Expand"
+                        },
+                    modifier =
+                        Modifier.rotate(rotation),
+                )
+            }
+
+            AnimatedVisibility(
+                visible = expanded
+            ) {
+                Column(
+                    modifier =
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(
+                                start =
+                                    tokens
+                                        .contentPadding,
+                                end =
+                                    tokens
+                                        .contentPadding,
+                                bottom = 10.dp,
+                            ),
+                    verticalArrangement =
+                        Arrangement.spacedBy(
+                            tokens.sectionGap
+                        ),
+                    content = content,
+                )
+            }
+        }
+    }
+}
+
 @Composable private fun SectionTitle(text: String) { val t = LocalDesignTokens.current; Text(if (t.sectionUppercase) text.uppercase() else text, style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onBackground) }
 @Composable private fun SettingHeader(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String) { Row(verticalAlignment = Alignment.CenterVertically) { Icon(icon, null); Spacer(Modifier.width(10.dp)); Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold) } }
 @Composable private fun SettingSwitch(title: String, subtitle: String, checked: Boolean, onChecked: (Boolean) -> Unit) { Row(verticalAlignment = Alignment.CenterVertically) { Column(Modifier.weight(1f)) { Text(title, fontWeight = FontWeight.SemiBold); Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }; Switch(checked, onChecked) } }
@@ -1600,10 +2030,10 @@ private fun DiscoveryCategoryRow(
     val c = MaterialTheme.colorScheme
     return when (theme) {
         ThemeProfile.SIGNATURE -> Brush.verticalGradient(listOf(c.background, c.primary.copy(alpha = .055f), c.background))
-        ThemeProfile.MINIMAL -> Brush.linearGradient(listOf(c.background, c.background))
-        ThemeProfile.GLASS -> Brush.verticalGradient(listOf(c.background, c.primary.copy(alpha = .10f), c.tertiary.copy(alpha = .07f), c.background))
-        ThemeProfile.EDITORIAL -> Brush.verticalGradient(listOf(c.background, c.secondary.copy(alpha = .045f), c.background))
-        ThemeProfile.MATERIAL_YOU -> Brush.verticalGradient(listOf(c.background, c.primary.copy(alpha = .08f), c.secondary.copy(alpha = .06f)))
+        ThemeProfile.CINEMATIC -> Brush.linearGradient(listOf(c.background, c.background))
+        ThemeProfile.CYBER -> Brush.verticalGradient(listOf(c.background, c.primary.copy(alpha = .10f), c.tertiary.copy(alpha = .07f), c.background))
+        ThemeProfile.LUXE -> Brush.verticalGradient(listOf(c.background, c.secondary.copy(alpha = .045f), c.background))
+        ThemeProfile.MATERIAL_PRO -> Brush.verticalGradient(listOf(c.background, c.primary.copy(alpha = .08f), c.secondary.copy(alpha = .06f)))
     }
 }
 @Composable private fun rememberPreviewBitmap(path: String?): android.graphics.Bitmap? {

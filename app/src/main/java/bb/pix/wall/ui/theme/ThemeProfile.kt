@@ -4,9 +4,28 @@ enum class ThemeProfile(
     val title: String,
     val subtitle: String,
 ) {
-    SIGNATURE("Signature", "Balanced, premium and calm"),
-    MINIMAL("Minimal", "Compact, quiet and distraction-free"),
-    GLASS("Glass", "Soft depth with restrained translucency"),
-    EDITORIAL("Editorial", "Strong type and generous spacing"),
-    MATERIAL_YOU("Material You+", "Adaptive Android color language"),
+    SIGNATURE(
+        "Signature Neon",
+        "Animated premium edge light and balanced controls",
+    ),
+
+    CINEMATIC(
+        "Cinematic",
+        "Dark-film typography, restrained glow and slow motion",
+    ),
+
+    CYBER(
+        "Cyber",
+        "Sharp technical geometry and fast digital accents",
+    ),
+
+    LUXE(
+        "Luxe",
+        "Elegant surfaces, soft motion and premium spacing",
+    ),
+
+    MATERIAL_PRO(
+        "Material Pro",
+        "Compact Android-native design with adaptive color",
+    ),
 }
