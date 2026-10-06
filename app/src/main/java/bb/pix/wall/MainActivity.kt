@@ -18,7 +18,7 @@ import bb.pix.wall.root.RootAccess
 import bb.pix.wall.settings.EngineMode
 import bb.pix.wall.settings.AppSettings
 import bb.pix.wall.settings.SettingsStore
-import bb.pix.wall.ui.HomeScreen
+import bb.pix.wall.ui.LiteHomeScreen
 import bb.pix.wall.ui.theme.BBPixWallTheme
 import bb.pix.wall.ui.theme.ThemeProfile
 
@@ -36,50 +36,89 @@ class MainActivity : ComponentActivity() {
             runtime.edit().putBoolean("blur_master", false).putInt("migration_version", 9).apply()
         }
 
-        val prefs = getSharedPreferences("bb_pixwall_ui", MODE_PRIVATE)
-        val initialProfile = runCatching { ThemeProfile.valueOf(prefs.getString("theme", ThemeProfile.SIGNATURE.name)!!) }
-            .getOrDefault(ThemeProfile.SIGNATURE)
-
         setContent {
-            val store = remember { SettingsStore(applicationContext) }
-            var profile by remember { mutableStateOf(initialProfile) }
-            var settings by remember { mutableStateOf(store.load()) }
-            var previewTick by remember { mutableStateOf(0) }
+            val store =
+                remember {
+                    SettingsStore(
+                        applicationContext
+                    )
+                }
 
-            BBPixWallTheme(profile = profile, appearanceMode = settings.appearanceMode) {
-                HomeScreen(
-                    selectedTheme = profile,
-                    onThemeSelected = {
-                        profile = it
-                        prefs.edit().putString("theme", it.name).apply()
-                    },
+            var settings by
+                remember {
+                    mutableStateOf(
+                        store.load()
+                    )
+                }
+
+            BBPixWallTheme(
+                profile =
+                    ThemeProfile.MATERIAL_PRO,
+                appearanceMode =
+                    settings.appearanceMode,
+            ) {
+                LiteHomeScreen(
                     settings = settings,
-                    wallpaperState = remember(previewTick) { WallpaperController.state() },
-                    onSettingsChange = { updated ->
-                        val previous = settings
+                    onSettingsChange = { requested ->
+                        /*
+                         * Lite deliberately hard-disables every heavy
+                         * intelligence system. Only fetch/order/apply,
+                         * blur, remote and root background tuning remain.
+                         */
+                        val updated =
+                            requested.copy(
+                                decisionEngineEnabled = false,
+                                smartPairingEnabled = false,
+                                moodEngineEnabled = false,
+                                moodAutoReactEnabled = false,
+                                moodWeatherEnabled = false,
+                                sourcePriorityMode =
+                                    bb.pix.wall.settings.SourcePriorityMode.PHOTOS_FIRST,
+                                cacheTarget =
+                                    requested.cacheTarget
+                                        .coerceIn(4, 8),
+                            )
+
+                        val previous =
+                            settings
+
                         settings = updated
                         store.save(updated)
-                        handleSettingsMutation(previous, updated) { previewTick++ }
-                    },
-                    onRefreshPreviews = { previewTick++ },
-                    onPrepareNext = {
-                        Thread {
-                            bb.pix.wall.engine.WallpaperSourceEngine.invalidateCloudIndex()
-                            runCatching { WallpaperController.primeCache(applicationContext, settings) }
-                            runCatching { WallpaperController.ensureNext(applicationContext, settings) }
-                            runOnUiThread { previewTick++ }
-                        }.start()
+
+                        handleSettingsMutation(
+                            previous,
+                            updated,
+                        ) {}
                     },
                     onRequestAdvanced = {
                         Thread {
-                            val result = RootAccess.requestAndTune(applicationContext)
+                            val result =
+                                RootAccess.requestAndTune(
+                                    applicationContext
+                                )
+
                             if (result.granted) {
-                                val updated = settings.copy(engineMode = EngineMode.ADVANCED)
+                                val updated =
+                                    settings.copy(
+                                        engineMode =
+                                            EngineMode.ADVANCED,
+                                        decisionEngineEnabled =
+                                            false,
+                                        smartPairingEnabled =
+                                            false,
+                                        moodEngineEnabled =
+                                            false,
+                                        moodAutoReactEnabled =
+                                            false,
+                                        moodWeatherEnabled =
+                                            false,
+                                    )
+
                                 store.save(updated)
-                                runCatching { WallpaperController.primeCache(applicationContext, updated) }
-                                runOnUiThread { settings = updated; previewTick++ }
-                            } else {
-                                runOnUiThread { settings = settings.copy(engineMode = EngineMode.STANDARD) }
+
+                                runOnUiThread {
+                                    settings = updated
+                                }
                             }
                         }.start()
                     },
@@ -96,58 +135,16 @@ class MainActivity : ComponentActivity() {
                     applicationContext
                 ).load()
 
-            /*
-             * Always make the prepared queue available locally.
-             * When automation is active its foreground service owns cloud
-             * maintenance, avoiding duplicate cache/root work at app launch.
-             */
-            runCatching {
-                WallpaperController.ensureNext(
-                    applicationContext,
-                    latest,
-                    allowNetwork = false,
-                )
-            }
-
-            if (!latest.autoChange) {
-                bb.pix.wall.engine.EngineExecutors.io {
-                    val target =
-                        latest.cacheTarget
-                            .coerceIn(4, 36)
-
-                    val lastPrime =
-                        bb.pix.wall.engine.RuntimeStatus
-                            .getLong(
-                                applicationContext,
-                                "cache_prime_finished_at",
-                                0L,
-                            )
-
-                    if (
-                        WallpaperController.cacheCount() <
-                        target &&
-                        System.currentTimeMillis() -
-                            lastPrime >=
-                        10L * 60L * 1000L
-                    ) {
-                        runCatching {
-                            WallpaperController.primeCache(
-                                applicationContext,
-                                latest,
-                            )
-                        }
-                    }
-
-                    runCatching {
-                        WallpaperController.ensureNext(
-                            applicationContext,
-                            latest,
-                            allowNetwork = true,
-                        )
-                    }
+            bb.pix.wall.engine.EngineExecutors.io {
+                runCatching {
+                    WallpaperController.ensureNext(
+                        applicationContext,
+                        latest,
+                        allowNetwork = true,
+                    )
                 }
             }
-        }, 2500, java.util.concurrent.TimeUnit.MILLISECONDS)
+        }, 1200L, java.util.concurrent.TimeUnit.MILLISECONDS)
     }
 
     private fun handleSettingsMutation(previous: AppSettings, updated: AppSettings, refresh: () -> Unit) {
