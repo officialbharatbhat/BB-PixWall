@@ -24,7 +24,7 @@ class SettingsStore(context: Context) {
                 prefs.getInt(
                     "interval_minutes",
                     30,
-                ).coerceIn(1, 240),
+                ).coerceIn(1, 300),
             targetMode =
                 enumOrDefault(
                     prefs.getString(
@@ -160,7 +160,7 @@ class SettingsStore(context: Context) {
             cacheTarget =
                 prefs.getInt(
                     "cache_target",
-                    8,
+                    4,
                 ).coerceIn(4, 36),
             backgroundGuardEnabled =
                 prefs.getBoolean(
@@ -206,12 +206,12 @@ class SettingsStore(context: Context) {
                         "source_priority_mode",
                         null,
                     ),
-                    SourcePriorityMode.SMART_BALANCED,
+                    SourcePriorityMode.PHOTOS_FIRST,
                 ),
             smartPairingEnabled =
                 prefs.getBoolean(
                     "smart_pairing_enabled",
-                    true,
+                    false,
                 ),
             cacheMaxMb =
                 prefs.getInt(
@@ -316,7 +316,7 @@ class SettingsStore(context: Context) {
             decisionEngineEnabled =
                 prefs.getBoolean(
                     "decision_engine_enabled",
-                    true,
+                    false,
                 ),
         )
 
@@ -324,7 +324,7 @@ class SettingsStore(context: Context) {
         prefs.edit()
             .putBoolean("auto_change", settings.autoChange)
             .putString("trigger_mode", settings.triggerMode.name)
-            .putInt("interval_minutes", settings.intervalMinutes.coerceIn(1, 240))
+            .putInt("interval_minutes", settings.intervalMinutes.coerceIn(1, 300))
             .putString("target_mode", settings.targetMode.name)
             .putString("wallpaper_order", settings.wallpaperOrder.name)
             .putString("engine_mode", settings.engineMode.name)
