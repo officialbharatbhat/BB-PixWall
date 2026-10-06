@@ -4,7 +4,6 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import bb.pix.wall.network.LanServerService
-import bb.pix.wall.engine.AutonomousIntelligenceEngine
 import bb.pix.wall.settings.SettingsStore
 
 class BootReceiver : BroadcastReceiver() {
@@ -15,12 +14,6 @@ class BootReceiver : BroadcastReceiver() {
         Thread {
             try {
                 val settings = SettingsStore(context).load()
-                runCatching {
-                    AutonomousIntelligenceEngine.onBoot(
-                        context,
-                        settings,
-                    )
-                }
                 if (settings.autoChange) runCatching { context.startForegroundService(Intent(context, WallpaperAutomationService::class.java)) }
                 if (settings.lanEnabled) runCatching { context.startForegroundService(Intent(context, LanServerService::class.java)) }
             } finally { pending.finish() }
