@@ -22,11 +22,11 @@ android {
     compileSdk = 37
 
     defaultConfig {
-        applicationId = "bb.pix.wall"
+        applicationId = "bb.pixwall.lite"
         minSdk = 35
         targetSdk = 37
-        versionCode = 14
-        versionName = "1.1.0"
+        versionCode = 1
+        versionName = "1.0.0"
     }
 
     buildFeatures {
