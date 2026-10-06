@@ -3,8 +3,8 @@ package bb.pix.wall.engine
 import java.io.File
 
 object WallpaperFiles {
-    val root = File("/sdcard/wallpaper")
-    val local = File(root, "local")
+    val root = File("/sdcard/BB-PixWall-Lite")
+    val local = File("/sdcard/wallpaper")
     val backup = File(root, "backup")
     val cache = File(root, "cache")
     val hotCache = File(cache, "hot")
