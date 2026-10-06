@@ -444,9 +444,6 @@ fun invalidateQueue() =
         } finally {
             preparingNext.set(false)
         }
-        if (WallpaperFiles.nextHome.exists() || WallpaperFiles.nextLock.exists()) {
-            EngineExecutors.io { runCatching { primeCache(context, settings) } }
-        }
         return made || WallpaperFiles.nextHome.exists() || WallpaperFiles.nextLock.exists()
     }
 
@@ -1004,63 +1001,12 @@ fun invalidateQueue() =
                 )
                 RuntimeStatus.setLong(context, "last_change", System.currentTimeMillis())
                 EngineExecutors.io {
-                    /*
-                     * First promote already-downloaded cache content.
-                     * One apply must not automatically trigger multiple
-                     * overlapping cloud refills.
-                     */
-                    val preparedFromCache =
-                        runCatching {
-                            prepareNextFromPredictiveCache(
-                                context,
-                                settings,
-                            )
-                        }.getOrDefault(false)
-
-                    val now =
-                        System.currentTimeMillis()
-
-                    val lastPrime =
-                        RuntimeStatus.getLong(
+                    runCatching {
+                        ensureNext(
                             context,
-                            "cache_prime_finished_at",
-                            0L,
+                            SettingsStore(context).load(),
+                            allowNetwork = true,
                         )
-
-                    val target =
-                        settings.cacheTarget
-                            .coerceIn(4, 36)
-
-                    /*
-                     * Refill at most once per ten minutes after apply and
-                     * only when cache inventory is below its configured
-                     * target. Resource policy inside primeCache still wins.
-                     */
-                    if (
-                        cacheCount() < target &&
-                        now - lastPrime >=
-                        10L * 60L * 1000L
-                    ) {
-                        runCatching {
-                            primeCache(
-                                context,
-                                settings,
-                            )
-                        }
-                    }
-
-                    /*
-                     * Cloud queue preparation happens only if predictive
-                     * cache could not produce the next required pair.
-                     */
-                    if (!preparedFromCache) {
-                        runCatching {
-                            ensureNext(
-                                context,
-                                settings,
-                                allowNetwork = true,
-                            )
-                        }
                     }
                 }
                 log("NEXT applied target=${settings.targetMode}")
