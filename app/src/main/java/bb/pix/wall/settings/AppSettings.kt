@@ -51,8 +51,8 @@ data class AppSettings(
     val wifiOnly: Boolean = false,
     val mobileDataAllowed: Boolean = true,
     val chargingOnly: Boolean = false,
-    val pauseBatterySaver: Boolean = true,
-    val pauseLowBattery: Boolean = true,
+    val pauseBatterySaver: Boolean = false,
+    val pauseLowBattery: Boolean = false,
     val lowBatteryThreshold: Int = 15,
     val quietHoursEnabled: Boolean = false,
     val quietStartHour: Int = 23,
@@ -64,7 +64,7 @@ data class AppSettings(
     val perceptualDistance: Int = 6,
     // Quality-first aspect handling for Bharat's 9:20 wallpaper library.
     // Compatible images are always streamed untouched; only mismatches may be cropped.
-    val smartCropEnabled: Boolean = true,
+    val smartCropEnabled: Boolean = false,
     val smartCropTolerancePct: Float = 1.5f,
     // Keep local storage footprint small even in Advance mode.
     val leanStorageMode: Boolean = true,
@@ -74,7 +74,7 @@ data class AppSettings(
         SourcePriorityMode.PHOTOS_FIRST,
     val smartPairingEnabled: Boolean = false,
     val cacheMaxMb: Int = 512,
-    val adaptiveResourceProtectionEnabled: Boolean = true,
+    val adaptiveResourceProtectionEnabled: Boolean = false,
 
     // Adaptive environment / Mood Engine.
     val moodEngineEnabled: Boolean = false,
