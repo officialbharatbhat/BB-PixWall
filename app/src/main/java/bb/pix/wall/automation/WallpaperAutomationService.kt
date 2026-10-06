@@ -408,19 +408,6 @@ class WallpaperAutomationService : Service() {
                     },
                 )
 
-                if (changed) {
-                    EngineExecutors.io {
-                        runCatching {
-                            WallpaperController.ensureNext(
-                                applicationContext,
-                                SettingsStore(
-                                    applicationContext
-                                ).load(),
-                                allowNetwork = true,
-                            )
-                        }
-                    }
-                }
             } catch (t: Throwable) {
                 RuntimeStatus.failure(
                     applicationContext,
