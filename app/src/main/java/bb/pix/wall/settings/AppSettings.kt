@@ -57,7 +57,7 @@ data class AppSettings(
     val quietHoursEnabled: Boolean = false,
     val quietStartHour: Int = 23,
     val quietEndHour: Int = 7,
-    val cacheTarget: Int = 8,
+    val cacheTarget: Int = 4,
     val backgroundGuardEnabled: Boolean = true,
     val lowStorageReserveMb: Int = 768,
     val aspectPreference: AspectPreference = AspectPreference.ANY,
@@ -71,8 +71,8 @@ data class AppSettings(
 
     // Phase-1 final smart source/cache policy.
     val sourcePriorityMode: SourcePriorityMode =
-        SourcePriorityMode.SMART_BALANCED,
-    val smartPairingEnabled: Boolean = true,
+        SourcePriorityMode.PHOTOS_FIRST,
+    val smartPairingEnabled: Boolean = false,
     val cacheMaxMb: Int = 512,
     val adaptiveResourceProtectionEnabled: Boolean = true,
 
@@ -98,7 +98,7 @@ data class AppSettings(
 
     // Intelligent ordering for Random Shuffle / Surprise only.
     // Explicit A-Z/date/size orders are never overridden.
-    val decisionEngineEnabled: Boolean = true,
+    val decisionEngineEnabled: Boolean = false,
 
 
     // v1.1+ scalable category discovery.
