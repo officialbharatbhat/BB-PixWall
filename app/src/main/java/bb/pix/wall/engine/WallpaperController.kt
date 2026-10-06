@@ -642,38 +642,6 @@ fun invalidateQueue() =
                 }
 
                 if (
-                    settings.smartPairingEnabled &&
-                    WallpaperFiles.nextHome.exists() &&
-                    cached.size > 1
-                ) {
-                    val homeId =
-                        cacheCandidateId(
-                            WallpaperFiles.nextHome
-                        )
-
-                    if (homeId != null) {
-                        cached.sortByDescending { file ->
-                            cacheCandidateId(file)
-                                ?.let { candidateId ->
-                                    Phase1FinalEngine
-                                        .pairScore(
-                                            context,
-                                            homeId,
-                                            candidateId,
-                                        )
-                                }
-                                ?: 0
-                        }
-
-                        RuntimeStatus.set(
-                            context,
-                            "smart_pairing",
-                            "Cache pair ranked",
-                        )
-                    }
-                }
-
-                if (
                     !WallpaperFiles.nextLock.exists()
                 ) {
                     consumeInto(
@@ -715,13 +683,6 @@ fun invalidateQueue() =
              * Even if an old build or interrupted source switch left a
              * prepared Photos/Drive .next file behind, never apply it.
              */
-
-
-            val previousTasteIds = if (userInitiated) {
-                TasteLearning.currentIds(settings.targetMode)
-            } else {
-                emptySet()
-            }
 
             // Real fast path:
             // 1. already prepared next files
@@ -840,40 +801,7 @@ fun invalidateQueue() =
                 return false
             }
 
-            AutonomousIntelligenceEngine
-                .beginApply(
-                    context,
-                    settings.targetMode.name,
-                )
-
             synchronized(lock) {
-                /*
-                 * Capture the currently active originals before replacing
-                 * them. This extends the old one-level Previous feature
-                 * into persistent multi-history without changing apply
-                 * semantics.
-                 */
-                val historyStarted =
-                    android.os.SystemClock
-                        .elapsedRealtime()
-
-                runCatching {
-                    WallpaperLibrary.captureCurrent(
-                        settings.targetMode,
-                    )
-                }.onFailure {
-                    log(
-                        "HISTORY capture failed: ${it.message}"
-                    )
-                }
-
-                RuntimeStatus.setLong(
-                    context,
-                    "history_capture_ms",
-                    android.os.SystemClock
-                        .elapsedRealtime() -
-                        historyStarted,
-                )
 
                 val wm = WallpaperManager.getInstance(context)
             val blurMaster = blurMasterEnabled(context)
@@ -906,21 +834,6 @@ fun invalidateQueue() =
                     context,
                     "apply_${target}_started",
                     started,
-                )
-
-                val previous =
-                    if (
-                        flag ==
-                        WallpaperManager.FLAG_SYSTEM
-                    ) {
-                        WallpaperFiles.previousHome
-                    } else {
-                        WallpaperFiles.previousLock
-                    }
-
-                snapshotPrevious(
-                    current,
-                    previous,
                 )
 
                 val result =
@@ -1071,76 +984,6 @@ fun invalidateQueue() =
             }
             if (changed) {
                 recordSeenForCurrent(settings.targetMode)
-
-                  if (userInitiated) {
-                      TasteLearning.recordManualAdvance(
-                          context,
-                          previousTasteIds,
-                      )?.let { signal ->
-                          SessionMoodLearning.recordSignal(
-                              context,
-                              signal,
-                          )
-                      }
-                  }
-
-                  TasteLearning.recordAppliedCurrent(
-                      context,
-                      settings.targetMode,
-                  )
-
-                  SessionMoodLearning.recordApplied(
-                      context,
-                      TasteLearning.currentIds(
-                          settings.targetMode
-                      ),
-                  )
-
-                  EngineExecutors.io {
-                      val policy =
-                          Phase1FinalEngine
-                              .resourcePolicy(
-                                  context,
-                                  settings,
-                              )
-
-                      if (policy.allowHeavyAnalysis) {
-                          runCatching {
-                              WallpaperStyleLearning.analyzeCurrent(
-                                  context,
-                                  settings.targetMode,
-                              )
-
-                              VisualIntelligenceEngine.analyzeCurrent(
-                                  context
-                              )
-
-                              AutonomousIntelligenceEngine
-                                  .onApplied(
-                                      context,
-                                      settings,
-                                  )
-
-                              VisualIntelligenceEngine.publishForFile(
-                                  context,
-                                  WallpaperFiles.currentHome,
-                                  "current_home",
-                              )
-
-                              VisualIntelligenceEngine.publishForFile(
-                                  context,
-                                  WallpaperFiles.currentLock,
-                                  "current_lock",
-                              )
-                          }
-                      } else {
-                          RuntimeStatus.set(
-                              context,
-                              "analysis_resource_state",
-                              "Skipped • ${policy.label}",
-                          )
-                      }
-                  }
                 WallpaperFiles.nextHome.delete()
                 File(
                     WallpaperFiles.nextHome.absolutePath +
@@ -1153,12 +996,6 @@ fun invalidateQueue() =
                         ".meta"
                 ).delete()
                 RuntimeStatus.success(context, "Wallpaper applied: ${settings.targetMode.label}")
-
-                AutonomousIntelligenceEngine
-                    .completeApply(
-                        context,
-                        true,
-                    )
 
                 RuntimeStatus.set(
                     context,
@@ -1225,21 +1062,9 @@ fun invalidateQueue() =
                             )
                         }
                     }
-
-                    runCatching {
-                        warmApplyCaches(
-                            context,
-                            settings,
-                        )
-                    }
                 }
                 log("NEXT applied target=${settings.targetMode}")
             } else if (!allowNetwork) {
-                AutonomousIntelligenceEngine
-                    .completeApply(
-                        context,
-                        false,
-                    )
 
                 RuntimeStatus.failure(context, "Offline queue empty")
                 log("NEXT skipped: offline queue empty")
@@ -1247,11 +1072,6 @@ fun invalidateQueue() =
             changed
             }
         } catch (t: Throwable) {
-            AutonomousIntelligenceEngine
-                .completeApply(
-                    context,
-                    false,
-                )
 
             RuntimeStatus.failure(context, t.message ?: t.javaClass.simpleName)
             log("NEXT failed: ${t.message}")
@@ -2608,14 +2428,10 @@ fun invalidateQueue() =
         settings: AppSettings =
             SettingsStore(context).load(),
     ) {
-        WallpaperFiles.ensure()
-
-        cleanupObsoleteApplyCaches(context)
-
         RuntimeStatus.set(
             context,
             "apply_cache_state",
-            "Original source • lossless",
+            "Lite • original stream only",
         )
     }
 
@@ -2633,146 +2449,43 @@ fun invalidateQueue() =
 
         return try {
             if (!doBlur || radius <= 0) {
-                val prepared =
-                    readyApplyCache(
-                        context,
-                        settings,
+                /*
+                 * Lite quality path:
+                 * feed WallpaperManager the exact downloaded/original
+                 * stream. No resize, crop, JPEG apply-cache or analysis.
+                 */
+                val aspect =
+                    inspectAspect(
                         src,
+                        settings.smartCropTolerancePct,
                     )
 
-                if (prepared != null) {
-                    FileInputStream(
-                        prepared
-                    ).use { input ->
-                        wm.setStream(
-                            input,
-                            null,
-                            true,
-                            flag,
-                        )
-                    }
+                RuntimeStatus.set(
+                    context,
+                    "last_aspect",
+                    aspect.status,
+                )
 
-                    RuntimeStatus.set(
-                        context,
-                        "last_pipeline",
-                        "Adaptive prepared cache • instant apply",
+                FileInputStream(src).use { input ->
+                    wm.setStream(
+                        input,
+                        null,
+                        true,
+                        flag,
                     )
-                } else {
-                    val aspect =
-                        inspectAspect(
-                            src,
-                            settings.smartCropTolerancePct,
-                        )
-
-                    RuntimeStatus.set(
-                        context,
-                        "last_aspect",
-                        aspect.status,
-                    )
-
-                    if (
-                        settings.smartCropEnabled &&
-                        !aspect.matchesNineByTwenty &&
-                        aspect.valid
-                    ) {
-                        val cropped =
-                            cropOriginalNineByTwenty(
-                                src
-                            )
-
-                        if (cropped != null) {
-                            val appliedCrop =
-                                try {
-                                    wm.setBitmap(
-                                        cropped,
-                                        null,
-                                        true,
-                                        flag,
-                                    )
-
-                                    true
-                                } catch (_: Throwable) {
-                                    false
-                                } finally {
-                                    cropped.recycle()
-                                }
-
-                            if (appliedCrop) {
-                                RuntimeStatus.set(
-                                    context,
-                                    "last_pipeline",
-                                    "Smart crop 9:20 • source preserved",
-                                )
-
-                                log(
-                                    "PIPELINE smart-crop ${src.name} ${aspect.width}x${aspect.height} -> 9:20"
-                                )
-                            } else {
-                                FileInputStream(
-                                    src
-                                ).use { input ->
-                                    wm.setStream(
-                                        input,
-                                        null,
-                                        true,
-                                        flag,
-                                    )
-                                }
-
-                                RuntimeStatus.set(
-                                    context,
-                                    "last_pipeline",
-                                    "Original stream • crop apply fallback",
-                                )
-                            }
-                        } else {
-                            FileInputStream(
-                                src
-                            ).use { input ->
-                                wm.setStream(
-                                    input,
-                                    null,
-                                    true,
-                                    flag,
-                                )
-                            }
-
-                            RuntimeStatus.set(
-                                context,
-                                "last_pipeline",
-                                "Original stream • crop skipped for quality",
-                            )
-
-                            log(
-                                "PIPELINE crop skipped quality-first ${src.name}"
-                            )
-                        }
-                    } else {
-                        FileInputStream(
-                            src
-                        ).use { input ->
-                            wm.setStream(
-                                input,
-                                null,
-                                true,
-                                flag,
-                            )
-                        }
-
-                        RuntimeStatus.set(
-                            context,
-                            "last_pipeline",
-                            if (
-                                aspect.matchesNineByTwenty
-                            ) {
-                                "Original 9:20 • untouched"
-                            } else {
-                                "Original stream • smart crop off"
-                            },
-                        )
-                    }
                 }
+
+                RuntimeStatus.set(
+                    context,
+                    "last_pipeline",
+                    "Lite original stream • untouched",
+                )
             } else {
+                /*
+                 * Blur is the only intentional pixel-processing path.
+                 * The saved/current source below remains the exact
+                 * original file.
+                 */
                 val original =
                     decodeForProcessing(
                         src,
@@ -2800,132 +2513,30 @@ fun invalidateQueue() =
                 RuntimeStatus.set(
                     context,
                     "last_pipeline",
-                    "Blur processed • original source preserved",
+                    "Lite blur processed • original source preserved",
                 )
             }
 
             /*
-             * One-level rollback snapshot.
-             * Preserve the exact previous source before replacing current.
+             * Keep an exact original copy for Save/Blur reapply.
+             * No autonomous/history/previous-wall work on Lite.
              */
-            val previousTarget =
-                when (current) {
-                    WallpaperFiles.currentHome ->
-                        WallpaperFiles.previousHome
+            current.parentFile?.mkdirs()
+            src.copyTo(
+                current,
+                overwrite = true,
+            )
 
-                    WallpaperFiles.currentLock ->
-                        WallpaperFiles.previousLock
-
-                    else ->
-                        null
-                }
-
-            if (
-                previousTarget != null &&
-                current.exists()
-            ) {
-                current.copyTo(
-                    previousTarget,
-                    overwrite = true,
-                )
-
-                val oldMeta =
-                    File(
-                        current.absolutePath +
-                            ".meta"
-                    )
-
-                val previousMeta =
-                    File(
-                        previousTarget.absolutePath +
-                            ".meta"
-                    )
-
-                if (oldMeta.exists()) {
-                    oldMeta.copyTo(
-                        previousMeta,
-                        overwrite = true,
-                    )
-                } else {
-                    previousMeta.delete()
-                }
-            }
-
-            /*
-             * Current file always remains the exact original.
-             * Prepared cache is disposable acceleration only.
-             */
-            check(
-                AutonomousIntelligenceEngine
-                    .atomicReplace(
-                        src,
-                        current,
-                    )
-            ) {
-                "Atomic current-file commit failed"
-            }
-
-            val meta =
-                File(
-                    src.absolutePath +
-                        ".meta"
-                )
-
-            val currentMeta =
-                File(
-                    current.absolutePath +
-                        ".meta"
-                )
-
-            if (meta.exists()) {
-                meta.copyTo(
-                    currentMeta,
-                    overwrite = true,
-                )
-            } else {
-                currentMeta.delete()
-            }
-
-            val warmRadius =
-                when (current) {
-                    WallpaperFiles.currentHome ->
-                        if (
-                            settings.homeBlurEnabled
-                        ) {
-                            settings.homeBlurRadius
-                        } else {
-                            0
-                        }
-
-                    WallpaperFiles.currentLock ->
-                        if (
-                            settings.lockBlurEnabled
-                        ) {
-                            settings.lockBlurRadius
-                        } else {
-                            0
-                        }
-
-                    else -> 0
-                }
-
-            if (warmRadius > 0) {
-                EngineExecutors.io {
-                    runCatching {
-                        prepareBlurCache(
-                            current,
-                            warmRadius,
-                        )
-                    }
-                }
-            }
+            copyWallpaperMeta(
+                src,
+                current,
+            )
 
             true
         } catch (t: Throwable) {
             log(
                 "APPLY failed ${src.name}: ${t.message}"
             )
-
             false
         }
     }
