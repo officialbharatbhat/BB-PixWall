@@ -658,13 +658,6 @@ class LanServerService : Service() {
                         old.appearanceMode,
                     ),
 
-                sourcePriorityMode =
-                    enumValue(
-                        form["sourcePriorityMode"],
-                        SourcePriorityMode.entries.toTypedArray(),
-                        old.sourcePriorityMode,
-                    ),
-
                 aspectPreference =
                     enumValue(
                         form["aspectPreference"],
@@ -755,12 +748,6 @@ class LanServerService : Service() {
                         ?.toIntOrNull()
                         ?.coerceIn(0, 23)
                         ?: old.quietEndHour,
-
-                cacheTarget =
-                    form["cacheTarget"]
-                        ?.toIntOrNull()
-                        ?.coerceIn(4, 36)
-                        ?: old.cacheTarget,
 
                 cacheMaxMb =
                     form["cacheMaxMb"]
