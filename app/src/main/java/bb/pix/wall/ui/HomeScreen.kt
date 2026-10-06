@@ -176,8 +176,8 @@ fun HomeScreen(
                     .padding(padding)
                     .verticalScroll(rememberScrollState())
                     .padding(
-                        horizontal = 0.dp,
-                        vertical = 8.dp,
+                        horizontal = 16.dp,
+                        vertical = 12.dp,
                     ),
             verticalArrangement =
                 Arrangement.spacedBy(tokens.sectionGap),
@@ -187,17 +187,6 @@ fun HomeScreen(
                 engineMode = settings.engineMode,
                 theme = selectedTheme,
             )
-
-            ThinkingSweepLine(
-                modifier =
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(
-                            horizontal =
-                                28.dp
-                        )
-            )
-
 
             PreviewGrid(wallpaperState, onRefreshPreviews, onPrepareNext)
 
@@ -2400,16 +2389,6 @@ CollapsibleSection(
 
 
 
-            ThinkingSweepLine(
-                modifier =
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(
-                            horizontal =
-                                28.dp
-                        )
-            )
-
             DeveloperIdentityCard(
                 context = context,
                 theme = selectedTheme,
@@ -3315,7 +3294,7 @@ private fun WallpaperThumb(
             Box(
                 Modifier
                     .fillMaxWidth()
-                    .aspectRatio(.95f)
+                    .aspectRatio(1.05f)
                     .background(
                         MaterialTheme
                             .colorScheme
@@ -3446,28 +3425,6 @@ private fun PremiumAppHeader(
             }.getOrDefault("dev")
         }
 
-    val transition =
-        rememberInfiniteTransition(
-            label = "bb_header_glow"
-        )
-
-    val glow by transition.animateFloat(
-        initialValue = .18f,
-        targetValue = .85f,
-        animationSpec =
-            infiniteRepeatable(
-                animation =
-                    tween(
-                        durationMillis =
-                            tokens.glowSweepMs,
-                        easing = tokens.easing,
-                    ),
-                repeatMode =
-                    RepeatMode.Reverse,
-            ),
-        label = "header_glow",
-    )
-
     val accent =
         when (theme) {
             ThemeProfile.SIGNATURE ->
@@ -3488,9 +3445,7 @@ private fun PremiumAppHeader(
 
     Surface(
         modifier =
-            Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 8.dp),
+            Modifier.fillMaxWidth(),
         shape =
             RoundedCornerShape(
                 tokens.cardRadius
@@ -3498,28 +3453,23 @@ private fun PremiumAppHeader(
         color =
             MaterialTheme.colorScheme
                 .surface
-                .copy(alpha = .92f),
+                .copy(alpha = .96f),
         border =
             androidx.compose.foundation.BorderStroke(
-                tokens.borderWidth,
-                accent.copy(
-                    alpha =
-                        if (tokens.glowEnabled) {
-                            .18f + glow * .42f
-                        } else {
-                            .16f
-                        }
-                ),
+                1.dp,
+                MaterialTheme.colorScheme
+                    .outlineVariant
+                    .copy(alpha = .55f),
             ),
     ) {
         Column(
             modifier =
                 Modifier.padding(
-                    horizontal = 12.dp,
-                    vertical = 9.dp,
+                    horizontal = 18.dp,
+                    vertical = 16.dp,
                 ),
             verticalArrangement =
-                Arrangement.spacedBy(3.dp),
+                Arrangement.spacedBy(8.dp),
         ) {
             Row(
                 modifier =
@@ -3527,35 +3477,57 @@ private fun PremiumAppHeader(
                 verticalAlignment =
                     Alignment.CenterVertically,
             ) {
-                Text(
-                    "BB-PixWall",
-                    style =
-                        MaterialTheme.typography
-                            .headlineLarge,
+                Column(
                     modifier =
-                        Modifier.weight(1f),
-                )
+                        Modifier.weight(1f)
+                ) {
+                    Text(
+                        "BB-PixWall",
+                        style =
+                            MaterialTheme.typography
+                                .headlineMedium,
+                        fontWeight =
+                            FontWeight.Bold,
+                    )
+
+                    Text(
+                        "Wallpaper Intelligence",
+                        style =
+                            MaterialTheme.typography
+                                .bodySmall,
+                        color =
+                            MaterialTheme.colorScheme
+                                .onSurfaceVariant,
+                    )
+                }
 
                 Surface(
                     shape =
                         RoundedCornerShape(999.dp),
                     color =
-                        MaterialTheme.colorScheme
-                            .surfaceVariant,
+                        accent.copy(alpha = .10f),
                 ) {
                     Text(
                         "v$version",
                         modifier =
                             Modifier.padding(
-                                horizontal = 8.dp,
-                                vertical = 4.dp,
+                                horizontal = 10.dp,
+                                vertical = 5.dp,
                             ),
                         style =
                             MaterialTheme.typography
                                 .labelSmall,
+                        color = accent,
                     )
                 }
             }
+
+            HorizontalDivider(
+                color =
+                    MaterialTheme.colorScheme
+                        .outlineVariant
+                        .copy(alpha = .45f)
+            )
 
             Row(
                 verticalAlignment =
@@ -3563,7 +3535,7 @@ private fun PremiumAppHeader(
             ) {
                 Box(
                     Modifier
-                        .size(6.dp)
+                        .size(7.dp)
                         .clip(
                             RoundedCornerShape(
                                 99.dp
@@ -3584,11 +3556,18 @@ private fun PremiumAppHeader(
                 )
 
                 Spacer(
-                    Modifier.width(6.dp)
+                    Modifier.width(7.dp)
                 )
 
                 Text(
-                    engineMode.label,
+                    if (
+                        engineMode ==
+                        EngineMode.ADVANCED
+                    ) {
+                        "Advanced engine active"
+                    } else {
+                        "Standard engine"
+                    },
                     style =
                         MaterialTheme.typography
                             .labelMedium,
@@ -3600,7 +3579,6 @@ private fun PremiumAppHeader(
         }
     }
 }
-
 
 @Composable private fun SectionTitle(text: String) { val t = LocalDesignTokens.current; Text(if (t.sectionUppercase) text.uppercase() else text, style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onBackground) }
 @Composable private fun SettingHeader(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String) { Row(verticalAlignment = Alignment.CenterVertically) { Icon(icon, null); Spacer(Modifier.width(10.dp)); Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold) } }
