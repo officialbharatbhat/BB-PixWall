@@ -822,6 +822,27 @@ fun DeveloperIdentityCard(
     val tokens =
         LocalDesignTokens.current
 
+    val accent =
+        themeAccent(theme)
+
+    val youtube =
+        youtubeUrl.ifBlank {
+            "https://www.youtube.com/@sloverbofficial"
+        }
+
+    val instagram =
+        instagramUrl.ifBlank {
+            "https://www.instagram.com/officialbharatbhat"
+        }
+
+    val telegram =
+        telegramUrl.ifBlank {
+            "https://t.me/BharatBhat"
+        }
+
+    val facebook =
+        "https://www.facebook.com/officialbharatbhat"
+
     Surface(
         modifier =
             Modifier.fillMaxWidth(),
@@ -838,94 +859,150 @@ fun DeveloperIdentityCard(
                 1.dp,
                 MaterialTheme.colorScheme
                     .outlineVariant
-                    .copy(alpha = .50f),
+                    .copy(alpha = .40f),
             ),
     ) {
         Column(
             modifier =
-                Modifier.padding(
-                    horizontal = 16.dp,
-                    vertical = 16.dp,
-                ),
+                Modifier.padding(14.dp),
             verticalArrangement =
                 Arrangement.spacedBy(10.dp),
         ) {
-            Text(
-                text = "DEVELOPER",
-                style =
-                    MaterialTheme.typography
-                        .labelSmall,
-                color =
-                    MaterialTheme.colorScheme
-                        .onSurfaceVariant,
-            )
+            Row(
+                modifier =
+                    Modifier.fillMaxWidth(),
+                verticalAlignment =
+                    Alignment.CenterVertically,
+            ) {
+                Surface(
+                    modifier =
+                        Modifier.size(42.dp),
+                    shape =
+                        RoundedCornerShape(12.dp),
+                    color =
+                        accent.copy(alpha = .12f),
+                ) {
+                    Box(
+                        contentAlignment =
+                            Alignment.Center,
+                    ) {
+                        Text(
+                            "BB",
+                            style =
+                                MaterialTheme.typography
+                                    .titleMedium,
+                            fontWeight =
+                                FontWeight.Bold,
+                            color = accent,
+                        )
+                    }
+                }
 
-            Text(
-                text = "Bharat Bhat",
-                style =
-                    MaterialTheme.typography
-                        .titleLarge,
-                fontWeight =
-                    FontWeight.SemiBold,
-            )
+                Spacer(Modifier.width(12.dp))
 
-            Text(
-                text = "BB-PixWall",
-                style =
-                    MaterialTheme.typography
-                        .bodySmall,
-                color =
-                    MaterialTheme.colorScheme
-                        .onSurfaceVariant,
-            )
+                Column(
+                    modifier =
+                        Modifier.weight(1f)
+                ) {
+                    Text(
+                        "Bharat Bhat",
+                        style =
+                            MaterialTheme.typography
+                                .titleMedium,
+                        fontWeight =
+                            FontWeight.SemiBold,
+                    )
+
+                    Text(
+                        "Developer • BB-PixWall",
+                        style =
+                            MaterialTheme.typography
+                                .bodySmall,
+                        color =
+                            MaterialTheme.colorScheme
+                                .onSurfaceVariant,
+                    )
+                }
+
+                Text(
+                    "DEVELOPER",
+                    style =
+                        MaterialTheme.typography
+                            .labelSmall,
+                    color = accent,
+                )
+            }
 
             HorizontalDivider(
                 color =
                     MaterialTheme.colorScheme
                         .outlineVariant
-                        .copy(alpha = .45f)
+                        .copy(alpha = .35f)
             )
 
-            OutlinedButton(
-                onClick = {
-                    openUri(
-                        context,
-                        "mailto:bkbhatinfo@gmail.com",
-                    )
-                },
+            Row(
                 modifier =
                     Modifier.fillMaxWidth(),
+                horizontalArrangement =
+                    Arrangement.spacedBy(8.dp),
             ) {
-                Icon(
-                    painterResource(
-                        R.drawable.ic_brand_gmail
-                    ),
-                    null,
-                    Modifier.size(18.dp),
-                )
-                Spacer(Modifier.width(8.dp))
-                Text("bkbhatinfo@gmail.com")
-            }
+                OutlinedButton(
+                    onClick = {
+                        openUri(
+                            context,
+                            "mailto:bkbhatinfo@gmail.com",
+                        )
+                    },
+                    modifier =
+                        Modifier.weight(1f),
+                    contentPadding =
+                        PaddingValues(
+                            horizontal = 10.dp,
+                            vertical = 8.dp,
+                        ),
+                ) {
+                    Icon(
+                        painterResource(
+                            R.drawable.ic_brand_gmail
+                        ),
+                        null,
+                        Modifier.size(17.dp),
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        "Email",
+                        maxLines = 1,
+                    )
+                }
 
-            OutlinedButton(
-                onClick = {
-                    openUri(
-                        context,
-                        "https://github.com/officialbharatbhat",
+                OutlinedButton(
+                    onClick = {
+                        openUri(
+                            context,
+                            "https://github.com/officialbharatbhat",
+                        )
+                    },
+                    modifier =
+                        Modifier.weight(1f),
+                    contentPadding =
+                        PaddingValues(
+                            horizontal = 10.dp,
+                            vertical = 8.dp,
+                        ),
+                ) {
+                    Icon(
+                        painterResource(
+                            R.drawable.ic_brand_github
+                        ),
+                        null,
+                        Modifier.size(17.dp),
                     )
-                },
-                modifier =
-                    Modifier.fillMaxWidth(),
-            ) {
-                Icon(
-                    painterResource(
-                        R.drawable.ic_brand_github
-                    ),
-                    null,
-                    Modifier.size(18.dp),
-                )
-                Spacer(Modifier.width(8.dp))
-                Text("@officialbharatbhat")
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        "GitHub",
+                        maxLines = 1,
+                    )
+                }
             }
 
             Row(
@@ -938,45 +1015,115 @@ fun DeveloperIdentityCard(
                     onClick = {
                         openUri(
                             context,
-                            youtubeUrl,
+                            instagram,
                         )
                     },
-                    enabled =
-                        youtubeUrl.isNotBlank(),
                     modifier =
                         Modifier.weight(1f),
+                    contentPadding =
+                        PaddingValues(
+                            horizontal = 8.dp,
+                            vertical = 8.dp,
+                        ),
                 ) {
-                    Text("YouTube")
+                    Icon(
+                        Icons.Outlined.PhotoCamera,
+                        null,
+                        Modifier.size(17.dp),
+                    )
+                    Spacer(Modifier.width(5.dp))
+                    Text(
+                        "Instagram",
+                        maxLines = 1,
+                    )
                 }
 
                 OutlinedButton(
                     onClick = {
                         openUri(
                             context,
-                            instagramUrl,
+                            facebook,
                         )
                     },
-                    enabled =
-                        instagramUrl.isNotBlank(),
                     modifier =
                         Modifier.weight(1f),
+                    contentPadding =
+                        PaddingValues(
+                            horizontal = 8.dp,
+                            vertical = 8.dp,
+                        ),
                 ) {
-                    Text("Instagram")
+                    Icon(
+                        Icons.Outlined.Public,
+                        null,
+                        Modifier.size(17.dp),
+                    )
+                    Spacer(Modifier.width(5.dp))
+                    Text(
+                        "Facebook",
+                        maxLines = 1,
+                    )
+                }
+            }
+
+            Row(
+                modifier =
+                    Modifier.fillMaxWidth(),
+                horizontalArrangement =
+                    Arrangement.spacedBy(8.dp),
+            ) {
+                OutlinedButton(
+                    onClick = {
+                        openUri(
+                            context,
+                            youtube,
+                        )
+                    },
+                    modifier =
+                        Modifier.weight(1f),
+                    contentPadding =
+                        PaddingValues(
+                            horizontal = 8.dp,
+                            vertical = 8.dp,
+                        ),
+                ) {
+                    Icon(
+                        Icons.Outlined.PlayCircle,
+                        null,
+                        Modifier.size(17.dp),
+                    )
+                    Spacer(Modifier.width(5.dp))
+                    Text(
+                        "YouTube",
+                        maxLines = 1,
+                    )
                 }
 
                 OutlinedButton(
                     onClick = {
                         openUri(
                             context,
-                            telegramUrl,
+                            telegram,
                         )
                     },
-                    enabled =
-                        telegramUrl.isNotBlank(),
                     modifier =
                         Modifier.weight(1f),
+                    contentPadding =
+                        PaddingValues(
+                            horizontal = 8.dp,
+                            vertical = 8.dp,
+                        ),
                 ) {
-                    Text("Telegram")
+                    Icon(
+                        Icons.Outlined.Send,
+                        null,
+                        Modifier.size(17.dp),
+                    )
+                    Spacer(Modifier.width(5.dp))
+                    Text(
+                        "Telegram",
+                        maxLines = 1,
+                    )
                 }
             }
         }
