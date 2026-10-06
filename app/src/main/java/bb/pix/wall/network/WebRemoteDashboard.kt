@@ -35,7 +35,7 @@ object WebRemoteDashboard {
   content="width=device-width,initial-scale=1,viewport-fit=cover"
 >
 <meta name="theme-color" content="#080b10">
-<title>BB-PixWall Remote Pro</title>
+<title>BB-PixWall Lite Remote Pro</title>
 
 <style>
 :root{
@@ -364,7 +364,7 @@ pre{
 <div class="shell">
 
 <header>
-  <h1>BB-PixWall</h1>
+  <h1>BB-PixWall Lite</h1>
   <div class="spacer"></div>
   <span class="chip" id="modeChip">Standard</span>
   <span class="chip good" id="lanChip">LAN</span>
