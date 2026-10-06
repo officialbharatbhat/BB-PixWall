@@ -1135,15 +1135,7 @@ fun invalidateQueue() =
             val changed =
                 homeChanged ||
                     lockChanged
-
             if (changed) {
-                runCatching {
-                    TasteLearning.recordAppliedCurrent(
-                        context,
-                        settings.targetMode,
-                    )
-                }
-
                 RuntimeStatus.set(
                     context,
                     "last_pipeline",
@@ -1328,50 +1320,6 @@ fun invalidateQueue() =
                 save(WallpaperFiles.currentLock, "lock", settings.lockBlurEnabled, settings.lockBlurRadius)
             }
         }
-
-          if (out.isNotEmpty()) {
-              TasteLearning.recordSaveCurrent(
-                  context,
-                  settings.targetMode,
-              )?.let { signal ->
-                  SessionMoodLearning.recordSignal(
-                      context,
-                      signal,
-                  )
-              }
-          }
-
-          if (out.isNotEmpty()) {
-              RuntimeStatus.set(
-                  context,
-                  "cache_predictive_save_refresh",
-                  "scheduled"
-              )
-
-              EngineExecutors.io {
-                  runCatching {
-                      rebalancePredictiveCache(
-                          context,
-                          adaptiveHotTarget(
-                              settings.cacheTarget
-                                  .coerceIn(4, 36)
-                          ),
-                      )
-                  }.onSuccess {
-                      RuntimeStatus.set(
-                          context,
-                          "cache_predictive_save_refresh",
-                          "complete"
-                      )
-                  }.onFailure {
-                      RuntimeStatus.set(
-                          context,
-                          "cache_predictive_save_refresh",
-                          "failed"
-                      )
-                  }
-              }
-          }
 
           log("SAVE ${out.size} file(s)")
           out
@@ -2810,6 +2758,29 @@ fun invalidateQueue() =
 
     private fun primeCacheImpl(context: Context, settings: AppSettings) {
         requireStorage()
+
+        RuntimeStatus.set(
+            context,
+            "cache_progress",
+            "Lite • preparing next pair only",
+        )
+
+        runCatching {
+            ensureNext(
+                context,
+                settings,
+                allowNetwork = true,
+            )
+        }
+
+        RuntimeStatus.setLong(
+            context,
+            "cache_prime_finished_at",
+            System.currentTimeMillis(),
+        )
+
+        return
+
 
         purgeBlockedCached(context)
 
@@ -4572,79 +4543,39 @@ fun invalidateQueue() =
         avoidHashes: Set<String>,
         seenIds: Set<String>,
     ) {
-        val ordered = candidates
         var last: Throwable? = null
         var attempted = 0
-        for (candidate in ordered) {
-            if (candidate.id in seenIds) continue
+
+        for (candidate in candidates) {
+            if (candidate.id in seenIds) {
+                continue
+            }
 
             if (
                 WallpaperLibrary.isBlocked(
                     candidate.id
                 )
             ) {
-                RuntimeStatus.set(
-                    context,
-                    "selection_blocked_last",
-                    candidate.id.take(180),
-                )
-
                 continue
             }
 
             attempted++
+
             try {
-                fetchTo(candidate, dest)
-                val hash = sha256(dest)
+                fetchTo(
+                    candidate,
+                    dest,
+                )
+
+                val hash =
+                    sha256(dest)
 
                 if (
                     WallpaperLibrary
-                        .isBlockedHash(hash)
-                ) {
-                    dest.delete()
-                    continue
-                }
-
-                val ph =
-                    perceptualHash(dest)
-
-                val duplicatePhash =
-                    buildSet {
-                        addAll(
-                            readLinesSet(
-                                WallpaperFiles.seenPerceptual
-                            )
-                        )
-
-                        listOf(
-                            WallpaperFiles.currentHome,
-                            WallpaperFiles.currentLock,
-                            WallpaperFiles.nextHome,
-                            WallpaperFiles.nextLock,
-                        ).filter(File::exists)
-                            .mapNotNull {
-                                runCatching {
-                                    perceptualHash(it)
-                                }.getOrNull()
-                            }
-                            .filter(String::isNotBlank)
-                            .forEach(::add)
-                    }
-
-                val perceptualDuplicate =
-                    perceptuallySeen(
-                        ph,
-                        duplicatePhash,
-                        SettingsStore(context)
-                            .load()
-                            .perceptualDistance,
-                    )
-
-                if (
-                    ordered.size > 1 &&
+                        .isBlockedHash(hash) ||
                     (
-                        hash in avoidHashes ||
-                            perceptualDuplicate
+                        candidates.size > 1 &&
+                        hash in avoidHashes
                     )
                 ) {
                     dest.delete()
@@ -4657,68 +4588,55 @@ fun invalidateQueue() =
                     candidate.id,
                 )
 
-                runCatching {
-                    WallpaperStyleLearning.analyzeAndStore(
-                        context,
-                        candidate.id,
-                        dest,
+                RuntimeStatus.activeSource(
+                    context,
+                    candidate.source,
+                )
+
+                val ids =
+                    readLinesSet(
+                        WallpaperFiles.seenIds
                     )
+                        .toMutableSet()
+                        .apply {
+                            add(candidate.id)
+                        }
 
-                    VisualIntelligenceEngine.analyzeAndStore(
-                        context,
-                        candidate.id,
-                        dest,
-                    )
-                }
-                val directVisualProblem =
-                    VisualIntelligenceEngine
-                        .severeQualityProblem(
-                            context,
-                            candidate.id,
-                        )
+                writeLinesSet(
+                    WallpaperFiles.seenIds,
+                    ids
+                        .toList()
+                        .takeLast(10_000)
+                        .toSet(),
+                )
 
-                if (
-                    ordered.size > 1 &&
-                    directVisualProblem != null
-                ) {
-                    RuntimeStatus.set(
-                        context,
-                        "quality_guard_last",
-                        "${candidate.id.take(80)} • " +
-                            directVisualProblem,
-                    )
+                RuntimeStatus.set(
+                    context,
+                    "selection_reason",
+                    "${candidate.source} • ${candidate.id}",
+                )
 
-                    quarantine(
-                        dest,
-                        "visual_quality_direct",
-                    )
+                log(
+                    "QUEUE ${dest.name} <= ${candidate.id}"
+                )
 
-                    File(
-                        dest.absolutePath +
-                            ".meta"
-                    ).delete()
-
-                    continue
-                }
-
-                RuntimeStatus.activeSource(context, candidate.source)
-                val ids = readLinesSet(WallpaperFiles.seenIds).toMutableSet().apply { add(candidate.id) }
-                writeLinesSet(WallpaperFiles.seenIds, ids.toList().takeLast(10000).toSet())
-                val phv = perceptualHash(dest)
-                if (phv.isNotBlank()) {
-                    val ph = readLinesSet(WallpaperFiles.seenPerceptual).toMutableSet().apply { add(phv) }
-                    writeLinesSet(WallpaperFiles.seenPerceptual, ph.toList().takeLast(10000).toSet())
-                }
-                RuntimeStatus.set(context, "selection_reason", "${candidate.source} candidate • unseen source ID/hash • ${dest.name}")
-                log("QUEUE ${dest.name} <= ${candidate.id}")
                 return
             } catch (t: Throwable) {
                 last = t
                 dest.delete()
             }
         }
-        if (attempted == 0) throw IllegalStateException("Candidate cycle exhausted")
-        throw last ?: IllegalStateException("No unseen/usable wallpaper source")
+
+        if (attempted == 0) {
+            throw IllegalStateException(
+                "Candidate cycle exhausted"
+            )
+        }
+
+        throw last
+            ?: IllegalStateException(
+                "No unseen/usable wallpaper source"
+            )
     }
 
     private fun recordSeenForCurrent(targetMode: WallpaperTargetMode) {
