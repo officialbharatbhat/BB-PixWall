@@ -200,6 +200,119 @@ class SettingsStore(context: Context) {
                     "lean_storage_mode",
                     true,
                 ),
+            sourcePriorityMode =
+                enumOrDefault(
+                    prefs.getString(
+                        "source_priority_mode",
+                        null,
+                    ),
+                    SourcePriorityMode.SMART_BALANCED,
+                ),
+            smartPairingEnabled =
+                prefs.getBoolean(
+                    "smart_pairing_enabled",
+                    true,
+                ),
+            cacheMaxMb =
+                prefs.getInt(
+                    "cache_max_mb",
+                    512,
+                ).coerceIn(128, 2048),
+            adaptiveResourceProtectionEnabled =
+                prefs.getBoolean(
+                    "adaptive_resource_protection",
+                    true,
+                ),
+            moodEngineEnabled =
+                prefs.getBoolean(
+                    "mood_engine_enabled",
+                    false,
+                ),
+            moodAmbientLightEnabled =
+                prefs.getBoolean(
+                    "mood_ambient_light_enabled",
+                    true,
+                ),
+            moodTimeEnabled =
+                prefs.getBoolean(
+                    "mood_time_enabled",
+                    true,
+                ),
+            moodDarkModeEnabled =
+                prefs.getBoolean(
+                    "mood_dark_mode_enabled",
+                    true,
+                ),
+            moodBatteryContextEnabled =
+                prefs.getBoolean(
+                    "mood_battery_context_enabled",
+                    true,
+                ),
+            moodThermalProtectionEnabled =
+                prefs.getBoolean(
+                    "mood_thermal_protection_enabled",
+                    true,
+                ),
+            moodStrength =
+                prefs.getInt(
+                    "mood_strength",
+                    60,
+                ).coerceIn(0, 100),
+            moodDarkLuxThreshold =
+                prefs.getInt(
+                    "mood_dark_lux_threshold",
+                    20,
+                ).coerceIn(1, 200),
+            moodBrightLuxThreshold =
+                prefs.getInt(
+                    "mood_bright_lux_threshold",
+                    800,
+                ).coerceIn(100, 10_000),
+            moodWeatherEnabled =
+                prefs.getBoolean(
+                    "mood_weather_enabled",
+                    false,
+                ),
+            moodUseDeviceLocation =
+                prefs.getBoolean(
+                    "mood_use_device_location",
+                    true,
+                ),
+            moodWeatherCity =
+                prefs.getString(
+                    "mood_weather_city",
+                    "",
+                ).orEmpty(),
+            moodWeatherInfluence =
+                prefs.getInt(
+                    "mood_weather_influence",
+                    60,
+                ).coerceIn(0, 100),
+            moodOutdoorTemperatureEnabled =
+                prefs.getBoolean(
+                    "mood_outdoor_temperature_enabled",
+                    true,
+                ),
+            moodColdTemperatureC =
+                prefs.getInt(
+                    "mood_cold_temperature_c",
+                    15,
+                ).coerceIn(-10, 30),
+            moodHotTemperatureC =
+                prefs.getInt(
+                    "mood_hot_temperature_c",
+                    32,
+                ).coerceIn(20, 50),
+            moodAutoReactEnabled =
+                prefs.getBoolean(
+                    "mood_auto_react_enabled",
+                    false,
+                ),
+            moodAutoReactCooldownMinutes =
+                prefs.getInt(
+                    "mood_auto_react_cooldown_minutes",
+                    60,
+                ).coerceIn(15, 180),
             decisionEngineEnabled =
                 prefs.getBoolean(
                     "decision_engine_enabled",
@@ -244,6 +357,28 @@ class SettingsStore(context: Context) {
             .putBoolean("smart_crop_enabled", settings.smartCropEnabled)
             .putFloat("smart_crop_tolerance_pct", settings.smartCropTolerancePct.coerceIn(0.2f, 5f))
             .putBoolean("lean_storage_mode", settings.leanStorageMode)
+            .putString("source_priority_mode", settings.sourcePriorityMode.name)
+            .putBoolean("smart_pairing_enabled", settings.smartPairingEnabled)
+            .putInt("cache_max_mb", settings.cacheMaxMb.coerceIn(128, 2048))
+            .putBoolean("adaptive_resource_protection", settings.adaptiveResourceProtectionEnabled)
+            .putBoolean("mood_engine_enabled", settings.moodEngineEnabled)
+            .putBoolean("mood_ambient_light_enabled", settings.moodAmbientLightEnabled)
+            .putBoolean("mood_time_enabled", settings.moodTimeEnabled)
+            .putBoolean("mood_dark_mode_enabled", settings.moodDarkModeEnabled)
+            .putBoolean("mood_battery_context_enabled", settings.moodBatteryContextEnabled)
+            .putBoolean("mood_thermal_protection_enabled", settings.moodThermalProtectionEnabled)
+            .putInt("mood_strength", settings.moodStrength.coerceIn(0, 100))
+            .putInt("mood_dark_lux_threshold", settings.moodDarkLuxThreshold.coerceIn(1, 200))
+            .putInt("mood_bright_lux_threshold", settings.moodBrightLuxThreshold.coerceIn(100, 10_000))
+            .putBoolean("mood_weather_enabled", settings.moodWeatherEnabled)
+            .putBoolean("mood_use_device_location", settings.moodUseDeviceLocation)
+            .putString("mood_weather_city", settings.moodWeatherCity.trim())
+            .putInt("mood_weather_influence", settings.moodWeatherInfluence.coerceIn(0, 100))
+            .putBoolean("mood_outdoor_temperature_enabled", settings.moodOutdoorTemperatureEnabled)
+            .putInt("mood_cold_temperature_c", settings.moodColdTemperatureC.coerceIn(-10, 30))
+            .putInt("mood_hot_temperature_c", settings.moodHotTemperatureC.coerceIn(20, 50))
+            .putBoolean("mood_auto_react_enabled", settings.moodAutoReactEnabled)
+            .putInt("mood_auto_react_cooldown_minutes", settings.moodAutoReactCooldownMinutes.coerceIn(15, 180))
             .putBoolean("decision_engine_enabled", settings.decisionEngineEnabled)
             .apply()
     }

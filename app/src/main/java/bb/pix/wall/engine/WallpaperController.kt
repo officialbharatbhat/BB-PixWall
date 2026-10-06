@@ -79,7 +79,190 @@ object WallpaperController {
         )
     }
 
-    fun invalidateQueue() =
+    data class DisplayWallpaperInfo(
+        val exists: Boolean,
+        val width: Int = 0,
+        val height: Int = 0,
+        val bytes: Long = 0L,
+        val format: String = "Unknown",
+        val source: String = "Unknown",
+        val quality: String = "Unavailable",
+    ) {
+        val resolution: String
+            get() =
+                if (width > 0 && height > 0) {
+                    "${width}x${height}"
+                } else {
+                    "Unknown"
+                }
+
+        val sizeLabel: String
+            get() =
+                when {
+                    bytes >= 1024L * 1024L ->
+                        String.format(
+                            java.util.Locale.US,
+                            "%.1f MB",
+                            bytes.toDouble() /
+                                (1024.0 * 1024.0),
+                        )
+
+                    bytes >= 1024L ->
+                        String.format(
+                            java.util.Locale.US,
+                            "%.0f KB",
+                            bytes.toDouble() / 1024.0,
+                        )
+
+                    else ->
+                        "$bytes B"
+                }
+    }
+
+    fun displayWallpaperInfo(
+        path: String?,
+    ): DisplayWallpaperInfo {
+        if (path.isNullOrBlank()) {
+            return DisplayWallpaperInfo(false)
+        }
+
+        val file = File(path)
+
+        if (!file.exists() || !file.isFile) {
+            return DisplayWallpaperInfo(false)
+        }
+
+        val bounds =
+            BitmapFactory.Options().apply {
+                inJustDecodeBounds = true
+            }
+
+        runCatching {
+            BitmapFactory.decodeFile(
+                file.absolutePath,
+                bounds,
+            )
+        }
+
+        val format =
+            runCatching {
+                detectImageExtension(file)
+                    .uppercase(java.util.Locale.US)
+                    .replace("JPG", "JPEG")
+            }.getOrDefault("Unknown")
+
+        val meta =
+            File(file.absolutePath + ".meta")
+
+        val props =
+            runCatching {
+                Properties().apply {
+                    if (meta.exists()) {
+                        meta.inputStream().use(::load)
+                    }
+                }
+            }.getOrDefault(Properties())
+
+        val source =
+            props.getProperty(
+                "source",
+                sourceFor(path),
+            )
+
+        val metaBytes =
+            props.getProperty("bytes")
+                ?.toLongOrNull()
+
+        val metaWidth =
+            props.getProperty("width")
+                ?.toIntOrNull()
+
+        val metaHeight =
+            props.getProperty("height")
+                ?.toIntOrNull()
+
+        val valid =
+            bounds.outWidth > 0 &&
+                bounds.outHeight > 0 &&
+                file.length() > 0L
+
+        val metadataMatches =
+            !meta.exists() ||
+                (
+                    (metaBytes == null ||
+                        metaBytes == file.length()) &&
+                    (metaWidth == null ||
+                        metaWidth == bounds.outWidth) &&
+                    (metaHeight == null ||
+                        metaHeight == bounds.outHeight)
+                )
+
+        val quality =
+            when {
+                !valid -> "FAIL"
+                !metadataMatches -> "WARNING"
+                else -> "PASS"
+            }
+
+        return DisplayWallpaperInfo(
+            exists = true,
+            width = bounds.outWidth,
+            height = bounds.outHeight,
+            bytes = file.length(),
+            format = format,
+            source = source,
+            quality = quality,
+        )
+    }
+
+    private fun copyWallpaperMeta(
+        src: File,
+        dest: File,
+    ) {
+        val srcMeta =
+            File(src.absolutePath + ".meta")
+
+        val destMeta =
+            File(dest.absolutePath + ".meta")
+
+        if (srcMeta.exists()) {
+            runCatching {
+                srcMeta.copyTo(
+                    destMeta,
+                    overwrite = true,
+                )
+            }
+        } else {
+            destMeta.delete()
+        }
+    }
+
+    private fun snapshotPrevious(
+        current: File,
+        previous: File,
+    ) {
+        if (!current.exists()) {
+            return
+        }
+
+        runCatching {
+            current.copyTo(
+                previous,
+                overwrite = true,
+            )
+
+            copyWallpaperMeta(
+                current,
+                previous,
+            )
+        }
+    }
+
+    fun previousAvailable(): Boolean =
+        WallpaperFiles.previousHome.exists() ||
+            WallpaperFiles.previousLock.exists()
+
+fun invalidateQueue() =
         synchronized(lock) {
             generation.incrementAndGet()
 
@@ -104,6 +287,8 @@ object WallpaperController {
         allowNetwork: Boolean = true,
     ): Boolean {
         requireStorage()
+
+        purgeBlockedCached(context)
 
         /*
          * Capture queue generation for this preparation pass.
@@ -270,6 +455,8 @@ object WallpaperController {
         settings: AppSettings,
     ): Boolean {
         requireStorage()
+
+        purgeBlockedCached(context)
 
         fun targetReady(): Boolean =
             when (settings.targetMode) {
@@ -455,6 +642,38 @@ object WallpaperController {
                 }
 
                 if (
+                    settings.smartPairingEnabled &&
+                    WallpaperFiles.nextHome.exists() &&
+                    cached.size > 1
+                ) {
+                    val homeId =
+                        cacheCandidateId(
+                            WallpaperFiles.nextHome
+                        )
+
+                    if (homeId != null) {
+                        cached.sortByDescending { file ->
+                            cacheCandidateId(file)
+                                ?.let { candidateId ->
+                                    Phase1FinalEngine
+                                        .pairScore(
+                                            context,
+                                            homeId,
+                                            candidateId,
+                                        )
+                                }
+                                ?: 0
+                        }
+
+                        RuntimeStatus.set(
+                            context,
+                            "smart_pairing",
+                            "Cache pair ranked",
+                        )
+                    }
+                }
+
+                if (
                     !WallpaperFiles.nextLock.exists()
                 ) {
                     consumeInto(
@@ -480,6 +699,7 @@ object WallpaperController {
         context: Context,
         allowNetwork: Boolean = true,
         userInitiated: Boolean = false,
+        preferLockFirst: Boolean = false,
     ): Boolean {
         val now = System.currentTimeMillis()
         if (now - lastApplyStartedAt < 900L) return false
@@ -620,7 +840,41 @@ object WallpaperController {
                 return false
             }
 
+            AutonomousIntelligenceEngine
+                .beginApply(
+                    context,
+                    settings.targetMode.name,
+                )
+
             synchronized(lock) {
+                /*
+                 * Capture the currently active originals before replacing
+                 * them. This extends the old one-level Previous feature
+                 * into persistent multi-history without changing apply
+                 * semantics.
+                 */
+                val historyStarted =
+                    android.os.SystemClock
+                        .elapsedRealtime()
+
+                runCatching {
+                    WallpaperLibrary.captureCurrent(
+                        settings.targetMode,
+                    )
+                }.onFailure {
+                    log(
+                        "HISTORY capture failed: ${it.message}"
+                    )
+                }
+
+                RuntimeStatus.setLong(
+                    context,
+                    "history_capture_ms",
+                    android.os.SystemClock
+                        .elapsedRealtime() -
+                        historyStarted,
+                )
+
                 val wm = WallpaperManager.getInstance(context)
             val blurMaster = blurMasterEnabled(context)
             var changed = false
@@ -652,6 +906,21 @@ object WallpaperController {
                     context,
                     "apply_${target}_started",
                     started,
+                )
+
+                val previous =
+                    if (
+                        flag ==
+                        WallpaperManager.FLAG_SYSTEM
+                    ) {
+                        WallpaperFiles.previousHome
+                    } else {
+                        WallpaperFiles.previousLock
+                    }
+
+                snapshotPrevious(
+                    current,
+                    previous,
                 )
 
                 val result =
@@ -687,15 +956,117 @@ object WallpaperController {
                 WallpaperTargetMode.HOME -> changed = applyNext(WallpaperFiles.nextHome, WallpaperManager.FLAG_SYSTEM, blurMaster && settings.homeBlurEnabled, settings.homeBlurRadius, WallpaperFiles.currentHome)
                 WallpaperTargetMode.LOCK -> changed = applyNext(WallpaperFiles.nextLock, WallpaperManager.FLAG_LOCK, blurMaster && settings.lockBlurEnabled, settings.lockBlurRadius, WallpaperFiles.currentLock)
                 WallpaperTargetMode.BOTH_SAME -> {
-                    val src = WallpaperFiles.nextHome.takeIf { it.exists() } ?: WallpaperFiles.nextLock
-                    val a = applyNext(src, WallpaperManager.FLAG_SYSTEM, blurMaster && settings.homeBlurEnabled, settings.homeBlurRadius, WallpaperFiles.currentHome)
-                    val b = applyNext(src, WallpaperManager.FLAG_LOCK, blurMaster && settings.lockBlurEnabled, settings.lockBlurRadius, WallpaperFiles.currentLock)
-                    changed = a || b
+                    val src =
+                        WallpaperFiles.nextHome
+                            .takeIf { it.exists() }
+                            ?: WallpaperFiles.nextLock
+
+                    if (preferLockFirst) {
+                        /*
+                         * SCREEN_OFF priority:
+                         * get the lock wallpaper committed first so the next
+                         * unlock does not wait behind Home wallpaper work.
+                         */
+                        val lockChanged =
+                            applyNext(
+                                src,
+                                WallpaperManager.FLAG_LOCK,
+                                blurMaster &&
+                                    settings.lockBlurEnabled,
+                                settings.lockBlurRadius,
+                                WallpaperFiles.currentLock,
+                            )
+
+                        val homeChanged =
+                            applyNext(
+                                src,
+                                WallpaperManager.FLAG_SYSTEM,
+                                blurMaster &&
+                                    settings.homeBlurEnabled,
+                                settings.homeBlurRadius,
+                                WallpaperFiles.currentHome,
+                            )
+
+                        changed =
+                            lockChanged ||
+                                homeChanged
+                    } else {
+                        val homeChanged =
+                            applyNext(
+                                src,
+                                WallpaperManager.FLAG_SYSTEM,
+                                blurMaster &&
+                                    settings.homeBlurEnabled,
+                                settings.homeBlurRadius,
+                                WallpaperFiles.currentHome,
+                            )
+
+                        val lockChanged =
+                            applyNext(
+                                src,
+                                WallpaperManager.FLAG_LOCK,
+                                blurMaster &&
+                                    settings.lockBlurEnabled,
+                                settings.lockBlurRadius,
+                                WallpaperFiles.currentLock,
+                            )
+
+                        changed =
+                            homeChanged ||
+                                lockChanged
+                    }
                 }
+
                 WallpaperTargetMode.BOTH_DIFFERENT -> {
-                    val a = applyNext(WallpaperFiles.nextHome, WallpaperManager.FLAG_SYSTEM, blurMaster && settings.homeBlurEnabled, settings.homeBlurRadius, WallpaperFiles.currentHome)
-                    val b = applyNext(WallpaperFiles.nextLock, WallpaperManager.FLAG_LOCK, blurMaster && settings.lockBlurEnabled, settings.lockBlurRadius, WallpaperFiles.currentLock)
-                    changed = a || b
+                    if (preferLockFirst) {
+                        val lockChanged =
+                            applyNext(
+                                WallpaperFiles.nextLock,
+                                WallpaperManager.FLAG_LOCK,
+                                blurMaster &&
+                                    settings.lockBlurEnabled,
+                                settings.lockBlurRadius,
+                                WallpaperFiles.currentLock,
+                            )
+
+                        val homeChanged =
+                            applyNext(
+                                WallpaperFiles.nextHome,
+                                WallpaperManager.FLAG_SYSTEM,
+                                blurMaster &&
+                                    settings.homeBlurEnabled,
+                                settings.homeBlurRadius,
+                                WallpaperFiles.currentHome,
+                            )
+
+                        changed =
+                            lockChanged ||
+                                homeChanged
+                    } else {
+                        val homeChanged =
+                            applyNext(
+                                WallpaperFiles.nextHome,
+                                WallpaperManager.FLAG_SYSTEM,
+                                blurMaster &&
+                                    settings.homeBlurEnabled,
+                                settings.homeBlurRadius,
+                                WallpaperFiles.currentHome,
+                            )
+
+                        val lockChanged =
+                            applyNext(
+                                WallpaperFiles.nextLock,
+                                WallpaperManager.FLAG_LOCK,
+                                blurMaster &&
+                                    settings.lockBlurEnabled,
+                                settings.lockBlurRadius,
+                                WallpaperFiles.currentLock,
+                            )
+
+                        changed =
+                            homeChanged ||
+                                lockChanged
+                    }
                 }
             }
             if (changed) {
@@ -726,10 +1097,47 @@ object WallpaperController {
                   )
 
                   EngineExecutors.io {
-                      runCatching {
-                          WallpaperStyleLearning.analyzeCurrent(
+                      val policy =
+                          Phase1FinalEngine
+                              .resourcePolicy(
+                                  context,
+                                  settings,
+                              )
+
+                      if (policy.allowHeavyAnalysis) {
+                          runCatching {
+                              WallpaperStyleLearning.analyzeCurrent(
+                                  context,
+                                  settings.targetMode,
+                              )
+
+                              VisualIntelligenceEngine.analyzeCurrent(
+                                  context
+                              )
+
+                              AutonomousIntelligenceEngine
+                                  .onApplied(
+                                      context,
+                                      settings,
+                                  )
+
+                              VisualIntelligenceEngine.publishForFile(
+                                  context,
+                                  WallpaperFiles.currentHome,
+                                  "current_home",
+                              )
+
+                              VisualIntelligenceEngine.publishForFile(
+                                  context,
+                                  WallpaperFiles.currentLock,
+                                  "current_lock",
+                              )
+                          }
+                      } else {
+                          RuntimeStatus.set(
                               context,
-                              settings.targetMode,
+                              "analysis_resource_state",
+                              "Skipped • ${policy.label}",
                           )
                       }
                   }
@@ -746,6 +1154,12 @@ object WallpaperController {
                 ).delete()
                 RuntimeStatus.success(context, "Wallpaper applied: ${settings.targetMode.label}")
 
+                AutonomousIntelligenceEngine
+                    .completeApply(
+                        context,
+                        true,
+                    )
+
                 RuntimeStatus.set(
                     context,
                     "next_state",
@@ -754,38 +1168,60 @@ object WallpaperController {
                 RuntimeStatus.setLong(context, "last_change", System.currentTimeMillis())
                 EngineExecutors.io {
                     /*
-                     * Keep the next pair continuously ready.
-                     * Cache promotion is local/instant; cloud refill comes after.
+                     * First promote already-downloaded cache content.
+                     * One apply must not automatically trigger multiple
+                     * overlapping cloud refills.
                      */
-                    runCatching {
-                        prepareNextFromPredictiveCache(
-                            context,
-                            settings,
-                        )
-                    }
+                    val preparedFromCache =
+                        runCatching {
+                            prepareNextFromPredictiveCache(
+                                context,
+                                settings,
+                            )
+                        }.getOrDefault(false)
 
-                    runCatching {
-                        primeCache(
-                            context,
-                            settings,
-                        )
-                    }
+                    val now =
+                        System.currentTimeMillis()
 
+                    val lastPrime =
+                        RuntimeStatus.getLong(
+                            context,
+                            "cache_prime_finished_at",
+                            0L,
+                        )
+
+                    val target =
+                        settings.cacheTarget
+                            .coerceIn(4, 36)
+
+                    /*
+                     * Refill at most once per ten minutes after apply and
+                     * only when cache inventory is below its configured
+                     * target. Resource policy inside primeCache still wins.
+                     */
                     if (
-                        !prepareNextFromPredictiveCache(
-                            context,
-                            settings,
-                        )
+                        cacheCount() < target &&
+                        now - lastPrime >=
+                        10L * 60L * 1000L
                     ) {
+                        runCatching {
+                            primeCache(
+                                context,
+                                settings,
+                            )
+                        }
+                    }
+
+                    /*
+                     * Cloud queue preparation happens only if predictive
+                     * cache could not produce the next required pair.
+                     */
+                    if (!preparedFromCache) {
                         runCatching {
                             ensureNext(
                                 context,
                                 settings,
-                                allowNetwork =
-                                    WallpaperSourceEngine
-                                        .networkAvailable(
-                                            context
-                                        ),
+                                allowNetwork = true,
                             )
                         }
                     }
@@ -799,12 +1235,24 @@ object WallpaperController {
                 }
                 log("NEXT applied target=${settings.targetMode}")
             } else if (!allowNetwork) {
+                AutonomousIntelligenceEngine
+                    .completeApply(
+                        context,
+                        false,
+                    )
+
                 RuntimeStatus.failure(context, "Offline queue empty")
                 log("NEXT skipped: offline queue empty")
             }
             changed
             }
         } catch (t: Throwable) {
+            AutonomousIntelligenceEngine
+                .completeApply(
+                    context,
+                    false,
+                )
+
             RuntimeStatus.failure(context, t.message ?: t.javaClass.simpleName)
             log("NEXT failed: ${t.message}")
             false
@@ -812,6 +1260,272 @@ object WallpaperController {
             applying.set(false)
         }
     }
+
+    fun restoreHistory(
+        context: Context,
+        entry: WallpaperLibrary.HistoryEntry,
+    ): Boolean =
+        synchronized(lock) {
+            requireStorage()
+
+            val settings =
+                SettingsStore(context).load()
+
+            val wm =
+                WallpaperManager.getInstance(
+                    context
+                )
+
+            val master =
+                blurMasterEnabled(context)
+
+            /*
+             * Keep the currently active pair recoverable before
+             * restoring an older history entry.
+             */
+            runCatching {
+                WallpaperLibrary.captureCurrent(
+                    settings.targetMode
+                )
+            }
+
+            fun restoreOne(
+                src: File?,
+                current: File,
+                previous: File,
+                flag: Int,
+                blurEnabled: Boolean,
+                radius: Int,
+            ): Boolean {
+                if (
+                    src == null ||
+                    !src.exists()
+                ) {
+                    return false
+                }
+
+                return runCatching {
+                    snapshotPrevious(
+                        current,
+                        previous,
+                    )
+
+                    reapply(
+                        context = context,
+                        settings = settings,
+                        wm = wm,
+                        src = src,
+                        flag = flag,
+                        doBlur =
+                            master &&
+                                blurEnabled,
+                        radius = radius,
+                    )
+
+                    src.copyTo(
+                        current,
+                        overwrite = true,
+                    )
+
+                    copyWallpaperMeta(
+                        src,
+                        current,
+                    )
+
+                    true
+                }.getOrDefault(false)
+            }
+
+            val homeChanged =
+                restoreOne(
+                    src = entry.home,
+                    current =
+                        WallpaperFiles.currentHome,
+                    previous =
+                        WallpaperFiles.previousHome,
+                    flag =
+                        WallpaperManager.FLAG_SYSTEM,
+                    blurEnabled =
+                        settings.homeBlurEnabled,
+                    radius =
+                        settings.homeBlurRadius,
+                )
+
+            val lockChanged =
+                restoreOne(
+                    src = entry.lock,
+                    current =
+                        WallpaperFiles.currentLock,
+                    previous =
+                        WallpaperFiles.previousLock,
+                    flag =
+                        WallpaperManager.FLAG_LOCK,
+                    blurEnabled =
+                        settings.lockBlurEnabled,
+                    radius =
+                        settings.lockBlurRadius,
+                )
+
+            val changed =
+                homeChanged ||
+                    lockChanged
+
+            if (changed) {
+                runCatching {
+                    TasteLearning.recordAppliedCurrent(
+                        context,
+                        settings.targetMode,
+                    )
+                }
+
+                RuntimeStatus.set(
+                    context,
+                    "last_pipeline",
+                    "History restore • original source",
+                )
+
+                RuntimeStatus.success(
+                    context,
+                    "History wallpaper restored",
+                )
+
+                log(
+                    "HISTORY restored ${entry.id}"
+                )
+            }
+
+            changed
+        }
+
+    fun previousWall(
+        context: Context,
+    ): Boolean =
+        synchronized(lock) {
+            WallpaperFiles.ensure()
+
+            val settings =
+                SettingsStore(context).load()
+
+            val wm =
+                WallpaperManager.getInstance(context)
+
+            val master =
+                blurMasterEnabled(context)
+
+            fun restore(
+                previous: File,
+                current: File,
+                flag: Int,
+                blurEnabled: Boolean,
+                radius: Int,
+            ): Boolean {
+                if (!previous.exists()) {
+                    return false
+                }
+
+                return runCatching {
+                    reapply(
+                        context,
+                        settings,
+                        wm,
+                        previous,
+                        flag,
+                        master && blurEnabled,
+                        radius,
+                    )
+
+                    previous.copyTo(
+                        current,
+                        overwrite = true,
+                    )
+
+                    val pm =
+                        File(
+                            previous.absolutePath +
+                                ".meta"
+                        )
+
+                    val cm =
+                        File(
+                            current.absolutePath +
+                                ".meta"
+                        )
+
+                    if (pm.exists()) {
+                        pm.copyTo(
+                            cm,
+                            overwrite = true,
+                        )
+                    } else {
+                        cm.delete()
+                    }
+
+                    previous.delete()
+                    pm.delete()
+
+                    true
+                }.getOrDefault(false)
+            }
+
+            val changed =
+                when (settings.targetMode) {
+                    WallpaperTargetMode.HOME ->
+                        restore(
+                            WallpaperFiles.previousHome,
+                            WallpaperFiles.currentHome,
+                            WallpaperManager.FLAG_SYSTEM,
+                            settings.homeBlurEnabled,
+                            settings.homeBlurRadius,
+                        )
+
+                    WallpaperTargetMode.LOCK ->
+                        restore(
+                            WallpaperFiles.previousLock,
+                            WallpaperFiles.currentLock,
+                            WallpaperManager.FLAG_LOCK,
+                            settings.lockBlurEnabled,
+                            settings.lockBlurRadius,
+                        )
+
+                    WallpaperTargetMode.BOTH_SAME,
+                    WallpaperTargetMode.BOTH_DIFFERENT -> {
+                        val a =
+                            restore(
+                                WallpaperFiles.previousHome,
+                                WallpaperFiles.currentHome,
+                                WallpaperManager.FLAG_SYSTEM,
+                                settings.homeBlurEnabled,
+                                settings.homeBlurRadius,
+                            )
+
+                        val b =
+                            restore(
+                                WallpaperFiles.previousLock,
+                                WallpaperFiles.currentLock,
+                                WallpaperManager.FLAG_LOCK,
+                                settings.lockBlurEnabled,
+                                settings.lockBlurRadius,
+                            )
+
+                        a || b
+                    }
+                }
+
+            if (changed) {
+                RuntimeStatus.set(
+                    context,
+                    "last_pipeline",
+                    "Previous wallpaper • original source restored",
+                )
+
+                RuntimeStatus.success(
+                    context,
+                    "Previous wallpaper restored",
+                )
+            }
+
+            changed
+        }
 
     fun saveCurrent(context: Context): List<File> = synchronized(lock) {
         requireStorage()
@@ -831,7 +1545,7 @@ object WallpaperController {
                 return
             }
 
-            val bitmap = decodeForProcessing(src) ?: return
+            val bitmap = decodeOriginalArgb(src) ?: return
             val rendered = blur(bitmap, radius)
             val dest = uniqueFile(WallpaperFiles.saved, "BBPixWall_${stamp}_${suffix}_wall_blurred", "png")
             FileOutputStream(dest).use { rendered.compress(Bitmap.CompressFormat.PNG, 100, it) }
@@ -951,12 +1665,12 @@ object WallpaperController {
          * Never make the UI/QS/remote caller wait for bitmap decoding.
          * The state flips immediately. Wallpaper commit runs separately.
          */
-        EngineExecutors.io {
+        EngineExecutors.blur {
             if (
                 generation !=
                 blurGeneration.get()
             ) {
-                return@io
+                return@blur
             }
 
             runCatching {
@@ -1033,7 +1747,7 @@ object WallpaperController {
             SettingsStore(context)
                 .load()
 
-        EngineExecutors.io {
+        EngineExecutors.blur {
             runCatching {
                 reapplyCurrentBlurState(
                     context = context,
@@ -1153,20 +1867,50 @@ object WallpaperController {
     ) {
         if (!src.exists()) return
 
+        val target =
+            if (flag == WallpaperManager.FLAG_SYSTEM) {
+                "home"
+            } else {
+                "lock"
+            }
+
+        val totalStart =
+            android.os.SystemClock.elapsedRealtime()
+
+        log(
+            "BLUR_TIMING target=$target enabled=$enabled start"
+        )
+
         if (
             enabled &&
             radius > 0
         ) {
+            val cacheStart =
+                android.os.SystemClock.elapsedRealtime()
+
             val cached =
                 prepareBlurCache(
                     src,
                     radius,
                 )
 
+            log(
+                "BLUR_TIMING target=$target cache_ms=" +
+                    (android.os.SystemClock.elapsedRealtime() - cacheStart) +
+                    " hit=${cached != null && cached.exists()}"
+            )
+
             if (
                 cached != null &&
                 cached.exists()
             ) {
+                val commitStart =
+                    android.os.SystemClock.elapsedRealtime()
+
+                log(
+                    "BLUR_TIMING target=$target setStream_start"
+                )
+
                 FileInputStream(
                     cached
                 ).use { input ->
@@ -1178,6 +1922,18 @@ object WallpaperController {
                     )
                 }
 
+                val commitMs =
+                    android.os.SystemClock.elapsedRealtime() -
+                        commitStart
+
+                val totalMs =
+                    android.os.SystemClock.elapsedRealtime() -
+                        totalStart
+
+                log(
+                    "BLUR_TIMING target=$target setStream_ms=$commitMs total_ms=$totalMs"
+                )
+
                 RuntimeStatus.set(
                     context,
                     "last_pipeline",
@@ -1188,6 +1944,13 @@ object WallpaperController {
             }
         }
 
+        val reapplyStart =
+            android.os.SystemClock.elapsedRealtime()
+
+        log(
+            "BLUR_TIMING target=$target original_reapply_start"
+        )
+
         reapply(
             context = context,
             settings = settings,
@@ -1197,7 +1960,36 @@ object WallpaperController {
             doBlur = false,
             radius = radius,
         )
+
+        val reapplyMs =
+            android.os.SystemClock.elapsedRealtime() -
+                reapplyStart
+
+        val totalMs =
+            android.os.SystemClock.elapsedRealtime() -
+                totalStart
+
+        log(
+            "BLUR_TIMING target=$target original_reapply_ms=$reapplyMs total_ms=$totalMs"
+        )
     }
+
+    private fun decodeOriginalArgb(
+        file: File,
+    ): Bitmap? =
+        runCatching {
+            val options =
+                BitmapFactory.Options().apply {
+                    inPreferredConfig =
+                        Bitmap.Config.ARGB_8888
+                    inScaled = false
+                }
+
+            BitmapFactory.decodeFile(
+                file.absolutePath,
+                options,
+            )
+        }.getOrNull()
 
     private fun blurCacheFile(
         src: File,
@@ -1281,8 +2073,8 @@ object WallpaperController {
             ).use { output ->
                 if (
                     !rendered.compress(
-                        Bitmap.CompressFormat.JPEG,
-                        96,
+                        Bitmap.CompressFormat.PNG,
+                        100,
                         output,
                     )
                 ) {
@@ -1341,7 +2133,7 @@ object WallpaperController {
             RuntimeStatus.set(context, "last_pipeline", if (aspect.matchesNineByTwenty) "Original 9:20 • untouched" else "Original stream • smart crop off/quality fallback")
             return
         }
-        val bitmap = decodeForProcessing(src, 2200) ?: return
+        val bitmap = decodeOriginalArgb(src) ?: return
         val rendered = blur(bitmap, radius)
         try { wm.setBitmap(rendered, null, true, flag) }
         finally {
@@ -1823,63 +2615,7 @@ object WallpaperController {
         RuntimeStatus.set(
             context,
             "apply_cache_state",
-            "Preparing",
-        )
-
-        when (settings.targetMode) {
-            WallpaperTargetMode.HOME -> {
-                prepareApplyCache(
-                    context,
-                    settings,
-                    WallpaperFiles.nextHome,
-                )
-            }
-
-            WallpaperTargetMode.LOCK -> {
-                prepareApplyCache(
-                    context,
-                    settings,
-                    WallpaperFiles.nextLock,
-                )
-            }
-
-            WallpaperTargetMode.BOTH_SAME -> {
-                val src =
-                    WallpaperFiles.nextHome
-                        .takeIf {
-                            it.exists()
-                        }
-                        ?: WallpaperFiles.nextLock
-
-                prepareApplyCache(
-                    context,
-                    settings,
-                    src,
-                )
-            }
-
-            WallpaperTargetMode.BOTH_DIFFERENT -> {
-                prepareApplyCache(
-                    context,
-                    settings,
-                    WallpaperFiles.nextHome,
-                )
-
-                prepareApplyCache(
-                    context,
-                    settings,
-                    WallpaperFiles.nextLock,
-                )
-            }
-        }
-
-        val size =
-            applyTargetSize(context)
-
-        RuntimeStatus.set(
-            context,
-            "apply_cache_state",
-            "Ready ${size.width}x${size.height}",
+            "Original source • lossless",
         )
     }
 
@@ -2069,13 +2805,65 @@ object WallpaperController {
             }
 
             /*
+             * One-level rollback snapshot.
+             * Preserve the exact previous source before replacing current.
+             */
+            val previousTarget =
+                when (current) {
+                    WallpaperFiles.currentHome ->
+                        WallpaperFiles.previousHome
+
+                    WallpaperFiles.currentLock ->
+                        WallpaperFiles.previousLock
+
+                    else ->
+                        null
+                }
+
+            if (
+                previousTarget != null &&
+                current.exists()
+            ) {
+                current.copyTo(
+                    previousTarget,
+                    overwrite = true,
+                )
+
+                val oldMeta =
+                    File(
+                        current.absolutePath +
+                            ".meta"
+                    )
+
+                val previousMeta =
+                    File(
+                        previousTarget.absolutePath +
+                            ".meta"
+                    )
+
+                if (oldMeta.exists()) {
+                    oldMeta.copyTo(
+                        previousMeta,
+                        overwrite = true,
+                    )
+                } else {
+                    previousMeta.delete()
+                }
+            }
+
+            /*
              * Current file always remains the exact original.
              * Prepared cache is disposable acceleration only.
              */
-            src.copyTo(
-                current,
-                overwrite = true,
-            )
+            check(
+                AutonomousIntelligenceEngine
+                    .atomicReplace(
+                        src,
+                        current,
+                    )
+            ) {
+                "Atomic current-file commit failed"
+            }
 
             val meta =
                 File(
@@ -2395,17 +3183,21 @@ object WallpaperController {
                 true,
             )
         ) {
-            cachePrimeRequested.set(true)
+            val firstCoalescedRequest =
+                !cachePrimeRequested
+                    .getAndSet(true)
 
             RuntimeStatus.set(
                 context,
                 "cache_refill_queue",
-                "queued",
+                "coalesced",
             )
 
-            log(
-                "CACHE prime queued: already running"
-            )
+            if (firstCoalescedRequest) {
+                log(
+                    "CACHE prime coalesced: active pass already running"
+                )
+            }
 
             return
         }
@@ -2441,62 +3233,50 @@ object WallpaperController {
                 System.currentTimeMillis(),
             )
 
-            /*
-             * Capture requests both before and immediately after
-             * releasing the priming guard. This closes the tiny race
-             * where another caller can queue a refill between the
-             * first request check and cachePriming becoming false.
-             */
-            val followUpBeforeRelease =
+            val coalesced =
                 cachePrimeRequested
                     .getAndSet(false)
 
             cachePriming.set(false)
 
-            val followUpAfterRelease =
-                cachePrimeRequested
-                    .getAndSet(false)
-
-            val followUp =
-                followUpBeforeRelease ||
-                    followUpAfterRelease
-
             RuntimeStatus.set(
                 context,
                 "cache_refill_queue",
-                if (followUp) {
-                    "follow-up scheduled"
+                if (coalesced) {
+                    "idle • duplicate requests coalesced"
                 } else {
                     "idle"
                 },
             )
-
-            if (followUp) {
-                EngineExecutors.io {
-                    /*
-                     * Tiny yield lets filesystem/cache moves settle
-                     * before recalculating the live inventory.
-                     */
-                    runCatching {
-                        Thread.sleep(250L)
-
-                        primeCache(
-                            context,
-                            SettingsStore(context)
-                                .load(),
-                        )
-                    }.onFailure {
-                        log(
-                            "CACHE follow-up failed: ${it.message}"
-                        )
-                    }
-                }
-            }
         }
     }
 
     private fun primeCacheImpl(context: Context, settings: AppSettings) {
         requireStorage()
+
+        purgeBlockedCached(context)
+
+        val resourcePolicy =
+            Phase1FinalEngine
+                .resourcePolicy(
+                    context,
+                    settings,
+                )
+
+        if (
+            settings
+                .adaptiveResourceProtectionEnabled &&
+            !resourcePolicy
+                .allowNetworkRefill
+        ) {
+            RuntimeStatus.set(
+                context,
+                "cache_resource_state",
+                "Paused • ${resourcePolicy.label}",
+            )
+
+            return
+        }
 
         val primeGeneration =
             generation.get()
@@ -2512,15 +3292,42 @@ object WallpaperController {
             log("CACHE paused: low storage reserve=${settings.lowStorageReserveMb}MB")
             return
         }
-        val target = when {
-            settings.leanStorageMode -> settings.cacheTarget.coerceIn(4, 36)
-            settings.engineMode == EngineMode.ADVANCED -> max(settings.cacheTarget, 16)
-            else -> settings.cacheTarget.coerceIn(4, 36)
-        }
+        val requestedTarget =
+            when {
+                settings.leanStorageMode ->
+                    settings.cacheTarget
+                        .coerceIn(4, 36)
+
+                settings.engineMode ==
+                    EngineMode.ADVANCED ->
+                    max(
+                        settings.cacheTarget,
+                        16,
+                    )
+
+                else ->
+                    settings.cacheTarget
+                        .coerceIn(4, 36)
+            }
+
+        val target =
+            Phase1FinalEngine
+                .adjustedCacheTarget(
+                    requestedTarget,
+                    resourcePolicy,
+                )
         val hotTarget =
             adaptiveHotTarget(target)
 
         trimCache(target)
+
+        trimCacheBytes(
+            settings.cacheMaxMb
+                .coerceIn(128, 2048)
+                .toLong() *
+                1024L *
+                1024L
+        )
 
         val existing =
             cacheImageFiles()
@@ -2651,6 +3458,9 @@ object WallpaperController {
 
         if (candidates.isEmpty()) return
 
+        val blockedIds =
+            WallpaperLibrary.blockedIds()
+
         /*
          * The public Google Photos surface may expose only a bounded
          * candidate window even when the shared album itself is much
@@ -2739,7 +3549,8 @@ object WallpaperController {
 
         val unseenAvailable =
             candidates.count { candidate ->
-                candidate.id !in seenIds &&
+                candidate.id !in blockedIds &&
+                    candidate.id !in seenIds &&
                     candidate.id !in cachedIds
             }
 
@@ -2797,6 +3608,7 @@ object WallpaperController {
             ).toMutableSet()
         var index = existing.size
         var successfulAdds = 0
+        var skippedBlocked = 0
         var skippedSeenId = 0
         var skippedCachedId = 0
         var skippedDuplicate = 0
@@ -2828,6 +3640,17 @@ object WallpaperController {
                 successfulAdds >=
                     refillBatch
             ) break
+
+            if (
+                candidate.id in blockedIds ||
+                WallpaperLibrary.isBlocked(
+                    candidate.id
+                )
+            ) {
+                skippedBlocked++
+                continue
+            }
+
             if (candidate.id in seenIds) {
                 skippedSeenId++
                 continue
@@ -2883,6 +3706,16 @@ object WallpaperController {
                 }
 
                 val hash = sha256(staging)
+
+                if (
+                    WallpaperLibrary
+                        .isBlockedHash(hash)
+                ) {
+                    skippedBlocked++
+                    staging.delete()
+                    continue
+                }
+
                 val ph = perceptualHash(staging)
 
                 val duplicate =
@@ -2904,12 +3737,53 @@ object WallpaperController {
                  * No additional network and no second decode is required
                  * later merely to decide Hot vs Warm.
                  */
-                runCatching {
-                    WallpaperStyleLearning.analyzeAndStore(
+                if (
+                    resourcePolicy
+                        .allowHeavyAnalysis
+                ) {
+                    runCatching {
+                        WallpaperStyleLearning.analyzeAndStore(
+                            context,
+                            candidate.id,
+                            staging,
+                        )
+
+                        VisualIntelligenceEngine.analyzeAndStore(
+                            context,
+                            candidate.id,
+                            staging,
+                        )
+                    }
+                }
+
+                val visualQualityProblem =
+                    VisualIntelligenceEngine
+                        .severeQualityProblem(
+                            context,
+                            candidate.id,
+                        )
+
+                if (
+                    visualQualityProblem != null
+                ) {
+                    RuntimeStatus.set(
                         context,
-                        candidate.id,
-                        staging,
+                        "quality_guard_last",
+                        "${candidate.id.take(80)} • " +
+                            visualQualityProblem,
                     )
+
+                    quarantine(
+                        staging,
+                        "visual_quality",
+                    )
+
+                    File(
+                        staging.absolutePath +
+                            ".meta"
+                    ).delete()
+
+                    continue
                 }
 
                 val predictiveScore =
@@ -2960,7 +3834,14 @@ object WallpaperController {
                          * lock, so generation check + cache commit is
                          * atomic against a source-contract mutation.
                          */
-                        if (stalePrime()) {
+                        if (
+                            stalePrime() ||
+                            WallpaperLibrary.isBlocked(
+                                candidate.id
+                            ) ||
+                            WallpaperLibrary
+                                .isBlockedHash(hash)
+                        ) {
                             false
                         } else {
                             val moved =
@@ -3099,13 +3980,23 @@ object WallpaperController {
         RuntimeStatus.set(
             context,
             "cache_duplicate_guard",
-            "seen=$skippedSeenId" +
+            "blocked=$skippedBlocked" +
+                " • seen=$skippedSeenId" +
                 " • cached=$skippedCachedId" +
                 " • duplicate=$skippedDuplicate" +
                 " • added=$successfulAdds",
         )
 
         trimCache(target)
+
+        trimCacheBytes(
+            settings.cacheMaxMb
+                .coerceIn(128, 2048)
+                .toLong() *
+                1024L *
+                1024L
+        )
+
         rebalancePredictiveCache(
             context,
             hotTarget,
@@ -3942,6 +4833,141 @@ object WallpaperController {
         return false
     }
 
+    fun purgeBlockedCached(
+        context: Context,
+    ): Int =
+        synchronized(lock) {
+            WallpaperFiles.ensure()
+
+            val allowed =
+                setOf(
+                    "jpg",
+                    "jpeg",
+                    "png",
+                    "webp",
+                    "avif",
+                )
+
+            val candidates =
+                (
+                    listOf(
+                        WallpaperFiles.nextHome,
+                        WallpaperFiles.nextLock,
+                    ) +
+                        listOf(
+                            WallpaperFiles.hotCache,
+                            WallpaperFiles.warmCache,
+                            WallpaperFiles.cache,
+                            WallpaperFiles.queue,
+                            WallpaperFiles.legacyQueue,
+                        ).flatMap { dir ->
+                            dir.listFiles()
+                                .orEmpty()
+                                .filter {
+                                    it.isFile &&
+                                        it.extension
+                                            .lowercase() in
+                                        allowed
+                                }
+                        }
+                )
+                    .filter {
+                        it.exists() &&
+                            it.isFile
+                    }
+                    .distinctBy {
+                        it.absolutePath
+                    }
+
+            var removed = 0
+
+            candidates.forEach { file ->
+                val id =
+                    cacheCandidateId(file)
+
+                val blocked =
+                    (
+                        id != null &&
+                            WallpaperLibrary
+                                .isBlocked(id)
+                    ) ||
+                        WallpaperLibrary
+                            .isBlockedFile(file)
+
+                if (blocked) {
+                    if (file.delete()) {
+                        removed++
+                    }
+
+                    File(
+                        file.absolutePath +
+                            ".meta"
+                    ).delete()
+
+                    File(
+                        file.absolutePath +
+                            ".part"
+                    ).delete()
+                }
+            }
+
+            RuntimeStatus.set(
+                context,
+                "blocked_cache_purge",
+                removed.toString(),
+            )
+
+            removed
+        }
+
+    private fun trimCacheBytes(
+        maxBytes: Long,
+    ) {
+        if (maxBytes <= 0L) {
+            return
+        }
+
+        val files =
+            cacheImageFiles()
+                .sortedBy {
+                    it.lastModified()
+                }
+                .toMutableList()
+
+        var total =
+            files.sumOf {
+                it.length()
+            }
+
+        val iterator =
+            files.iterator()
+
+        while (
+            total > maxBytes &&
+            iterator.hasNext()
+        ) {
+            val file =
+                iterator.next()
+
+            val size =
+                file.length()
+
+            if (file.delete()) {
+                total -= size
+
+                File(
+                    file.absolutePath +
+                        ".meta"
+                ).delete()
+
+                File(
+                    file.absolutePath +
+                        ".part"
+                ).delete()
+            }
+        }
+    }
+
     private fun trimCache(maxFiles: Int) {
         val protected = setOf(WallpaperFiles.currentHome.absolutePath, WallpaperFiles.currentLock.absolutePath, WallpaperFiles.nextHome.absolutePath, WallpaperFiles.nextLock.absolutePath)
         val images = cacheImageFiles().filter { it.absolutePath !in protected }.sortedByDescending { it.lastModified() }
@@ -3994,15 +5020,85 @@ object WallpaperController {
         var attempted = 0
         for (candidate in ordered) {
             if (candidate.id in seenIds) continue
+
+            if (
+                WallpaperLibrary.isBlocked(
+                    candidate.id
+                )
+            ) {
+                RuntimeStatus.set(
+                    context,
+                    "selection_blocked_last",
+                    candidate.id.take(180),
+                )
+
+                continue
+            }
+
             attempted++
             try {
                 fetchTo(candidate, dest)
                 val hash = sha256(dest)
-                if (hash in avoidHashes && ordered.size > 1) {
+
+                if (
+                    WallpaperLibrary
+                        .isBlockedHash(hash)
+                ) {
                     dest.delete()
                     continue
                 }
-                writeMeta(dest, candidate.source, candidate.id)
+
+                val ph =
+                    perceptualHash(dest)
+
+                val duplicatePhash =
+                    buildSet {
+                        addAll(
+                            readLinesSet(
+                                WallpaperFiles.seenPerceptual
+                            )
+                        )
+
+                        listOf(
+                            WallpaperFiles.currentHome,
+                            WallpaperFiles.currentLock,
+                            WallpaperFiles.nextHome,
+                            WallpaperFiles.nextLock,
+                        ).filter(File::exists)
+                            .mapNotNull {
+                                runCatching {
+                                    perceptualHash(it)
+                                }.getOrNull()
+                            }
+                            .filter(String::isNotBlank)
+                            .forEach(::add)
+                    }
+
+                val perceptualDuplicate =
+                    perceptuallySeen(
+                        ph,
+                        duplicatePhash,
+                        SettingsStore(context)
+                            .load()
+                            .perceptualDistance,
+                    )
+
+                if (
+                    ordered.size > 1 &&
+                    (
+                        hash in avoidHashes ||
+                            perceptualDuplicate
+                    )
+                ) {
+                    dest.delete()
+                    continue
+                }
+
+                writeMeta(
+                    dest,
+                    candidate.source,
+                    candidate.id,
+                )
 
                 runCatching {
                     WallpaperStyleLearning.analyzeAndStore(
@@ -4010,7 +5106,44 @@ object WallpaperController {
                         candidate.id,
                         dest,
                     )
+
+                    VisualIntelligenceEngine.analyzeAndStore(
+                        context,
+                        candidate.id,
+                        dest,
+                    )
                 }
+                val directVisualProblem =
+                    VisualIntelligenceEngine
+                        .severeQualityProblem(
+                            context,
+                            candidate.id,
+                        )
+
+                if (
+                    ordered.size > 1 &&
+                    directVisualProblem != null
+                ) {
+                    RuntimeStatus.set(
+                        context,
+                        "quality_guard_last",
+                        "${candidate.id.take(80)} • " +
+                            directVisualProblem,
+                    )
+
+                    quarantine(
+                        dest,
+                        "visual_quality_direct",
+                    )
+
+                    File(
+                        dest.absolutePath +
+                            ".meta"
+                    ).delete()
+
+                    continue
+                }
+
                 RuntimeStatus.activeSource(context, candidate.source)
                 val ids = readLinesSet(WallpaperFiles.seenIds).toMutableSet().apply { add(candidate.id) }
                 writeLinesSet(WallpaperFiles.seenIds, ids.toList().takeLast(10000).toSet())
@@ -4171,6 +5304,213 @@ object WallpaperController {
     private fun freeBytes(): Long = runCatching { StatFs(WallpaperFiles.root.absolutePath).availableBytes }.getOrDefault(Long.MAX_VALUE)
     private fun quarantine(file: File, prefix: String) { if (!file.exists()) return; runCatching { WallpaperFiles.quarantine.mkdirs(); file.renameTo(File(WallpaperFiles.quarantine, "${prefix}_${System.currentTimeMillis()}.bad")) } }
     private fun writeMeta(file: File, source: String, id: String) { runCatching { val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }; BitmapFactory.decodeFile(file.absolutePath, bounds); File(file.absolutePath + ".meta").writeText("source=$source\nid=$id\nbytes=${file.length()}\nsha256=${sha256(file)}\nwidth=${bounds.outWidth}\nheight=${bounds.outHeight}\n") } }
+    data class WallpaperInfo(
+        val path: String,
+        val source: String,
+        val format: String,
+        val width: Int,
+        val height: Int,
+        val bytes: Long,
+        val sizeLabel: String,
+    )
+
+    fun wallpaperInfo(
+        path: String?,
+    ): WallpaperInfo? {
+        if (path.isNullOrBlank()) {
+            return null
+        }
+
+        val file = File(path)
+
+        if (!file.exists() || !file.isFile) {
+            return null
+        }
+
+        val bounds =
+            BitmapFactory.Options().apply {
+                inJustDecodeBounds = true
+                BitmapFactory.decodeFile(
+                    file.absolutePath,
+                    this,
+                )
+            }
+
+        val bytes = file.length()
+
+        val sizeLabel =
+            when {
+                bytes >= 1024L * 1024L ->
+                    String.format(
+                        java.util.Locale.US,
+                        "%.2f MB",
+                        bytes.toDouble() /
+                            (1024.0 * 1024.0),
+                    )
+
+                bytes >= 1024L ->
+                    String.format(
+                        java.util.Locale.US,
+                        "%.1f KB",
+                        bytes.toDouble() / 1024.0,
+                    )
+
+                else ->
+                    "$bytes B"
+            }
+
+        return WallpaperInfo(
+            path = file.absolutePath,
+            source = sourceFor(path),
+            format =
+                detectImageExtension(file)
+                    .uppercase(),
+            width = bounds.outWidth,
+            height = bounds.outHeight,
+            bytes = bytes,
+            sizeLabel = sizeLabel,
+        )
+    }
+
+    fun blurLabel(
+        context: Context,
+        home: Boolean,
+    ): String {
+        val settings =
+            SettingsStore(context).load()
+
+        val master =
+            blurMasterEnabled(context)
+
+        val enabled =
+            if (home) {
+                settings.homeBlurEnabled
+            } else {
+                settings.lockBlurEnabled
+            }
+
+        val radius =
+            if (home) {
+                settings.homeBlurRadius
+            } else {
+                settings.lockBlurRadius
+            }
+
+        return if (
+            master &&
+            enabled &&
+            radius > 0
+        ) {
+            "Blur ON • r$radius"
+        } else {
+            "Blur OFF"
+        }
+    }
+
+    fun previewFile(
+        context: Context,
+        file: File,
+        home: Boolean,
+    ): File {
+        if (!file.exists()) {
+            return file
+        }
+
+        val settings =
+            SettingsStore(context).load()
+
+        if (!blurMasterEnabled(context)) {
+            return file
+        }
+
+        val enabled =
+            if (home) {
+                settings.homeBlurEnabled
+            } else {
+                settings.lockBlurEnabled
+            }
+
+        val radius =
+            if (home) {
+                settings.homeBlurRadius
+            } else {
+                settings.lockBlurRadius
+            }
+
+        if (!enabled || radius <= 0) {
+            return file
+        }
+
+        return prepareBlurCache(
+            file,
+            radius,
+        ) ?: file
+    }
+
+    fun qualityGuardian(
+        context: Context,
+    ): String {
+        WallpaperFiles.ensure()
+
+        val active =
+            listOf(
+                WallpaperFiles.currentHome,
+                WallpaperFiles.currentLock,
+            ).filter(File::exists)
+
+        if (active.isEmpty()) {
+            return "WAITING • no current wallpaper"
+        }
+
+        val invalid =
+            active.firstOrNull { file ->
+                val info =
+                    wallpaperInfo(
+                        file.absolutePath
+                    )
+
+                info == null ||
+                    info.width <= 0 ||
+                    info.height <= 0 ||
+                    info.bytes <= 0L
+            }
+
+        if (invalid != null) {
+            return "FAIL • invalid ${invalid.name}"
+        }
+
+        val lossyApplyCache =
+            WallpaperFiles.backup
+                .listFiles()
+                .orEmpty()
+                .any {
+                    it.isFile &&
+                        ".apply_" in it.name
+                }
+
+        if (lossyApplyCache) {
+            return "FAIL • obsolete apply cache detected"
+        }
+
+        val pipeline =
+            RuntimeStatus.get(
+                context,
+                "last_pipeline",
+                "Unknown",
+            )
+
+        if (
+            pipeline.contains(
+                "prepared cache",
+                ignoreCase = true,
+            )
+        ) {
+            return "FAIL • lossy prepared pipeline"
+        }
+
+        return "PASS • original-quality pipeline"
+    }
+
     fun sourceFor(path: String?): String {
         if (path == null) return "None"
         val meta = File(path + ".meta")
@@ -4195,6 +5535,52 @@ object WallpaperController {
             appendLine("leanStorage=${s.leanStorageMode}")
             appendLine("lastPipeline=${RuntimeStatus.get(context,"last_pipeline","Unknown")}")
             appendLine("lastAspect=${RuntimeStatus.get(context,"last_aspect","Unknown")}")
+            appendLine("visualProfile=${RuntimeStatus.get(context,"visual_last_decision",RuntimeStatus.get(context,"visual_last_profile","Waiting"))}")
+            appendLine("visualPalette=${RuntimeStatus.get(context,"visual_last_palette","Waiting")}")
+            appendLine("visualDetail=${RuntimeStatus.get(context,"visual_last_detail","Waiting")}")
+            appendLine("visualPairing=${RuntimeStatus.get(context,"visual_pairing","Waiting")}")
+            appendLine("autonomousGrade=${RuntimeStatus.get(context,"autonomous_grade","Waiting")}")
+            appendLine("autonomousHealth=${RuntimeStatus.get(context,"autonomous_health","Waiting")}")
+            appendLine("selfHeal=${RuntimeStatus.get(context,"self_heal_last","Waiting")}")
+            appendLine("storagePressure=${RuntimeStatus.get(context,"storage_pressure","Waiting")}")
+            appendLine("wallpaperDNA=${RuntimeStatus.get(context,"wallpaper_dna","Waiting")}")
+            appendLine("wallpaperFamily=${RuntimeStatus.get(context,"wallpaper_family","Waiting")}")
+            appendLine("familyFatigue=${RuntimeStatus.get(context,"family_fatigue","Waiting")}")
+            appendLine("pairStory=${RuntimeStatus.get(context,"pair_story","Waiting")}")
+            appendLine("tasteConfidenceV2=${RuntimeStatus.get(context,"taste_confidence_v2","Waiting")}")
+            appendLine("learningMode=${RuntimeStatus.get(context,"learning_mode","Waiting")}")
+            appendLine("contextConfidence=${RuntimeStatus.get(context,"context_confidence","Waiting")}")
+            appendLine("contextConflict=${RuntimeStatus.get(context,"context_conflict","Waiting")}")
+            appendLine("sourcePhotosTrust=${RuntimeStatus.get(context,"source_photos_trust","Waiting")}")
+            appendLine("sourceDriveTrust=${RuntimeStatus.get(context,"source_drive_trust","Waiting")}")
+            appendLine("decisionTrace=${RuntimeStatus.get(context,"decision_trace_id","Waiting")}")
+            appendLine("decisionConfidenceV2=${RuntimeStatus.get(context,"decision_confidence_v2","Waiting")}")
+            appendLine("decisionWhyV2=${RuntimeStatus.get(context,"decision_why_v2","Waiting")}")
+            appendLine("whyNotRunner=${RuntimeStatus.get(context,"decision_why_not_runner","Waiting")}")
+            appendLine("shadowRank=${RuntimeStatus.get(context,"shadow_rank","Waiting")}")
+            appendLine("qualityGuard=${RuntimeStatus.get(context,"quality_guard_last","No rejection")}")
+            appendLine("applyJournal=${RuntimeStatus.get(context,"apply_journal","Idle")}")
+            appendLine("crashRecovery=${RuntimeStatus.get(context,"crash_recovery","None")}")
+            appendLine("premiumHomeDNA=${RuntimeStatus.get(context,"premium_home_dna","Waiting")}")
+            appendLine("premiumHomePalette=${RuntimeStatus.get(context,"premium_home_palette","Waiting")}")
+            appendLine("premiumHomeVisual=${RuntimeStatus.get(context,"premium_home_visual","Waiting")}")
+            appendLine("premiumHomeRole=${RuntimeStatus.get(context,"premium_home_role","Waiting")}")
+            appendLine("premiumLockDNA=${RuntimeStatus.get(context,"premium_lock_dna","Waiting")}")
+            appendLine("premiumLockPalette=${RuntimeStatus.get(context,"premium_lock_palette","Waiting")}")
+            appendLine("premiumLockVisual=${RuntimeStatus.get(context,"premium_lock_visual","Waiting")}")
+            appendLine("premiumLockRole=${RuntimeStatus.get(context,"premium_lock_role","Waiting")}")
+            appendLine("premiumPairSummary=${RuntimeStatus.get(context,"premium_pair_summary","Waiting")}")
+            appendLine("premiumPairHarmony=${RuntimeStatus.get(context,"premium_pair_harmony","Waiting")}")
+            appendLine("premiumCacheMap=${RuntimeStatus.get(context,"premium_cache_map","Waiting")}")
+            appendLine("premiumCacheSize=${RuntimeStatus.get(context,"premium_cache_size","Waiting")}")
+            appendLine("premiumCacheReadiness=${RuntimeStatus.get(context,"premium_cache_readiness","Waiting")}")
+            appendLine("premiumSourcePhotos=${RuntimeStatus.get(context,"premium_source_photos","Waiting")}")
+            appendLine("premiumSourceDrive=${RuntimeStatus.get(context,"premium_source_drive","Waiting")}")
+            appendLine("premiumWatchdogAge=${RuntimeStatus.get(context,"premium_watchdog_age","Waiting")}")
+            appendLine("premiumApplyTiming=${RuntimeStatus.get(context,"premium_apply_timing","Waiting")}")
+            appendLine("premiumLibrary=${RuntimeStatus.get(context,"premium_library","Waiting")}")
+            appendLine("premiumRecovery=${RuntimeStatus.get(context,"premium_recovery","Waiting")}")
+            appendLine("premiumTimeline=${RuntimeStatus.get(context,"premium_event_timeline","Waiting")}")
             appendLine("rootState=${RuntimeStatus.get(context,"root_state","Not checked")}")
             appendLine("rootProvider=${RuntimeStatus.get(context,"root_provider","Unknown")}")
             appendLine("rootCaps=${RuntimeStatus.get(context,"root_caps","Not scanned")}")
@@ -4241,20 +5627,120 @@ object WallpaperController {
         return candidate
     }
 
-    private fun blur(source: Bitmap, requestedRadius: Int): Bitmap {
-        val radius = requestedRadius.coerceIn(1, 64)
-        val scale = 0.22f
-        val w = max((source.width * scale).toInt(), 64)
-        val h = max((source.height * scale).toInt(), 64)
-        val small = Bitmap.createScaledBitmap(source, w, h, true)
-        val pixels = IntArray(w * h)
-        small.getPixels(pixels, 0, w, 0, 0, w, h)
-        val r = max((radius * scale).toInt(), 1)
-        boxBlur(pixels, w, h, r)
-        val blurredSmall = Bitmap.createBitmap(pixels, w, h, Bitmap.Config.ARGB_8888)
-        val result = Bitmap.createScaledBitmap(blurredSmall, source.width, source.height, true)
-        if (small !== source) small.recycle()
-        blurredSmall.recycle()
+    private fun blur(
+        source: Bitmap,
+        requestedRadius: Int,
+    ): Bitmap {
+        val radius =
+            requestedRadius.coerceIn(1, 64)
+
+        val sourcePixels =
+            source.width.toLong() *
+                source.height.toLong()
+
+        /*
+         * Native-resolution quality path for normal
+         * wallpaper sizes. Very large images get only
+         * a memory-safety cap, never the old fixed 22%
+         * destructive downscale.
+         */
+        val maxWorkingPixels =
+            6_000_000L
+
+        val scale =
+            if (
+                sourcePixels <= maxWorkingPixels
+            ) {
+                1f
+            } else {
+                kotlin.math.sqrt(
+                    maxWorkingPixels.toDouble() /
+                        sourcePixels.toDouble()
+                ).toFloat()
+            }
+
+        val w =
+            max(
+                (source.width * scale).toInt(),
+                64,
+            )
+
+        val h =
+            max(
+                (source.height * scale).toInt(),
+                64,
+            )
+
+        val working =
+            if (
+                w == source.width &&
+                h == source.height
+            ) {
+                source
+            } else {
+                Bitmap.createScaledBitmap(
+                    source,
+                    w,
+                    h,
+                    true,
+                )
+            }
+
+        val pixels =
+            IntArray(w * h)
+
+        working.getPixels(
+            pixels,
+            0,
+            w,
+            0,
+            0,
+            w,
+            h,
+        )
+
+        val effectiveRadius =
+            max(
+                (radius * scale).toInt(),
+                1,
+            )
+
+        boxBlur(
+            pixels,
+            w,
+            h,
+            effectiveRadius,
+        )
+
+        val blurred =
+            Bitmap.createBitmap(
+                pixels,
+                w,
+                h,
+                Bitmap.Config.ARGB_8888,
+            )
+
+        if (working !== source) {
+            working.recycle()
+        }
+
+        if (
+            w == source.width &&
+            h == source.height
+        ) {
+            return blurred
+        }
+
+        val result =
+            Bitmap.createScaledBitmap(
+                blurred,
+                source.width,
+                source.height,
+                true,
+            )
+
+        blurred.recycle()
+
         return result
     }
 

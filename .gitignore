@@ -19,3 +19,4 @@ local.properties
 *.jks
 *.keystore
 keystore.properties
+.phase1-backups/

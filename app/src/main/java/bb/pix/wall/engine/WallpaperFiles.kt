@@ -12,11 +12,16 @@ object WallpaperFiles {
     val queue = File(root, "queue")
     val legacyQueue = File(root, "quee")
     val saved = File(root, "saved")
+    val history = File(root, "history")
+    val favorites = File(root, "favorites")
     val logs = File(root, "logs")
     val quarantine = File(root, "quarantine")
 
     val currentHome = File(backup, "current_home.jpg")
     val currentLock = File(backup, "current_lock.jpg")
+
+    val previousHome = File(backup, "previous_home.jpg")
+    val previousLock = File(backup, "previous_lock.jpg")
     val nextHome = File(backup, "next_home.jpg")
     val nextLock = File(backup, "next_lock.jpg")
     val seenHashes = File(logs, "seen_hashes.txt")
@@ -27,11 +32,26 @@ object WallpaperFiles {
     val metadata = File(logs, "queue_meta.properties")
     val cacheIndex = File(logs, "cache_index.properties")
     val triggerHistory = File(logs, "trigger_history.log")
+    val blockedIds = File(logs, "blocked_ids.txt")
+    val blockedHashes = File(logs, "blocked_hashes.txt")
 
     fun ensure(): Boolean {
         val ok = root.exists() || root.mkdirs()
         if (!ok) return false
-        val dirsOk = listOf(local, backup, cache, hotCache, warmCache, queue, legacyQueue, saved, logs, quarantine).all { it.exists() || it.mkdirs() }
+        val dirsOk = listOf(
+            local,
+            backup,
+            cache,
+            hotCache,
+            warmCache,
+            queue,
+            legacyQueue,
+            saved,
+            history,
+            favorites,
+            logs,
+            quarantine,
+        ).all { it.exists() || it.mkdirs() }
         if (!dirsOk) return false
         // Migrate beta-era cache images that were stored directly under /cache into warm/.
         // This keeps the cache layout predictable without deleting user-ready assets.

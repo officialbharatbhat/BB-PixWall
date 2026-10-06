@@ -28,10 +28,12 @@ import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -66,6 +68,97 @@ fun HomeScreen(
     onRequestAdvanced: () -> Unit,
 ) {
     val context = LocalContext.current
+
+    var moodUiTick by
+        remember {
+            mutableIntStateOf(0)
+        }
+
+    val locationPermissionLabel =
+        remember(moodUiTick) {
+            bb.pix.wall.engine
+                .MoodLocationEngine
+                .permissionLabel(
+                    context
+                )
+        }
+
+    LaunchedEffect(
+        settings.moodEngineEnabled,
+        settings.moodWeatherEnabled,
+        settings.moodUseDeviceLocation,
+    ) {
+        if (
+            settings.moodEngineEnabled &&
+            settings.moodWeatherEnabled
+        ) {
+            while (true) {
+                delay(1500L)
+                moodUiTick++
+            }
+        }
+    }
+
+    LaunchedEffect(
+        settings.moodAutoReactEnabled
+    ) {
+        bb.pix.wall.automation
+            .MoodAutoReactReceiver
+            .schedule(
+                context.applicationContext,
+                settings.moodAutoReactEnabled,
+            )
+    }
+
+    val moodLocationPermissionLauncher =
+        androidx.activity.compose
+            .rememberLauncherForActivityResult(
+                androidx.activity.result.contract
+                    .ActivityResultContracts
+                    .RequestMultiplePermissions()
+            ) { grants ->
+                val fine =
+                    grants[
+                        android.Manifest.permission
+                            .ACCESS_FINE_LOCATION
+                    ] == true
+
+                val coarse =
+                    grants[
+                        android.Manifest.permission
+                            .ACCESS_COARSE_LOCATION
+                    ] == true
+
+                moodUiTick++
+
+                if (fine || coarse) {
+                    RuntimeStatus.set(
+                        context,
+                        "weather_location_status",
+                        if (fine) {
+                            "Precise location granted"
+                        } else {
+                            "Approximate location granted"
+                        },
+                    )
+
+                    bb.pix.wall.engine
+                        .WeatherMoodEngine
+                        .forceRefresh(
+                            context.applicationContext,
+                            settings.copy(
+                                moodUseDeviceLocation =
+                                    true
+                            ),
+                        )
+                } else {
+                    RuntimeStatus.set(
+                        context,
+                        "weather_location_status",
+                        "Location permission denied • manual fallback available",
+                    )
+                }
+            }
     val tokens = LocalDesignTokens.current
     val spacing = (16 * tokens.spacingScale).dp
     val localIp = remember { LanInfo.localIpv4() }
@@ -95,11 +188,22 @@ fun HomeScreen(
                 theme = selectedTheme,
             )
 
+            ThinkingSweepLine(
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(
+                            horizontal =
+                                28.dp
+                        )
+            )
+
+
             PreviewGrid(wallpaperState, onRefreshPreviews, onPrepareNext)
 
             CollapsibleSection(
                 title = "Sources",
-                summary = "Cloud • Local • Health",
+                summary = "Cloud • Local • Priority",
             ) {
             SourceConfigCard(
                 title = "Google Photos",
@@ -117,6 +221,65 @@ fun HomeScreen(
                 icon = Icons.Outlined.Cloud,
                 onValue = { onSettingsChange(settings.copy(driveFolderUrl = it.trim())) },
             )
+            Card(
+                Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    Modifier.padding(16.dp),
+                    verticalArrangement =
+                        Arrangement.spacedBy(
+                            4.dp
+                        ),
+                ) {
+                    SettingHeader(
+                        Icons.Outlined.Tune,
+                        "Source priority",
+                    )
+
+                    Text(
+                        "Used when multiple usable sources are available. Source health and offline fallback still stay active.",
+                        style =
+                            MaterialTheme
+                                .typography
+                                .bodySmall,
+                        color =
+                            MaterialTheme
+                                .colorScheme
+                                .onSurfaceVariant,
+                    )
+
+                    SourcePriorityMode.entries
+                        .forEach { mode ->
+                            RadioSetting(
+                                settings
+                                    .sourcePriorityMode ==
+                                    mode,
+                                mode.label,
+                                when (mode) {
+                                    SourcePriorityMode.SMART_BALANCED ->
+                                        "Balanced Photos-first behavior with health-aware fallback."
+
+                                    SourcePriorityMode.PHOTOS_FIRST ->
+                                        "Give Google Photos the strongest ranking preference."
+
+                                    SourcePriorityMode.DRIVE_FIRST ->
+                                        "Prefer Drive whenever Drive candidates are available."
+
+                                    SourcePriorityMode.LOCAL_FIRST ->
+                                        "Prefer local/offline candidates whenever available."
+                                },
+                            ) {
+                                onSettingsChange(
+                                    settings.copy(
+                                        sourcePriorityMode =
+                                            mode
+                                    )
+                                )
+                            }
+                        }
+                }
+            }
+
             Card(Modifier.fillMaxWidth()) {
                 Row(Modifier.fillMaxWidth().padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Outlined.Folder, null)
@@ -145,103 +308,9 @@ fun HomeScreen(
 
             }
 
-            CollapsibleSection(
-                title = "Wallpaper order",
-                summary = "Rotation strategy",
-            ) {
-            Card(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    SettingHeader(Icons.Outlined.Sort, "Choose how the next wallpaper is picked")
-                    WallpaperOrder.entries.forEach { mode ->
-                        RadioSetting(settings.wallpaperOrder == mode, mode.label, when (mode) {
-                            WallpaperOrder.A_Z -> "Alphabetical A to Z. Exact for local files; best-effort for cloud items."
-                            WallpaperOrder.Z_A -> "Alphabetical Z to A."
-                            WallpaperOrder.DATE_NEWEST -> "Newest first. Uses real file dates for local wallpapers."
-                            WallpaperOrder.DATE_OLDEST -> "Oldest first. Uses real file dates for local wallpapers."
-                            WallpaperOrder.SIZE_LOW_HIGH -> "Smaller files first."
-                            WallpaperOrder.SIZE_HIGH_LOW -> "Larger files first."
-                            WallpaperOrder.SURPRISE -> "Stable daily surprise order without repeating recent walls."
-                            WallpaperOrder.RANDOM_SHUFFLE -> "Fresh shuffled order whenever the queue is refilled."
-                        }) { onSettingsChange(settings.copy(wallpaperOrder = mode)) }
-                    }
-                }
-            }
-
-            }
-
-            CollapsibleSection(
-                title = "Engine mode",
-                summary = "Standard • Advanced",
-            ) {
-            Card(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    SettingHeader(Icons.Outlined.Speed, "Standard / Advance")
-                    RadioSetting(settings.engineMode == EngineMode.STANDARD, "Standard", "No root. Android APIs + persistent foreground automation and configurable prefetch cache.") {
-                        onSettingsChange(settings.copy(engineMode = EngineMode.STANDARD))
-                    }
-                    RadioSetting(settings.engineMode == EngineMode.ADVANCED, "Advance", "Requests su and applies app-specific background/priority tuning. Wallpaper commits still use Android WallpaperManager for Android 15–17+ compatibility.") {
-                        if (settings.engineMode != EngineMode.ADVANCED) onRequestAdvanced()
-                    }
-                    Text("Cache ready: ${bb.pix.wall.engine.WallpaperController.cacheCount()} wallpaper(s)", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text("Last trigger: ${RuntimeStatus.get(context, "last_trigger", "None yet")}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
-
-            }
-
-            CollapsibleSection(
-                title = "Network & cache",
-                summary = "Wi-Fi • Cache",
-            ) {
-            Card(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                    SettingSwitch("Data Saver", "When ON, cloud sources request reduced-resolution images where supported. Local wallpapers stay untouched.", settings.dataSaverEnabled) { onSettingsChange(settings.copy(dataSaverEnabled = it)) }
-                    SettingSwitch("Wi-Fi only", "Use Wi-Fi for cloud prefetch. Already-cached wallpapers can still rotate offline.", settings.wifiOnly) { onSettingsChange(settings.copy(wifiOnly = it)) }
-                    SettingSwitch("Allow mobile data", "Allow cloud prefetch on mobile data when Wi-Fi-only is OFF.", settings.mobileDataAllowed) { onSettingsChange(settings.copy(mobileDataAllowed = it)) }
-                    SettingSwitch("Lean local storage", "Keep only the configured prefetch amount even in Advance mode. Google Photos stays primary and Drive remains the mirror/fallback.", settings.leanStorageMode) { onSettingsChange(settings.copy(leanStorageMode = it)) }
-                    SettingSwitch("Charging only", "Run automatic wallpaper changes only while charging.", settings.chargingOnly) { onSettingsChange(settings.copy(chargingOnly = it)) }
-                    SettingSwitch("Pause in Battery Saver", "Pause automatic changes while Android Battery Saver is active.", settings.pauseBatterySaver) { onSettingsChange(settings.copy(pauseBatterySaver = it)) }
-                    Text("Prefetch cache: ${settings.cacheTarget} wallpapers", fontWeight = FontWeight.SemiBold)
-                    Slider(value = settings.cacheTarget.toFloat(), onValueChange = { onSettingsChange(settings.copy(cacheTarget = it.roundToInt().coerceIn(4, 36))) }, valueRange = 4f..36f, steps = 31)
-
-                    Text(if (settings.leanStorageMode) "Lean mode: cache stays at this exact target to avoid wasting phone storage." else "Expanded mode: Advance may keep at least 16 ready wallpapers.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
-
-            }
-
-            CollapsibleSection(
-                title = "Background reliability",
-                summary = "Recovery • Background",
-            ) {
-            Card(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    SettingSwitch("Background guard", "Keep the automation foreground service sticky; Advance mode also applies root-only app-specific background tuning.", settings.backgroundGuardEnabled) { onSettingsChange(settings.copy(backgroundGuardEnabled = it)) }
-                    SettingSwitch("Pause on low battery", "Avoid automatic changes below the configured threshold.", settings.pauseLowBattery) { onSettingsChange(settings.copy(pauseLowBattery = it)) }
-                    if (settings.pauseLowBattery) {
-                        Text("Low-battery threshold: ${settings.lowBatteryThreshold}%", fontWeight = FontWeight.SemiBold)
-                        Slider(value = settings.lowBatteryThreshold.toFloat(), onValueChange = { onSettingsChange(settings.copy(lowBatteryThreshold = it.roundToInt().coerceIn(5,50))) }, valueRange = 5f..50f, steps = 44)
-                    }
-                    SettingSwitch("Quiet hours", "Pause automatic changes during your sleep/quiet window.", settings.quietHoursEnabled) { onSettingsChange(settings.copy(quietHoursEnabled = it)) }
-                    if (settings.quietHoursEnabled) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                            OutlinedTextField(value = settings.quietStartHour.toString(), onValueChange = { it.toIntOrNull()?.let { h -> onSettingsChange(settings.copy(quietStartHour = h.coerceIn(0,23))) } }, label = { Text("Start hour") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.weight(1f), singleLine = true)
-                            OutlinedTextField(value = settings.quietEndHour.toString(), onValueChange = { it.toIntOrNull()?.let { h -> onSettingsChange(settings.copy(quietEndHour = h.coerceIn(0,23))) } }, label = { Text("End hour") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.weight(1f), singleLine = true)
-                        }
-                    }
-                    TextButton(onClick = {
-                        runCatching { context.startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:${context.packageName}"))) }
-                            .recoverCatching { context.startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) }
-                    }) { Text("Allow unrestricted battery use") }
-                    Text("Accessibility and display-overlay permissions are intentionally not requested because wallpaper rotation does not need them.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
-
-            }
-
-            CollapsibleSection(
+CollapsibleSection(
                 title = "Wallpaper automation",
-                summary = "Schedule • Trigger",
+                summary = "Trigger • Schedule",
             ) {
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -273,7 +342,7 @@ fun HomeScreen(
 
             }
 
-            CollapsibleSection(
+CollapsibleSection(
                 title = "Wallpaper target",
                 summary = "Home • Lock",
             ) {
@@ -293,13 +362,131 @@ fun HomeScreen(
 
             }
 
-            CollapsibleSection(
+CollapsibleSection(
+                title = "Wallpaper order",
+                summary = "Ranking • Shuffle",
+            ) {
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    SettingHeader(Icons.Outlined.Sort, "Choose how the next wallpaper is picked")
+                    WallpaperOrder.entries.forEach { mode ->
+                        RadioSetting(settings.wallpaperOrder == mode, mode.label, when (mode) {
+                            WallpaperOrder.A_Z -> "Alphabetical A to Z. Exact for local files; best-effort for cloud items."
+                            WallpaperOrder.Z_A -> "Alphabetical Z to A."
+                            WallpaperOrder.DATE_NEWEST -> "Newest first. Uses real file dates for local wallpapers."
+                            WallpaperOrder.DATE_OLDEST -> "Oldest first. Uses real file dates for local wallpapers."
+                            WallpaperOrder.SIZE_LOW_HIGH -> "Smaller files first."
+                            WallpaperOrder.SIZE_HIGH_LOW -> "Larger files first."
+                            WallpaperOrder.SURPRISE -> "Stable daily surprise order without repeating recent walls."
+                            WallpaperOrder.RANDOM_SHUFFLE -> "Fresh shuffled order whenever the queue is refilled."
+                        }) { onSettingsChange(settings.copy(wallpaperOrder = mode)) }
+                    }
+                }
+            }
+
+            }
+
+CollapsibleSection(
+                title = "Engine mode",
+                summary = "Standard • Advanced",
+            ) {
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    SettingHeader(Icons.Outlined.Speed, "Standard / Advance")
+                    RadioSetting(settings.engineMode == EngineMode.STANDARD, "Standard", "No root. Android APIs + persistent foreground automation and configurable prefetch cache.") {
+                        onSettingsChange(settings.copy(engineMode = EngineMode.STANDARD))
+                    }
+                    RadioSetting(settings.engineMode == EngineMode.ADVANCED, "Advance", "Requests su and applies app-specific background/priority tuning. Wallpaper commits still use Android WallpaperManager for Android 15–17+ compatibility.") {
+                        if (settings.engineMode != EngineMode.ADVANCED) onRequestAdvanced()
+                    }
+                    Text("Cache ready: ${bb.pix.wall.engine.WallpaperController.cacheCount()} wallpaper(s)", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("Last trigger: ${RuntimeStatus.get(context, "last_trigger", "None yet")}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+
+            }
+
+CollapsibleSection(
                 title = "Quality & aspect",
-                summary = "Smart Crop • Quality",
+                summary = "Visual IQ • Crop",
             ) {
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     SettingHeader(Icons.Outlined.HighQuality, "9:20 quality-first pipeline")
+
+                    Text(
+                        "Visual Intelligence V2",
+                        fontWeight =
+                            FontWeight.SemiBold,
+                    )
+
+                    Text(
+                        bb.pix.wall.engine.RuntimeStatus.get(
+                            context,
+                            "visual_last_decision",
+                            bb.pix.wall.engine.RuntimeStatus.get(
+                                context,
+                                "visual_last_profile",
+                                "Waiting for analyzed wallpaper",
+                            ),
+                        ),
+                        style =
+                            MaterialTheme
+                                .typography
+                                .bodySmall,
+                        color =
+                            MaterialTheme
+                                .colorScheme
+                                .onSurfaceVariant,
+                    )
+
+                    Text(
+                        "Palette: ${
+                            bb.pix.wall.engine.RuntimeStatus.get(
+                                context,
+                                "visual_last_palette",
+                                "Waiting"
+                            )
+                        }",
+                        style =
+                            MaterialTheme
+                                .typography
+                                .bodySmall,
+                        color =
+                            MaterialTheme
+                                .colorScheme
+                                .onSurfaceVariant,
+                    )
+
+                    Text(
+                        "Pairing: ${
+                            bb.pix.wall.engine.RuntimeStatus.get(
+                                context,
+                                "visual_pairing",
+                                "Waiting for Home/Lock pair"
+                            )
+                        }",
+                        style =
+                            MaterialTheme
+                                .typography
+                                .bodySmall,
+                        color =
+                            MaterialTheme
+                                .colorScheme
+                                .onSurfaceVariant,
+                    )
+
+                    Text(
+                        "Analyzes palette, AMOLED suitability, readability, composition, crop safety, detail density and visual style locally.",
+                        style =
+                            MaterialTheme
+                                .typography
+                                .bodySmall,
+                        color =
+                            MaterialTheme
+                                .colorScheme
+                                .onSurfaceVariant,
+                    )
                     SettingSwitch(
                         "Smart Crop (mismatch only)",
                         "Your 9:20-compatible wallpapers are streamed untouched: no crop, resize or BB-PixWall recompression. Only an accidental aspect mismatch may be center-cropped to 9:20.",
@@ -315,9 +502,846 @@ fun HomeScreen(
 
             }
 
-            CollapsibleSection(
+CollapsibleSection(
+                title = "Mood Engine",
+                summary = "Context • Weather",
+            ) {
+                Card(
+                    Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        Modifier.padding(18.dp),
+                        verticalArrangement =
+                            Arrangement.spacedBy(
+                                12.dp
+                            ),
+                    ) {
+                        SettingSwitch(
+                            "Adaptive Mood Wallpapers",
+                            "Let BB-PixWall gently rank wallpapers using room light, time of day, Android theme, battery and device thermal context. Quality, duplicate protection and learned taste remain higher priority.",
+                            settings.moodEngineEnabled,
+                        ) {
+                            onSettingsChange(
+                                settings.copy(
+                                    moodEngineEnabled = it
+                                )
+                            )
+                        }
+
+                        if (settings.moodEngineEnabled) {
+                            HorizontalDivider()
+
+                            Text(
+                                "Current Mood",
+                                fontWeight =
+                                    FontWeight.Bold,
+                            )
+
+                            Text(
+                                RuntimeStatus.get(
+                                    context,
+                                    "mood_profile_label",
+                                    "Waiting for first smart decision",
+                                ),
+                                style =
+                                    MaterialTheme
+                                        .typography
+                                        .titleMedium,
+                                color =
+                                    MaterialTheme
+                                        .colorScheme
+                                        .primary,
+                            )
+
+                            Text(
+                                RuntimeStatus.get(
+                                    context,
+                                    "mood_profile_summary",
+                                    "Environment profile not sampled yet",
+                                ),
+                                style =
+                                    MaterialTheme
+                                        .typography
+                                        .bodySmall,
+                                color =
+                                    MaterialTheme
+                                        .colorScheme
+                                        .onSurfaceVariant,
+                            )
+
+                            Text(
+                                "Last influence: ${
+                                    RuntimeStatus.get(
+                                        context,
+                                        "mood_last_factors",
+                                        "Waiting for ranked selection",
+                                    )
+                                }",
+                                style =
+                                    MaterialTheme
+                                        .typography
+                                        .bodySmall,
+                                color =
+                                    MaterialTheme
+                                        .colorScheme
+                                        .onSurfaceVariant,
+                            )
+
+                            Text(
+                                "Auto-react: ${
+                                    RuntimeStatus.get(
+                                        context,
+                                        "mood_auto_react",
+                                        if (
+                                            settings
+                                                .moodAutoReactEnabled
+                                        ) {
+                                            "Watching context"
+                                        } else {
+                                            "Off"
+                                        },
+                                    )
+                                }",
+                                style =
+                                    MaterialTheme
+                                        .typography
+                                        .bodySmall,
+                                color =
+                                    MaterialTheme
+                                        .colorScheme
+                                        .onSurfaceVariant,
+                            )
+
+                            HorizontalDivider()
+
+                            Text(
+                                "Current environment",
+                                fontWeight =
+                                    FontWeight.SemiBold,
+                            )
+
+                            Text(
+                                RuntimeStatus.get(
+                                    context,
+                                    "adaptive_mood_context",
+                                    "Waiting for next wallpaper decision",
+                                ),
+                                color =
+                                    MaterialTheme
+                                        .colorScheme
+                                        .primary,
+                            )
+
+                            Text(
+                                "Mood affects ranking, not hard filtering. Your wallpaper library stays diverse.",
+                                style =
+                                    MaterialTheme
+                                        .typography
+                                        .bodySmall,
+                                color =
+                                    MaterialTheme
+                                        .colorScheme
+                                        .onSurfaceVariant,
+                            )
+
+                            SettingSwitch(
+                                "Auto-react to environment",
+                                "When the overall environment meaningfully changes, apply an already-cached wallpaper automatically. Cloud fetching is never performed just for auto-react.",
+                                settings.moodAutoReactEnabled,
+                            ) { enabled ->
+                                val updated =
+                                    settings.copy(
+                                        moodAutoReactEnabled =
+                                            enabled
+                                    )
+
+                                onSettingsChange(
+                                    updated
+                                )
+
+                                bb.pix.wall.automation
+                                    .MoodAutoReactReceiver
+                                    .schedule(
+                                        context.applicationContext,
+                                        enabled,
+                                    )
+
+                                moodUiTick++
+                            }
+
+                            if (
+                                settings
+                                    .moodAutoReactEnabled
+                            ) {
+                                Text(
+                                    "Auto-react cooldown: ${settings.moodAutoReactCooldownMinutes} min",
+                                    fontWeight =
+                                        FontWeight
+                                            .SemiBold,
+                                )
+
+                                Slider(
+                                    value =
+                                        settings
+                                            .moodAutoReactCooldownMinutes
+                                            .toFloat(),
+                                    onValueChange = {
+                                        val value =
+                                            (
+                                                it /
+                                                    15f
+                                            )
+                                                .roundToInt() *
+                                                15
+
+                                        onSettingsChange(
+                                            settings.copy(
+                                                moodAutoReactCooldownMinutes =
+                                                    value.coerceIn(
+                                                        15,
+                                                        180,
+                                                    )
+                                            )
+                                        )
+                                    },
+                                    valueRange =
+                                        15f..180f,
+                                    steps = 10,
+                                )
+
+                                Text(
+                                    "Auto-react uses a 30-minute low-power context check and never wakes the phone just to change wallpaper.",
+                                    style =
+                                        MaterialTheme
+                                            .typography
+                                            .bodySmall,
+                                    color =
+                                        MaterialTheme
+                                            .colorScheme
+                                            .onSurfaceVariant,
+                                )
+                            }
+
+                            SettingSwitch(
+                                "Ambient Light",
+                                "Sample the phone light sensor briefly when BB-PixWall needs a new wallpaper. No continuous sensor monitoring.",
+                                settings
+                                    .moodAmbientLightEnabled,
+                            ) {
+                                onSettingsChange(
+                                    settings.copy(
+                                        moodAmbientLightEnabled =
+                                            it
+                                    )
+                                )
+                            }
+
+                            if (
+                                settings
+                                    .moodAmbientLightEnabled
+                            ) {
+                                Text(
+                                    "Dark room: ≤ ${settings.moodDarkLuxThreshold} lux",
+                                    fontWeight =
+                                        FontWeight
+                                            .SemiBold,
+                                )
+
+                                Slider(
+                                    value =
+                                        settings
+                                            .moodDarkLuxThreshold
+                                            .toFloat(),
+                                    onValueChange = {
+                                        val value =
+                                            it.roundToInt()
+                                                .coerceIn(
+                                                    1,
+                                                    200,
+                                                )
+
+                                        onSettingsChange(
+                                            settings.copy(
+                                                moodDarkLuxThreshold =
+                                                    value
+                                            )
+                                        )
+                                    },
+                                    valueRange =
+                                        1f..200f,
+                                    steps = 198,
+                                )
+
+                                Text(
+                                    "Bright environment: ≥ ${settings.moodBrightLuxThreshold} lux",
+                                    fontWeight =
+                                        FontWeight
+                                            .SemiBold,
+                                )
+
+                                Slider(
+                                    value =
+                                        settings
+                                            .moodBrightLuxThreshold
+                                            .toFloat(),
+                                    onValueChange = {
+                                        val value =
+                                            it.roundToInt()
+                                                .coerceIn(
+                                                    100,
+                                                    5000,
+                                                )
+                                                .coerceAtLeast(
+                                                    settings
+                                                        .moodDarkLuxThreshold +
+                                                        50
+                                                )
+
+                                        onSettingsChange(
+                                            settings.copy(
+                                                moodBrightLuxThreshold =
+                                                    value
+                                            )
+                                        )
+                                    },
+                                    valueRange =
+                                        100f..5000f,
+                                    steps = 97,
+                                )
+
+                                Text(
+                                    "Last light sample: ${
+                                        RuntimeStatus.get(
+                                            context,
+                                            "adaptive_mood_lux",
+                                            "Not sampled yet",
+                                        )
+                                    } lux",
+                                    style =
+                                        MaterialTheme
+                                            .typography
+                                            .bodySmall,
+                                    color =
+                                        MaterialTheme
+                                            .colorScheme
+                                            .onSurfaceVariant,
+                                )
+                            }
+
+                            SettingSwitch(
+                                "Time Mood",
+                                "Use Early Morning, Morning, Afternoon, Evening, Night and Midnight as subtle visual context.",
+                                settings.moodTimeEnabled,
+                            ) {
+                                onSettingsChange(
+                                    settings.copy(
+                                        moodTimeEnabled = it
+                                    )
+                                )
+                            }
+
+                            SettingSwitch(
+                                "Dark Mode Sync",
+                                "Give darker wallpapers a small extra preference when Android dark mode is active.",
+                                settings.moodDarkModeEnabled,
+                            ) {
+                                onSettingsChange(
+                                    settings.copy(
+                                        moodDarkModeEnabled =
+                                            it
+                                    )
+                                )
+                            }
+
+                            SettingSwitch(
+                                "Battery Context",
+                                "Battery Saver and low battery prefer calmer visuals; charging allows a tiny vibrant bias.",
+                                settings
+                                    .moodBatteryContextEnabled,
+                            ) {
+                                onSettingsChange(
+                                    settings.copy(
+                                        moodBatteryContextEnabled =
+                                            it
+                                    )
+                                )
+                            }
+
+                            SettingSwitch(
+                                "Thermal Protection",
+                                "Include Android thermal state in Mood decisions. Heavy-work thermal throttling will also use this signal in the resource-protection upgrade.",
+                                settings
+                                    .moodThermalProtectionEnabled,
+                            ) {
+                                onSettingsChange(
+                                    settings.copy(
+                                        moodThermalProtectionEnabled =
+                                            it
+                                    )
+                                )
+                            }
+
+                            Text(
+                                "Thermal: ${
+                                    RuntimeStatus.get(
+                                        context,
+                                        "adaptive_mood_thermal",
+                                        "Waiting for sample",
+                                    )
+                                }",
+                                style =
+                                    MaterialTheme
+                                        .typography
+                                        .bodySmall,
+                                color =
+                                    MaterialTheme
+                                        .colorScheme
+                                        .onSurfaceVariant,
+                            )
+
+                            HorizontalDivider()
+
+                            Text(
+                                "Mood strength: ${settings.moodStrength}%",
+                                fontWeight =
+                                    FontWeight.SemiBold,
+                            )
+
+                            Slider(
+                                value =
+                                    settings
+                                        .moodStrength
+                                        .toFloat(),
+                                onValueChange = {
+                                    onSettingsChange(
+                                        settings.copy(
+                                            moodStrength =
+                                                it.roundToInt()
+                                                    .coerceIn(
+                                                        0,
+                                                        100,
+                                                    )
+                                        )
+                                    )
+                                },
+                                valueRange =
+                                    0f..100f,
+                                steps = 19,
+                            )
+
+                            Text(
+                                when {
+                                    settings.moodStrength <= 25 ->
+                                        "Gentle — existing taste and randomness dominate."
+
+                                    settings.moodStrength <= 60 ->
+                                        "Balanced — environment has a noticeable but safe influence."
+
+                                    settings.moodStrength <= 85 ->
+                                        "Strong — environment meaningfully shapes selection."
+
+                                    else ->
+                                        "Maximum — Mood Engine gets its strongest allowed ranking bias."
+                                },
+                                style =
+                                    MaterialTheme
+                                        .typography
+                                        .bodySmall,
+                                color =
+                                    MaterialTheme
+                                        .colorScheme
+                                        .onSurfaceVariant,
+                            )
+
+                            HorizontalDivider()
+
+                            SettingSwitch(
+                                "Weather Mood",
+                                "Use current weather conditions to gently influence wallpaper selection. Weather stays cached, so wallpaper changes do not wait for the internet.",
+                                settings.moodWeatherEnabled,
+                            ) { enabled ->
+                                val updated =
+                                    settings.copy(
+                                        moodWeatherEnabled =
+                                            enabled
+                                    )
+
+                                onSettingsChange(
+                                    updated
+                                )
+
+                                if (enabled) {
+                                    val granted =
+                                        bb.pix.wall.engine
+                                            .MoodLocationEngine
+                                            .hasAnyPermission(
+                                                context
+                                            )
+
+                                    if (
+                                        updated
+                                            .moodUseDeviceLocation &&
+                                        !granted
+                                    ) {
+                                        moodLocationPermissionLauncher
+                                            .launch(
+                                                arrayOf(
+                                                    android.Manifest.permission.ACCESS_FINE_LOCATION,
+                                                    android.Manifest.permission.ACCESS_COARSE_LOCATION,
+                                                )
+                                            )
+                                    } else {
+                                        bb.pix.wall.engine
+                                            .WeatherMoodEngine
+                                            .forceRefresh(
+                                                context.applicationContext,
+                                                updated,
+                                            )
+                                    }
+                                }
+                            }
+
+                            if (settings.moodWeatherEnabled) {
+                                SettingSwitch(
+                                    "Use Device Location",
+                                    "Automatically update Weather Mood when your location changes. Approximate location is enough; precise location is optional.",
+                                    settings
+                                        .moodUseDeviceLocation,
+                                ) { enabled ->
+                                    val updated =
+                                        settings.copy(
+                                            moodUseDeviceLocation =
+                                                enabled
+                                        )
+
+                                    onSettingsChange(
+                                        updated
+                                    )
+
+                                    if (enabled) {
+                                        val granted =
+                                            bb.pix.wall.engine
+                                                .MoodLocationEngine
+                                                .hasAnyPermission(
+                                                    context
+                                                )
+
+                                        if (!granted) {
+                                            moodLocationPermissionLauncher
+                                                .launch(
+                                                    arrayOf(
+                                                        android.Manifest.permission.ACCESS_FINE_LOCATION,
+                                                        android.Manifest.permission.ACCESS_COARSE_LOCATION,
+                                                    )
+                                                )
+                                        } else {
+                                            bb.pix.wall.engine
+                                                .WeatherMoodEngine
+                                                .forceRefresh(
+                                                    context.applicationContext,
+                                                    updated,
+                                                )
+                                        }
+                                    } else {
+                                        bb.pix.wall.engine
+                                            .WeatherMoodEngine
+                                            .forceRefresh(
+                                                context.applicationContext,
+                                                updated,
+                                            )
+                                    }
+                                }
+
+                                if (
+                                    settings
+                                        .moodUseDeviceLocation
+                                ) {
+                                    Text(
+                                        "Location permission: ${
+                                            locationPermissionLabel
+                                        }",
+                                        style =
+                                            MaterialTheme
+                                                .typography
+                                                .bodySmall,
+                                        color =
+                                            MaterialTheme
+                                                .colorScheme
+                                                .onSurfaceVariant,
+                                    )
+
+                                    Text(
+                                        "Current location: ${
+                                            RuntimeStatus.get(
+                                                context,
+                                                "weather_location_status",
+                                                "Waiting for location",
+                                            )
+                                        }",
+                                        style =
+                                            MaterialTheme
+                                                .typography
+                                                .bodySmall,
+                                        color =
+                                            MaterialTheme
+                                                .colorScheme
+                                                .primary,
+                                    )
+                                }
+
+                                OutlinedTextField(
+                                    value =
+                                        settings.moodWeatherCity,
+                                    onValueChange = {
+                                        onSettingsChange(
+                                            settings.copy(
+                                                moodWeatherCity =
+                                                    it
+                                            )
+                                        )
+                                    },
+                                    modifier =
+                                        Modifier.fillMaxWidth(),
+                                    singleLine = true,
+                                    label = {
+                                        Text(
+                                            if (
+                                                settings
+                                                    .moodUseDeviceLocation
+                                            ) {
+                                                "Manual fallback city"
+                                            } else {
+                                                "Weather city"
+                                            }
+                                        )
+                                    },
+                                    placeholder = {
+                                        Text(
+                                            "Example: Miraj, Maharashtra"
+                                        )
+                                    },
+                                )
+
+                                Text(
+                                    RuntimeStatus.get(
+                                        context,
+                                        "weather_mood_status",
+                                        if (
+                                            settings
+                                                .moodWeatherCity
+                                                .isBlank()
+                                        ) {
+                                            "Enter a city to start Weather Mood"
+                                        } else {
+                                            "Weather will refresh on the next decision"
+                                        },
+                                    ),
+                                    style =
+                                        MaterialTheme
+                                            .typography
+                                            .bodySmall,
+                                    color =
+                                        MaterialTheme
+                                            .colorScheme
+                                            .primary,
+                                )
+
+                                TextButton(
+                                    enabled =
+                                        settings
+                                            .moodUseDeviceLocation ||
+                                            settings
+                                                .moodWeatherCity
+                                                .isNotBlank(),
+                                    onClick = {
+                                        bb.pix.wall.engine
+                                            .WeatherMoodEngine
+                                            .forceRefresh(
+                                                context.applicationContext,
+                                                settings,
+                                            )
+
+                                        moodUiTick++
+                                    }
+                                ) {
+                                    Text(
+                                        if (
+                                            settings
+                                                .moodUseDeviceLocation
+                                        ) {
+                                            "Refresh location & weather"
+                                        } else {
+                                            "Refresh weather"
+                                        }
+                                    )
+                                }
+
+                                Text(
+                                    "Weather influence: ${settings.moodWeatherInfluence}%",
+                                    fontWeight =
+                                        FontWeight
+                                            .SemiBold,
+                                )
+
+                                Slider(
+                                    value =
+                                        settings
+                                            .moodWeatherInfluence
+                                            .toFloat(),
+                                    onValueChange = {
+                                        onSettingsChange(
+                                            settings.copy(
+                                                moodWeatherInfluence =
+                                                    it.roundToInt()
+                                                        .coerceIn(
+                                                            0,
+                                                            100,
+                                                        )
+                                            )
+                                        )
+                                    },
+                                    valueRange =
+                                        0f..100f,
+                                    steps = 19,
+                                )
+
+                                Text(
+                                    when {
+                                        settings.moodWeatherInfluence <= 25 ->
+                                            "Gentle weather influence"
+
+                                        settings.moodWeatherInfluence <= 60 ->
+                                            "Balanced weather influence"
+
+                                        settings.moodWeatherInfluence <= 85 ->
+                                            "Strong weather influence"
+
+                                        else ->
+                                            "Maximum weather influence"
+                                    },
+                                    style =
+                                        MaterialTheme
+                                            .typography
+                                            .bodySmall,
+                                    color =
+                                        MaterialTheme
+                                            .colorScheme
+                                            .onSurfaceVariant,
+                                )
+
+                                SettingSwitch(
+                                    "Outdoor Temperature",
+                                    "Use current outdoor temperature together with weather conditions when ranking wallpapers.",
+                                    settings
+                                        .moodOutdoorTemperatureEnabled,
+                                ) {
+                                    onSettingsChange(
+                                        settings.copy(
+                                            moodOutdoorTemperatureEnabled =
+                                                it
+                                        )
+                                    )
+                                }
+
+                                if (
+                                    settings
+                                        .moodOutdoorTemperatureEnabled
+                                ) {
+                                    Text(
+                                        "Cold weather: ≤ ${settings.moodColdTemperatureC}°C",
+                                        fontWeight =
+                                            FontWeight
+                                                .SemiBold,
+                                    )
+
+                                    Slider(
+                                        value =
+                                            settings
+                                                .moodColdTemperatureC
+                                                .toFloat(),
+                                        onValueChange = {
+                                            val cold =
+                                                it.roundToInt()
+                                                    .coerceIn(
+                                                        -10,
+                                                        30,
+                                                    )
+                                                    .coerceAtMost(
+                                                        settings
+                                                            .moodHotTemperatureC -
+                                                            2
+                                                    )
+
+                                            onSettingsChange(
+                                                settings.copy(
+                                                    moodColdTemperatureC =
+                                                        cold
+                                                )
+                                            )
+                                        },
+                                        valueRange =
+                                            -10f..30f,
+                                        steps = 39,
+                                    )
+
+                                    Text(
+                                        "Hot weather: ≥ ${settings.moodHotTemperatureC}°C",
+                                        fontWeight =
+                                            FontWeight
+                                                .SemiBold,
+                                    )
+
+                                    Slider(
+                                        value =
+                                            settings
+                                                .moodHotTemperatureC
+                                                .toFloat(),
+                                        onValueChange = {
+                                            val hot =
+                                                it.roundToInt()
+                                                    .coerceIn(
+                                                        20,
+                                                        50,
+                                                    )
+                                                    .coerceAtLeast(
+                                                        settings
+                                                            .moodColdTemperatureC +
+                                                            2
+                                                    )
+
+                                            onSettingsChange(
+                                                settings.copy(
+                                                    moodHotTemperatureC =
+                                                        hot
+                                                )
+                                            )
+                                        },
+                                        valueRange =
+                                            20f..50f,
+                                        steps = 29,
+                                    )
+                                }
+
+                                Text(
+                                    "Weather is cached for about 45 minutes. Automatic location is rechecked periodically without continuous GPS tracking or background-location access.",
+                                    style =
+                                        MaterialTheme
+                                            .typography
+                                            .bodySmall,
+                                    color =
+                                        MaterialTheme
+                                            .colorScheme
+                                            .onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+CollapsibleSection(
                 title = "Blur",
-                summary = "Home • Lock blur",
+                summary = "Home • Lock",
             ) {
             BlurCard("Home screen blur", settings.homeBlurEnabled, settings.homeBlurRadius,
                 { onSettingsChange(settings.copy(homeBlurEnabled = it)) },
@@ -328,9 +1352,741 @@ fun HomeScreen(
 
             }
 
-            CollapsibleSection(
+CollapsibleSection(
+                title = "Network & cache",
+                summary = "Network • Prefetch",
+            ) {
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                    SettingSwitch("Data Saver", "When ON, cloud sources request reduced-resolution images where supported. Local wallpapers stay untouched.", settings.dataSaverEnabled) { onSettingsChange(settings.copy(dataSaverEnabled = it)) }
+                    SettingSwitch("Wi-Fi only", "Use Wi-Fi for cloud prefetch. Already-cached wallpapers can still rotate offline.", settings.wifiOnly) { onSettingsChange(settings.copy(wifiOnly = it)) }
+                    SettingSwitch("Allow mobile data", "Allow cloud prefetch on mobile data when Wi-Fi-only is OFF.", settings.mobileDataAllowed) { onSettingsChange(settings.copy(mobileDataAllowed = it)) }
+                    SettingSwitch("Lean local storage", "Keep only the configured prefetch amount even in Advance mode. Google Photos stays primary and Drive remains the mirror/fallback.", settings.leanStorageMode) { onSettingsChange(settings.copy(leanStorageMode = it)) }
+                    SettingSwitch(
+                        "Smart Home/Lock pairing",
+                        "When Home + Lock are different, rank the second cached wallpaper as a visually intentional companion instead of a near-clone.",
+                        settings.smartPairingEnabled,
+                    ) {
+                        onSettingsChange(
+                            settings.copy(
+                                smartPairingEnabled = it
+                            )
+                        )
+                    }
+
+                    SettingSwitch(
+                        "Adaptive Resource Protection",
+                        "Pause or reduce cache analysis/refill under Battery Saver, low battery or elevated thermal state.",
+                        settings.adaptiveResourceProtectionEnabled,
+                    ) {
+                        onSettingsChange(
+                            settings.copy(
+                                adaptiveResourceProtectionEnabled =
+                                    it
+                            )
+                        )
+                    }
+
+                    Text(
+                        "Cache storage cap: ${settings.cacheMaxMb} MB",
+                        fontWeight =
+                            FontWeight.SemiBold,
+                    )
+
+                    Slider(
+                        value =
+                            settings.cacheMaxMb
+                                .toFloat(),
+                        onValueChange = {
+                            val value =
+                                (
+                                    it.roundToInt() /
+                                        64
+                                ) *
+                                    64
+
+                            onSettingsChange(
+                                settings.copy(
+                                    cacheMaxMb =
+                                        value.coerceIn(
+                                            128,
+                                            2048,
+                                        )
+                                )
+                            )
+                        },
+                        valueRange =
+                            128f..2048f,
+                        steps = 29,
+                    )
+
+                    Text(
+                        "Resource policy: ${
+                            RuntimeStatus.get(
+                                context,
+                                "resource_policy",
+                                "Waiting for engine activity",
+                            )
+                        }",
+                        style =
+                            MaterialTheme
+                                .typography
+                                .bodySmall,
+                        color =
+                            MaterialTheme
+                                .colorScheme
+                                .onSurfaceVariant,
+                    )
+                    SettingSwitch("Charging only", "Run automatic wallpaper changes only while charging.", settings.chargingOnly) { onSettingsChange(settings.copy(chargingOnly = it)) }
+                    SettingSwitch("Pause in Battery Saver", "Pause automatic changes while Android Battery Saver is active.", settings.pauseBatterySaver) { onSettingsChange(settings.copy(pauseBatterySaver = it)) }
+                    Text("Prefetch cache: ${settings.cacheTarget} wallpapers", fontWeight = FontWeight.SemiBold)
+                    Slider(value = settings.cacheTarget.toFloat(), onValueChange = { onSettingsChange(settings.copy(cacheTarget = it.roundToInt().coerceIn(4, 36))) }, valueRange = 4f..36f, steps = 31)
+
+                    Text(if (settings.leanStorageMode) "Lean mode: cache stays at this exact target to avoid wasting phone storage." else "Expanded mode: Advance may keep at least 16 ready wallpapers.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+
+            }
+
+CollapsibleSection(
+                title = "Background reliability",
+                summary = "Protection • Recovery",
+            ) {
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    SettingSwitch("Background guard", "Keep the automation foreground service sticky; Advance mode also applies root-only app-specific background tuning.", settings.backgroundGuardEnabled) { onSettingsChange(settings.copy(backgroundGuardEnabled = it)) }
+
+                    HorizontalDivider()
+
+                    Text(
+                        "Autonomous Intelligence Core",
+                        fontWeight =
+                            FontWeight.SemiBold,
+                    )
+
+                    Text(
+                        "Engine ${
+                            bb.pix.wall.engine.RuntimeStatus.get(
+                                context,
+                                "autonomous_grade",
+                                "Waiting for first autonomous audit"
+                            )
+                        }",
+                        style =
+                            MaterialTheme.typography.bodyMedium,
+                    )
+
+                    Text(
+                        "Self-heal: ${
+                            bb.pix.wall.engine.RuntimeStatus.get(
+                                context,
+                                "self_heal_last",
+                                "Waiting"
+                            )
+                        }",
+                        style =
+                            MaterialTheme.typography.bodySmall,
+                        color =
+                            MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+
+                    Text(
+                        "Storage: ${
+                            bb.pix.wall.engine.RuntimeStatus.get(
+                                context,
+                                "storage_pressure",
+                                "Waiting"
+                            )
+                        }",
+                        style =
+                            MaterialTheme.typography.bodySmall,
+                        color =
+                            MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+
+                    Text(
+                        "DNA: ${
+                            bb.pix.wall.engine.RuntimeStatus.get(
+                                context,
+                                "wallpaper_dna",
+                                "Waiting for analyzed current wallpaper"
+                            )
+                        }",
+                        style =
+                            MaterialTheme.typography.bodySmall,
+                        color =
+                            MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+
+                    Text(
+                        "Family fatigue: ${
+                            bb.pix.wall.engine.RuntimeStatus.get(
+                                context,
+                                "family_fatigue",
+                                "Learning"
+                            )
+                        }",
+                        style =
+                            MaterialTheme.typography.bodySmall,
+                        color =
+                            MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+
+                    Text(
+                        "Pair director: ${
+                            bb.pix.wall.engine.RuntimeStatus.get(
+                                context,
+                                "pair_story",
+                                "Waiting for Home/Lock profiles"
+                            )
+                        }",
+                        style =
+                            MaterialTheme.typography.bodySmall,
+                        color =
+                            MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+
+                    Text(
+                        "Taste confidence: ${
+                            bb.pix.wall.engine.RuntimeStatus.get(
+                                context,
+                                "taste_confidence_v2",
+                                "Learning"
+                            )
+                        } • ${
+                            bb.pix.wall.engine.RuntimeStatus.get(
+                                context,
+                                "learning_mode",
+                                "Explore"
+                            )
+                        }",
+                        style =
+                            MaterialTheme.typography.bodySmall,
+                        color =
+                            MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+
+                    Text(
+                        "Context: ${
+                            bb.pix.wall.engine.RuntimeStatus.get(
+                                context,
+                                "context_confidence",
+                                "Waiting"
+                            )
+                        } • ${
+                            bb.pix.wall.engine.RuntimeStatus.get(
+                                context,
+                                "context_conflict",
+                                "Waiting"
+                            )
+                        }",
+                        style =
+                            MaterialTheme.typography.bodySmall,
+                        color =
+                            MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+
+                    Text(
+                        "Decision ${
+                            bb.pix.wall.engine.RuntimeStatus.get(
+                                context,
+                                "decision_confidence_v2",
+                                "Waiting"
+                            )
+                        } • trace ${
+                            bb.pix.wall.engine.RuntimeStatus.get(
+                                context,
+                                "decision_trace_id",
+                                "-"
+                            )
+                        }",
+                        style =
+                            MaterialTheme.typography.bodySmall,
+                        color =
+                            MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+
+                    Text(
+                        "Why V2: ${
+                            bb.pix.wall.engine.RuntimeStatus.get(
+                                context,
+                                "decision_why_v2",
+                                "Waiting for ranked selection"
+                            )
+                        }",
+                        style =
+                            MaterialTheme.typography.bodySmall,
+                        color =
+                            MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+
+                    Text(
+                        "Shadow: ${
+                            bb.pix.wall.engine.RuntimeStatus.get(
+                                context,
+                                "shadow_rank",
+                                "Waiting"
+                            )
+                        }",
+                        style =
+                            MaterialTheme.typography.bodySmall,
+                        color =
+                            MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+
+                    TextButton(
+                        onClick = {
+                            bb.pix.wall.engine.EngineExecutors.io {
+                                runCatching {
+                                    bb.pix.wall.engine
+                                        .AutonomousIntelligenceEngine
+                                        .auditAndRepair(
+                                            context =
+                                                context.applicationContext,
+                                            settings =
+                                                bb.pix.wall.settings
+                                                    .SettingsStore(context)
+                                                    .load(),
+                                            allowNetworkRefill =
+                                                false,
+                                        )
+                                }
+                            }
+                        }
+                    ) {
+                        Text(
+                            "Run autonomous audit"
+                        )
+                    }
+
+                    HorizontalDivider()
+
+                    Text(
+                        "Premium Intelligence Control Center",
+                        fontWeight =
+                            FontWeight.SemiBold,
+                    )
+
+                    Text(
+                        "HOME DNA • ${
+                            RuntimeStatus.get(
+                                context,
+                                "premium_home_dna",
+                                "Waiting"
+                            )
+                        }",
+                        style =
+                            MaterialTheme.typography.bodySmall,
+                    )
+
+                    Text(
+                        "Home palette • ${
+                            RuntimeStatus.get(
+                                context,
+                                "premium_home_palette",
+                                "Waiting"
+                            )
+                        }",
+                        style =
+                            MaterialTheme.typography.bodySmall,
+                        color =
+                            MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+
+                    Text(
+                        "Home role ${
+                            RuntimeStatus.get(
+                                context,
+                                "premium_home_role",
+                                "Waiting"
+                            )
+                        } • quality ${
+                            RuntimeStatus.get(
+                                context,
+                                "premium_home_quality",
+                                "Waiting"
+                            )
+                        } • AMOLED ${
+                            RuntimeStatus.get(
+                                context,
+                                "premium_home_amoled",
+                                "Waiting"
+                            )
+                        }",
+                        style =
+                            MaterialTheme.typography.bodySmall,
+                        color =
+                            MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+
+                    Text(
+                        "LOCK DNA • ${
+                            RuntimeStatus.get(
+                                context,
+                                "premium_lock_dna",
+                                "Waiting"
+                            )
+                        }",
+                        style =
+                            MaterialTheme.typography.bodySmall,
+                    )
+
+                    Text(
+                        "Lock palette • ${
+                            RuntimeStatus.get(
+                                context,
+                                "premium_lock_palette",
+                                "Waiting"
+                            )
+                        }",
+                        style =
+                            MaterialTheme.typography.bodySmall,
+                        color =
+                            MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+
+                    Text(
+                        "Lock role ${
+                            RuntimeStatus.get(
+                                context,
+                                "premium_lock_role",
+                                "Waiting"
+                            )
+                        } • readability ${
+                            RuntimeStatus.get(
+                                context,
+                                "premium_lock_readability",
+                                "Waiting"
+                            )
+                        } • crop ${
+                            RuntimeStatus.get(
+                                context,
+                                "premium_lock_crop",
+                                "Waiting"
+                            )
+                        }",
+                        style =
+                            MaterialTheme.typography.bodySmall,
+                        color =
+                            MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+
+                    Text(
+                        "Pair • ${
+                            RuntimeStatus.get(
+                                context,
+                                "premium_pair_summary",
+                                "Waiting"
+                            )
+                        }",
+                        style =
+                            MaterialTheme.typography.bodySmall,
+                    )
+
+                    Text(
+                        "Pair brightness • ${
+                            RuntimeStatus.get(
+                                context,
+                                "premium_pair_brightness",
+                                "Waiting"
+                            )
+                        }",
+                        style =
+                            MaterialTheme.typography.bodySmall,
+                        color =
+                            MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+
+                    Text(
+                        "Cache • ${
+                            RuntimeStatus.get(
+                                context,
+                                "premium_cache_map",
+                                "Waiting"
+                            )
+                        } • ${
+                            RuntimeStatus.get(
+                                context,
+                                "premium_cache_size",
+                                "-"
+                            )
+                        }",
+                        style =
+                            MaterialTheme.typography.bodySmall,
+                    )
+
+                    Text(
+                        "Offline readiness • ${
+                            RuntimeStatus.get(
+                                context,
+                                "premium_cache_readiness",
+                                "Waiting"
+                            )
+                        }",
+                        style =
+                            MaterialTheme.typography.bodySmall,
+                        color =
+                            MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+
+                    Text(
+                        "Photos • ${
+                            RuntimeStatus.get(
+                                context,
+                                "premium_source_photos",
+                                "Learning"
+                            )
+                        }",
+                        style =
+                            MaterialTheme.typography.bodySmall,
+                        color =
+                            MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+
+                    Text(
+                        "Drive • ${
+                            RuntimeStatus.get(
+                                context,
+                                "premium_source_drive",
+                                "Learning"
+                            )
+                        }",
+                        style =
+                            MaterialTheme.typography.bodySmall,
+                        color =
+                            MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+
+                    Text(
+                        "Apply timing • ${
+                            RuntimeStatus.get(
+                                context,
+                                "premium_apply_timing",
+                                "Waiting"
+                            )
+                        }",
+                        style =
+                            MaterialTheme.typography.bodySmall,
+                    )
+
+                    Text(
+                        "Watchdog age • ${
+                            RuntimeStatus.get(
+                                context,
+                                "premium_watchdog_age",
+                                "Waiting"
+                            )
+                        } • last change ${
+                            RuntimeStatus.get(
+                                context,
+                                "premium_last_change_age",
+                                "Waiting"
+                            )
+                        }",
+                        style =
+                            MaterialTheme.typography.bodySmall,
+                        color =
+                            MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+
+                    Text(
+                        "Library • ${
+                            RuntimeStatus.get(
+                                context,
+                                "premium_library",
+                                "Waiting"
+                            )
+                        }",
+                        style =
+                            MaterialTheme.typography.bodySmall,
+                    )
+
+                    Text(
+                        "Recovery • ${
+                            RuntimeStatus.get(
+                                context,
+                                "premium_recovery",
+                                "Waiting"
+                            )
+                        }",
+                        style =
+                            MaterialTheme.typography.bodySmall,
+                        color =
+                            MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement =
+                            Arrangement.spacedBy(8.dp),
+                    ) {
+                        OutlinedButton(
+                            onClick = {
+                                bb.pix.wall.engine.EngineExecutors.io {
+                                    bb.pix.wall.engine
+                                        .PremiumIntelligenceCenter
+                                        .refresh(
+                                            context.applicationContext,
+                                            "app-refresh",
+                                        )
+                                }
+                            },
+                            modifier =
+                                Modifier.weight(1f),
+                        ) {
+                            Text(
+                                "Refresh",
+                                maxLines = 1,
+                            )
+                        }
+
+                        OutlinedButton(
+                            onClick = {
+                                bb.pix.wall.engine.EngineExecutors.io {
+                                    bb.pix.wall.engine
+                                        .PremiumIntelligenceCenter
+                                        .reanalyzeCurrent(
+                                            context.applicationContext
+                                        )
+                                }
+                            },
+                            modifier =
+                                Modifier.weight(1f),
+                        ) {
+                            Text(
+                                "Reanalyze",
+                                maxLines = 1,
+                            )
+                        }
+                    }
+
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement =
+                            Arrangement.spacedBy(8.dp),
+                    ) {
+                        OutlinedButton(
+                            onClick = {
+                                bb.pix.wall.engine.EngineExecutors.io {
+                                    bb.pix.wall.engine
+                                        .PremiumIntelligenceCenter
+                                        .rebuildNext(
+                                            context.applicationContext
+                                        )
+                                }
+                            },
+                            modifier =
+                                Modifier.weight(1f),
+                        ) {
+                            Text(
+                                "Rebuild Next",
+                                maxLines = 1,
+                            )
+                        }
+
+                        OutlinedButton(
+                            onClick = {
+                                bb.pix.wall.engine.EngineExecutors.io {
+                                    bb.pix.wall.engine
+                                        .PremiumIntelligenceCenter
+                                        .cacheIntegrityAudit(
+                                            context.applicationContext
+                                        )
+                                }
+                            },
+                            modifier =
+                                Modifier.weight(1f),
+                        ) {
+                            Text(
+                                "Cache audit",
+                                maxLines = 1,
+                            )
+                        }
+                    }
+
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement =
+                            Arrangement.spacedBy(8.dp),
+                    ) {
+                        OutlinedButton(
+                            onClick = {
+                                bb.pix.wall.engine.EngineExecutors.io {
+                                    bb.pix.wall.engine
+                                        .PremiumIntelligenceCenter
+                                        .fullRepair(
+                                            context.applicationContext
+                                        )
+                                }
+                            },
+                            modifier =
+                                Modifier.weight(1f),
+                        ) {
+                            Text(
+                                "Self-Heal",
+                                maxLines = 1,
+                            )
+                        }
+
+                        OutlinedButton(
+                            onClick = {
+                                bb.pix.wall.engine.EngineExecutors.io {
+                                    bb.pix.wall.engine
+                                        .PremiumIntelligenceCenter
+                                        .exportReport(
+                                            context.applicationContext
+                                        )
+                                }
+                            },
+                            modifier =
+                                Modifier.weight(1f),
+                        ) {
+                            Text(
+                                "Export report",
+                                maxLines = 1,
+                            )
+                        }
+                    }
+
+                    Text(
+                        "Recent intelligence timeline:\n${
+                            RuntimeStatus.get(
+                                context,
+                                "premium_event_timeline",
+                                "No events yet"
+                            )
+                        }",
+                        style =
+                            MaterialTheme.typography.bodySmall,
+                        color =
+                            MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+
+                    SettingSwitch("Pause on low battery", "Avoid automatic changes below the configured threshold.", settings.pauseLowBattery) { onSettingsChange(settings.copy(pauseLowBattery = it)) }
+                    if (settings.pauseLowBattery) {
+                        Text("Low-battery threshold: ${settings.lowBatteryThreshold}%", fontWeight = FontWeight.SemiBold)
+                        Slider(value = settings.lowBatteryThreshold.toFloat(), onValueChange = { onSettingsChange(settings.copy(lowBatteryThreshold = it.roundToInt().coerceIn(5,50))) }, valueRange = 5f..50f, steps = 44)
+                    }
+                    SettingSwitch("Quiet hours", "Pause automatic changes during your sleep/quiet window.", settings.quietHoursEnabled) { onSettingsChange(settings.copy(quietHoursEnabled = it)) }
+                    if (settings.quietHoursEnabled) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            OutlinedTextField(value = settings.quietStartHour.toString(), onValueChange = { it.toIntOrNull()?.let { h -> onSettingsChange(settings.copy(quietStartHour = h.coerceIn(0,23))) } }, label = { Text("Start hour") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.weight(1f), singleLine = true)
+                            OutlinedTextField(value = settings.quietEndHour.toString(), onValueChange = { it.toIntOrNull()?.let { h -> onSettingsChange(settings.copy(quietEndHour = h.coerceIn(0,23))) } }, label = { Text("End hour") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.weight(1f), singleLine = true)
+                        }
+                    }
+                    TextButton(onClick = {
+                        runCatching { context.startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:${context.packageName}"))) }
+                            .recoverCatching { context.startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) }
+                    }) { Text("Allow unrestricted battery use") }
+                    Text("Accessibility and display-overlay permissions are intentionally not requested because wallpaper rotation does not need them.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+
+            }
+
+CollapsibleSection(
                 title = "Remote access",
-                summary = "LAN dashboard",
+                summary = "LAN • Dashboard",
             ) {
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -358,9 +2114,9 @@ fun HomeScreen(
 
             }
 
-            CollapsibleSection(
+CollapsibleSection(
                 title = "Appearance",
-                summary = "Mode • Theme",
+                summary = "Theme • Display",
             ) {
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -384,25 +2140,25 @@ fun HomeScreen(
 
             }
 
-            CollapsibleSection(
+CollapsibleSection(
                 title = "Quick Settings tiles",
-                summary = "Next • Save • Blur • Web",
+                summary = "Next • Save • Blur • Remote",
             ) {
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     TileInfo(Icons.Outlined.SkipNext, "Next Wall", "Apply the queued wallpaper using the selected target mode.")
                     TileInfo(Icons.Outlined.SaveAlt, "Save Wall", "Save current Home/Lock wallpaper into /sdcard/wallpaper/saved/.")
                     TileInfo(Icons.Outlined.BlurOn, "Blur Wall", "Toggle configured Home/Lock blur values.")
-                    TileInfo(Icons.Outlined.Language, "BB-PixWall Web", "Open the current Wi-Fi dashboard URL in the browser.")
+                    TileInfo(Icons.Outlined.Language, "BB-Remote", "Open the BB-PixWall Wi-Fi dashboard in the browser.")
                     Text("Add these from Android Quick Settings → Edit tiles.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
 
             }
 
-            CollapsibleSection(
+CollapsibleSection(
                 title = "Diagnostics",
-                summary = "Engine • Cache • Runtime",
+                summary = "Health • Runtime",
             ) {
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
@@ -412,6 +2168,59 @@ fun HomeScreen(
                     Text("Cache pools: ${bb.pix.wall.engine.WallpaperController.cacheBreakdown()}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Text("Automation: ${if (settings.autoChange) settings.triggerMode.label else "Off"}")
                     Text("Engine health: ${RuntimeStatus.get(context, "engine_health", "Waiting for audit")}")
+                    Text(
+                        "Phase-1 smart policy: ${
+                            RuntimeStatus.get(
+                                context,
+                                "resource_policy",
+                                "Waiting"
+                            )
+                        }",
+                        style =
+                            MaterialTheme
+                                .typography
+                                .bodySmall,
+                        color =
+                            MaterialTheme
+                                .colorScheme
+                                .onSurfaceVariant,
+                    )
+
+                    Text(
+                        "Mood profile: ${
+                            RuntimeStatus.get(
+                                context,
+                                "mood_profile_label",
+                                "Waiting"
+                            )
+                        }",
+                        style =
+                            MaterialTheme
+                                .typography
+                                .bodySmall,
+                        color =
+                            MaterialTheme
+                                .colorScheme
+                                .onSurfaceVariant,
+                    )
+
+                    Text(
+                        "Blocked cache purged: ${
+                            RuntimeStatus.get(
+                                context,
+                                "blocked_cache_purge",
+                                "0"
+                            )
+                        }",
+                        style =
+                            MaterialTheme
+                                .typography
+                                .bodySmall,
+                        color =
+                            MaterialTheme
+                                .colorScheme
+                                .onSurfaceVariant,
+                    )
                     Text("Offline ready: ${bb.pix.wall.engine.WallpaperController.offlineReadyCount()} wallpaper(s)")
                     Text("Cycle progress: ${bb.pix.wall.engine.WallpaperController.cycleProgress(context)}")
                     Text("Last trigger: ${RuntimeStatus.get(context, "last_trigger", "None yet")}")
@@ -444,7 +2253,14 @@ fun HomeScreen(
                 }
             }
 
-            CollapsibleSection(
+
+
+
+
+
+            }
+
+CollapsibleSection(
                 title = "Backup & Restore",
                 summary = "Settings • Learning",
             ) {
@@ -583,7 +2399,16 @@ fun HomeScreen(
             }
 
 
-            }
+
+            ThinkingSweepLine(
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(
+                            horizontal =
+                                28.dp
+                        )
+            )
 
             DeveloperIdentityCard(
                 context = context,
@@ -598,47 +2423,995 @@ fun HomeScreen(
 }
 }
 
-@Composable private fun PreviewGrid(state: WallpaperState, refresh: () -> Unit, prepare: () -> Unit) {
-    var selected by remember { mutableStateOf<Pair<String, String?>?>(null) }
-    selected?.let { item ->
-        val bmp = rememberPreviewBitmap(item.second)
-        AlertDialog(
-            onDismissRequest = { selected = null },
-            confirmButton = { TextButton(onClick = { selected = null }) { Text("Close") } },
-            title = { Text(item.first) },
-            text = {
-                if (bmp != null) Image(bmp.asImageBitmap(), item.first, Modifier.fillMaxWidth().aspectRatio(.62f).clip(RoundedCornerShape(18.dp)), contentScale = ContentScale.Crop)
-                else Text("Preview unavailable")
+private data class PreviewSelection(
+    val label: String,
+    val path: String?,
+    val home: Boolean,
+    val current: Boolean,
+)
+
+@Composable
+private fun PreviewGrid(
+    state: WallpaperState,
+    refresh: () -> Unit,
+    prepare: () -> Unit,
+) {
+    val context =
+        LocalContext.current
+
+    var selected by
+        remember {
+            mutableStateOf<PreviewSelection?>(
+                null
+            )
+        }
+
+    var showHistory by
+        remember {
+            mutableStateOf(false)
+        }
+
+    var libraryTick by
+        remember {
+            mutableStateOf(0)
+        }
+
+    fun postUi(
+        block: () -> Unit,
+    ) {
+        android.os.Handler(
+            android.os.Looper.getMainLooper()
+        ).post(block)
+    }
+
+    fun toast(
+        message: String,
+    ) {
+        android.widget.Toast.makeText(
+            context,
+            message,
+            android.widget.Toast.LENGTH_SHORT,
+        ).show()
+    }
+
+    /*
+     * ========================================================
+     * HISTORY
+     * ========================================================
+     */
+    if (showHistory) {
+        val history =
+            remember(
+                showHistory,
+                libraryTick,
+            ) {
+                bb.pix.wall.engine
+                    .WallpaperLibrary
+                    .history()
             }
+
+        AlertDialog(
+            onDismissRequest = {
+                showHistory = false
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showHistory = false
+                    }
+                ) {
+                    Text("Close")
+                }
+            },
+            title = {
+                Text(
+                    "Wallpaper History"
+                )
+            },
+            text = {
+                if (history.isEmpty()) {
+                    Text(
+                        "No wallpaper history yet."
+                    )
+                } else {
+                    Column(
+                        modifier =
+                            Modifier
+                                .fillMaxWidth()
+                                .heightIn(
+                                    max = 430.dp
+                                )
+                                .verticalScroll(
+                                    rememberScrollState()
+                                ),
+                        verticalArrangement =
+                            Arrangement.spacedBy(
+                                8.dp
+                            ),
+                    ) {
+                        history.take(40)
+                            .forEach { entry ->
+                                val date =
+                                    remember(
+                                        entry.createdAt
+                                    ) {
+                                        java.text
+                                            .SimpleDateFormat(
+                                                "dd MMM • hh:mm a",
+                                                java.util.Locale
+                                                    .getDefault(),
+                                            )
+                                            .format(
+                                                java.util.Date(
+                                                    entry.createdAt
+                                                )
+                                            )
+                                    }
+
+                                Card(
+                                    modifier =
+                                        Modifier
+                                            .fillMaxWidth()
+                                ) {
+                                    Row(
+                                        modifier =
+                                            Modifier
+                                                .fillMaxWidth()
+                                                .padding(
+                                                    12.dp
+                                                ),
+                                        verticalAlignment =
+                                            Alignment
+                                                .CenterVertically,
+                                    ) {
+                                        Column(
+                                            modifier =
+                                                Modifier
+                                                    .weight(
+                                                        1f
+                                                    )
+                                        ) {
+                                            Text(
+                                                date,
+                                                fontWeight =
+                                                    FontWeight
+                                                        .SemiBold,
+                                            )
+
+                                            Text(
+                                                buildString {
+                                                    if (
+                                                        entry.home !=
+                                                        null
+                                                    ) {
+                                                        append(
+                                                            "Home"
+                                                        )
+                                                    }
+
+                                                    if (
+                                                        entry.lock !=
+                                                        null
+                                                    ) {
+                                                        if (
+                                                            isNotEmpty()
+                                                        ) {
+                                                            append(
+                                                                " + "
+                                                            )
+                                                        }
+
+                                                        append(
+                                                            "Lock"
+                                                        )
+                                                    }
+                                                },
+                                                style =
+                                                    MaterialTheme
+                                                        .typography
+                                                        .bodySmall,
+                                                color =
+                                                    MaterialTheme
+                                                        .colorScheme
+                                                        .onSurfaceVariant,
+                                            )
+                                        }
+
+                                        TextButton(
+                                            onClick = {
+                                                bb.pix.wall.engine
+                                                    .EngineExecutors
+                                                    .io {
+                                                        val ok =
+                                                            runCatching {
+                                                                WallpaperController
+                                                                    .restoreHistory(
+                                                                        context.applicationContext,
+                                                                        entry,
+                                                                    )
+                                                            }.getOrDefault(
+                                                                false
+                                                            )
+
+                                                        postUi {
+                                                            if (
+                                                                ok
+                                                            ) {
+                                                                libraryTick++
+                                                                refresh()
+                                                                showHistory =
+                                                                    false
+                                                                toast(
+                                                                    "History restored"
+                                                                )
+                                                            } else {
+                                                                toast(
+                                                                    "Restore failed"
+                                                                )
+                                                            }
+                                                        }
+                                                    }
+                                            }
+                                        ) {
+                                            Text(
+                                                "Restore"
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                    }
+                }
+            },
         )
     }
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            Text("Wallpaper preview", style = MaterialTheme.typography.titleLarge)
-            Row { TextButton(onClick = prepare) { Text("Prepare next") }; IconButton(onClick = refresh) { Icon(Icons.Outlined.Refresh, "Refresh") } }
+
+    /*
+     * ========================================================
+     * SELECTED WALLPAPER ACTION SHEET
+     * ========================================================
+     */
+    selected?.let { item ->
+        val bmp =
+            rememberPreviewBitmap(
+                item.path
+            )
+
+        val file =
+            remember(
+                item.path,
+                libraryTick,
+            ) {
+                item.path
+                    ?.let {
+                        java.io.File(it)
+                    }
+            }
+
+        val info =
+            remember(
+                item.path,
+                libraryTick,
+            ) {
+                WallpaperController
+                    .displayWallpaperInfo(
+                        item.path
+                    )
+            }
+
+        val favorite =
+            file?.let {
+                bb.pix.wall.engine
+                    .WallpaperLibrary
+                    .isFavorite(it)
+            } ?: false
+
+        val pinned =
+            file?.let {
+                bb.pix.wall.engine
+                    .WallpaperLibrary
+                    .isPinned(it)
+            } ?: false
+
+        AlertDialog(
+            onDismissRequest = {
+                selected = null
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        selected = null
+                    }
+                ) {
+                    Text("Close")
+                }
+            },
+            title = {
+                Text(item.label)
+            },
+            text = {
+                Column(
+                    verticalArrangement =
+                        Arrangement.spacedBy(
+                            10.dp
+                        )
+                ) {
+                    if (bmp != null) {
+                        Image(
+                            bmp.asImageBitmap(),
+                            item.label,
+                            Modifier
+                                .fillMaxWidth()
+                                .aspectRatio(
+                                    .62f
+                                )
+                                .clip(
+                                    RoundedCornerShape(
+                                        18.dp
+                                    )
+                                ),
+                            contentScale =
+                                ContentScale.Crop,
+                        )
+                    } else {
+                        Text(
+                            "Preview unavailable"
+                        )
+                    }
+
+                    Text(
+                        "${info.resolution} • " +
+                            "${info.sizeLabel} • " +
+                            "${info.format}"
+                    )
+
+                    Text(
+                        "${info.source} • " +
+                            "Quality ${info.quality}",
+                        style =
+                            MaterialTheme
+                                .typography
+                                .bodySmall,
+                        color =
+                            MaterialTheme
+                                .colorScheme
+                                .onSurfaceVariant,
+                    )
+
+                    Row(
+                        modifier =
+                            Modifier
+                                .fillMaxWidth(),
+                        horizontalArrangement =
+                            Arrangement
+                                .spacedBy(
+                                    8.dp
+                                ),
+                    ) {
+                        TextButton(
+                            modifier =
+                                Modifier
+                                    .weight(
+                                        1f
+                                    ),
+                            enabled =
+                                file != null,
+                            onClick = {
+                                val f =
+                                    file
+                                        ?: return@TextButton
+
+                                val changed =
+                                    if (
+                                        favorite
+                                    ) {
+                                        bb.pix.wall.engine
+                                            .WallpaperLibrary
+                                            .removeFavorite(
+                                                f
+                                            )
+                                    } else {
+                                        bb.pix.wall.engine
+                                            .WallpaperLibrary
+                                            .favorite(
+                                                f
+                                            ) != null
+                                    }
+
+                                if (changed) {
+                                    libraryTick++
+                                    toast(
+                                        if (
+                                            favorite
+                                        ) {
+                                            "Removed from Favorites"
+                                        } else {
+                                            "Added to Favorites"
+                                        }
+                                    )
+                                }
+                            }
+                        ) {
+                            Text(
+                                if (favorite) {
+                                    "♥ Favorite"
+                                } else {
+                                    "♡ Favorite"
+                                }
+                            )
+                        }
+
+                        TextButton(
+                            modifier =
+                                Modifier
+                                    .weight(
+                                        1f
+                                    ),
+                            enabled =
+                                file != null,
+                            onClick = {
+                                val f =
+                                    file
+                                        ?: return@TextButton
+
+                                val ok =
+                                    bb.pix.wall.engine
+                                        .WallpaperLibrary
+                                        .setPinned(
+                                            f,
+                                            !pinned,
+                                        )
+
+                                if (ok) {
+                                    libraryTick++
+                                    toast(
+                                        if (
+                                            pinned
+                                        ) {
+                                            "Unpinned"
+                                        } else {
+                                            "Pinned"
+                                        }
+                                    )
+                                }
+                            }
+                        ) {
+                            Text(
+                                if (pinned) {
+                                    "Unpin"
+                                } else {
+                                    "Pin"
+                                }
+                            )
+                        }
+                    }
+
+                    Row(
+                        modifier =
+                            Modifier
+                                .fillMaxWidth(),
+                        horizontalArrangement =
+                            Arrangement
+                                .spacedBy(
+                                    8.dp
+                                ),
+                    ) {
+                        TextButton(
+                            modifier =
+                                Modifier
+                                    .weight(
+                                        1f
+                                    ),
+                            enabled =
+                                file != null,
+                            onClick = {
+                                val f =
+                                    file
+                                        ?: return@TextButton
+
+                                val saved =
+                                    bb.pix.wall.engine
+                                        .WallpaperLibrary
+                                        .saveOriginal(
+                                            f,
+                                            item.label,
+                                        )
+
+                                toast(
+                                    if (
+                                        saved != null
+                                    ) {
+                                        "Original saved"
+                                    } else {
+                                        "Save failed"
+                                    }
+                                )
+                            }
+                        ) {
+                            Text("Save")
+                        }
+
+                        TextButton(
+                            modifier =
+                                Modifier
+                                    .weight(
+                                        1f
+                                    ),
+                            enabled =
+                                file != null,
+                            onClick = {
+                                val f =
+                                    file
+                                        ?: return@TextButton
+
+                                val blocked =
+                                    bb.pix.wall.engine
+                                        .WallpaperLibrary
+                                        .neverShowAgain(
+                                            f
+                                        )
+
+                                if (blocked) {
+                                    WallpaperController
+                                        .purgeBlockedCached(
+                                            context.applicationContext
+                                        )
+
+                                    /*
+                                     * Current wallpaper stays visible.
+                                     * A prepared Next wallpaper can be
+                                     * discarded immediately and replaced.
+                                     */
+                                    if (
+                                        !item.current
+                                    ) {
+                                        f.delete()
+
+                                        java.io.File(
+                                            f.absolutePath +
+                                                ".meta"
+                                        ).delete()
+
+                                        bb.pix.wall.engine
+                                            .EngineExecutors
+                                            .io {
+                                                runCatching {
+                                                    WallpaperController
+                                                        .ensureNext(
+                                                            context.applicationContext
+                                                        )
+                                                }
+
+                                                postUi {
+                                                    refresh()
+                                                }
+                                            }
+                                    }
+
+                                    libraryTick++
+                                    toast(
+                                        "Never Show Again added"
+                                    )
+                                } else {
+                                    toast(
+                                        "Unable to block wallpaper"
+                                    )
+                                }
+                            }
+                        ) {
+                            Text(
+                                "Never Again"
+                            )
+                        }
+                    }
+                }
+            },
+        )
+    }
+
+    /*
+     * ========================================================
+     * MAIN PREVIEW GRID
+     * ========================================================
+     */
+    Column(
+        verticalArrangement =
+            Arrangement.spacedBy(
+                10.dp
+            )
+    ) {
+        Text(
+            "Wallpaper preview",
+            style =
+                MaterialTheme
+                    .typography
+                    .titleLarge,
+        )
+
+        Row(
+            modifier =
+                Modifier
+                    .fillMaxWidth(),
+            horizontalArrangement =
+                Arrangement.spacedBy(
+                    6.dp
+                ),
+        ) {
+            TextButton(
+                modifier =
+                    Modifier.weight(
+                        1f
+                    ),
+                onClick = {
+                    showHistory = true
+                }
+            ) {
+                Text("History")
+            }
+
+            TextButton(
+                modifier =
+                    Modifier.weight(
+                        1f
+                    ),
+                onClick = {
+                    bb.pix.wall.engine
+                        .EngineExecutors
+                        .io {
+                            val settings =
+                                SettingsStore(
+                                    context.applicationContext
+                                ).load()
+
+                            bb.pix.wall.engine
+                                .WallpaperSourceEngine
+                                .invalidateCloudIndex()
+
+                            WallpaperController
+                                .invalidateQueue()
+
+                            val ok =
+                                runCatching {
+                                    WallpaperController
+                                        .ensureNext(
+                                            context.applicationContext,
+                                            settings,
+                                            allowNetwork = true,
+                                        )
+                                }.getOrDefault(
+                                    false
+                                )
+
+                            /*
+                             * Refill predictive cache only after
+                             * the visible Next pair is ready.
+                             */
+                            bb.pix.wall.engine
+                                .EngineExecutors
+                                .io {
+                                    runCatching {
+                                        WallpaperController
+                                            .primeCache(
+                                                context.applicationContext,
+                                                settings,
+                                            )
+                                    }
+                                }
+
+                            postUi {
+                                refresh()
+
+                                toast(
+                                    if (ok) {
+                                        "Next refreshed"
+                                    } else {
+                                        "Next refresh queued"
+                                    }
+                                )
+                            }
+                        }
+                }
+            ) {
+                Text("Refresh Next")
+            }
+
+            TextButton(
+                modifier =
+                    Modifier.weight(
+                        1f
+                    ),
+                onClick = {
+                    bb.pix.wall.engine
+                        .EngineExecutors
+                        .io {
+                            /*
+                             * Force a fresh choice, but still use
+                             * ready local/predictive cache first.
+                             */
+                            WallpaperController
+                                .invalidateQueue()
+
+                            val changed =
+                                runCatching {
+                                    WallpaperController
+                                        .nextWall(
+                                            context.applicationContext,
+                                            allowNetwork = true,
+                                            userInitiated = true,
+                                        )
+                                }.getOrDefault(
+                                    false
+                                )
+
+                            postUi {
+                                refresh()
+
+                                toast(
+                                    if (changed) {
+                                        "Surprise applied"
+                                    } else {
+                                        "Preparing surprise"
+                                    }
+                                )
+                            }
+                        }
+                }
+            ) {
+                Text("Surprise")
+            }
         }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            WallpaperThumb("Current Home", state.currentHome, Modifier.weight(1f)) { selected = "Current Home" to state.currentHome }
-            WallpaperThumb("Current Lock", state.currentLock, Modifier.weight(1f)) { selected = "Current Lock" to state.currentLock }
+
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement =
+                Arrangement.spacedBy(
+                    10.dp
+                ),
+        ) {
+            WallpaperThumb(
+                "Current Home",
+                state.currentHome,
+                true,
+                true,
+                Modifier.weight(1f),
+            ) {
+                selected =
+                    PreviewSelection(
+                        label =
+                            "Current Home",
+                        path =
+                            state.currentHome,
+                        home = true,
+                        current = true,
+                    )
+            }
+
+            WallpaperThumb(
+                "Current Lock",
+                state.currentLock,
+                false,
+                true,
+                Modifier.weight(1f),
+            ) {
+                selected =
+                    PreviewSelection(
+                        label =
+                            "Current Lock",
+                        path =
+                            state.currentLock,
+                        home = false,
+                        current = true,
+                    )
+            }
         }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            WallpaperThumb("Next Home", state.nextHome, Modifier.weight(1f)) { selected = "Next Home" to state.nextHome }
-            WallpaperThumb("Next Lock", state.nextLock, Modifier.weight(1f)) { selected = "Next Lock" to state.nextLock }
+
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement =
+                Arrangement.spacedBy(
+                    10.dp
+                ),
+        ) {
+            WallpaperThumb(
+                "Next Home",
+                state.nextHome,
+                true,
+                false,
+                Modifier.weight(1f),
+            ) {
+                selected =
+                    PreviewSelection(
+                        label =
+                            "Next Home",
+                        path =
+                            state.nextHome,
+                        home = true,
+                        current = false,
+                    )
+            }
+
+            WallpaperThumb(
+                "Next Lock",
+                state.nextLock,
+                false,
+                false,
+                Modifier.weight(1f),
+            ) {
+                selected =
+                    PreviewSelection(
+                        label =
+                            "Next Lock",
+                        path =
+                            state.nextLock,
+                        home = false,
+                        current = false,
+                    )
+            }
         }
     }
 }
 
-@Composable private fun WallpaperThumb(label: String, path: String?, modifier: Modifier = Modifier, onClick: () -> Unit) {
-    val bitmap = rememberPreviewBitmap(path)
-    val source = remember(path) { WallpaperController.sourceFor(path) }
-    Card(modifier = modifier.clickable(enabled = path != null, onClick = onClick), shape = RoundedCornerShape(18.dp)) {
-        Box(Modifier.fillMaxWidth().aspectRatio(.82f).background(MaterialTheme.colorScheme.surfaceVariant)) {
-            if (bitmap != null) Image(bitmap.asImageBitmap(), label, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-            else Icon(Icons.Outlined.ImageNotSupported, null, Modifier.align(Alignment.Center).size(34.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-            Surface(Modifier.align(Alignment.BottomStart).fillMaxWidth(), color = MaterialTheme.colorScheme.surface.copy(alpha = .86f)) {
-                Column(Modifier.padding(horizontal = 10.dp, vertical = 7.dp)) {
-                    Text(label, style = MaterialTheme.typography.labelMedium)
-                    Text(source, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+@Composable
+private fun WallpaperThumb(
+    label: String,
+    path: String?,
+    home: Boolean,
+    allowBlur: Boolean,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    val context =
+        LocalContext.current
+
+    val bitmap =
+        rememberWallpaperPreviewBitmap(
+            path = path,
+            home = home,
+            allowBlur = allowBlur,
+        )
+
+    val settings =
+        bb.pix.wall.settings.SettingsStore(
+            context
+        ).load()
+
+    val blurMaster =
+        WallpaperController
+            .blurMasterEnabled(context)
+
+    val blurEnabled =
+        allowBlur &&
+        blurMaster &&
+            if (home) {
+                settings.homeBlurEnabled &&
+                    settings.homeBlurRadius > 0
+            } else {
+                settings.lockBlurEnabled &&
+                    settings.lockBlurRadius > 0
+            }
+
+    val blurRadius =
+        if (home) {
+            settings.homeBlurRadius
+        } else {
+            settings.lockBlurRadius
+        }
+
+    val info =
+        WallpaperController.displayWallpaperInfo(
+            path
+        )
+
+    Card(
+        modifier =
+            modifier.clickable(
+                enabled = path != null,
+                onClick = onClick,
+            ),
+        shape =
+            RoundedCornerShape(18.dp),
+    ) {
+        Column {
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(.95f)
+                    .background(
+                        MaterialTheme
+                            .colorScheme
+                            .surfaceVariant
+                    )
+            ) {
+                if (bitmap != null) {
+                    Image(
+                        bitmap.asImageBitmap(),
+                        label,
+                        Modifier
+                            .fillMaxSize(),
+                        contentScale =
+                            ContentScale.Crop,
+                    )
+                } else {
+                    Icon(
+                        Icons.Outlined
+                            .ImageNotSupported,
+                        null,
+                        Modifier
+                            .align(
+                                Alignment.Center
+                            )
+                            .size(34.dp),
+                        tint =
+                            MaterialTheme
+                                .colorScheme
+                                .onSurfaceVariant,
+                    )
+                }
+            }
+
+            Column(
+                Modifier.padding(
+                    horizontal = 10.dp,
+                    vertical = 8.dp,
+                )
+            ) {
+                Text(
+                    label,
+                    style =
+                        MaterialTheme
+                            .typography
+                            .labelMedium,
+                )
+
+                Text(
+                    info.source,
+                    style =
+                        MaterialTheme
+                            .typography
+                            .labelSmall,
+                    color =
+                        MaterialTheme
+                            .colorScheme
+                            .primary,
+                )
+
+                Text(
+                    if (info.exists) {
+                        "${info.resolution} • " +
+                            "${info.format} • " +
+                            info.sizeLabel
+                    } else {
+                        "Unavailable"
+                    },
+                    style =
+                        MaterialTheme
+                            .typography
+                            .labelSmall,
+                    color =
+                        MaterialTheme
+                            .colorScheme
+                            .onSurfaceVariant,
+                )
+
+                if (info.exists) {
+                    Text(
+                        (
+                            if (blurEnabled) {
+                                "Blur ON • ${blurRadius}px"
+                            } else {
+                                "Blur OFF"
+                            }
+                        ) +
+                            " • Quality ${info.quality}",
+                        style =
+                            MaterialTheme
+                                .typography
+                                .labelSmall,
+                        color =
+                            MaterialTheme
+                                .colorScheme
+                                .onSurfaceVariant,
+                    )
                 }
             }
         }
@@ -866,6 +3639,81 @@ private fun PremiumAppHeader(
         ThemeProfile.MATERIAL_PRO -> Brush.verticalGradient(listOf(c.background, c.primary.copy(alpha = .08f), c.secondary.copy(alpha = .06f)))
     }
 }
+@Composable
+private fun rememberWallpaperPreviewBitmap(
+    path: String?,
+    home: Boolean,
+    allowBlur: Boolean,
+): android.graphics.Bitmap? {
+    val context = LocalContext.current
+
+    val settings =
+        bb.pix.wall.settings.SettingsStore(context)
+            .load()
+
+    val blurMaster =
+        WallpaperController.blurMasterEnabled(context)
+
+    val blurEnabled =
+        allowBlur &&
+            blurMaster &&
+            if (home) {
+                settings.homeBlurEnabled &&
+                    settings.homeBlurRadius > 0
+            } else {
+                settings.lockBlurEnabled &&
+                    settings.lockBlurRadius > 0
+            }
+
+    val blurRadius =
+        if (home) {
+            settings.homeBlurRadius
+        } else {
+            settings.lockBlurRadius
+        }
+
+    /*
+     * Include effective blur state + radius in the key.
+     * The wallpaper path itself does not change when Blur Wall toggles,
+     * so path-only produceState would otherwise keep the stale bitmap.
+     */
+    val previewKey =
+        "$path|home=$home|allow=$allowBlur|blur=$blurEnabled|radius=$blurRadius"
+
+    val state =
+        produceState<android.graphics.Bitmap?>(
+            initialValue = null,
+            key1 = previewKey,
+        ) {
+            value =
+                if (path.isNullOrBlank()) {
+                    null
+                } else {
+                    withContext(Dispatchers.IO) {
+                        val source =
+                            java.io.File(path)
+
+                        val preview =
+                            if (blurEnabled) {
+                                WallpaperController.previewFile(
+                                    context.applicationContext,
+                                    source,
+                                    home,
+                                )
+                            } else {
+                                source
+                            }
+
+                        decodePreview(
+                            preview.absolutePath
+                        )
+                    }
+                }
+        }
+
+    return state.value
+}
+
 @Composable private fun rememberPreviewBitmap(path: String?): android.graphics.Bitmap? {
     val state = produceState<android.graphics.Bitmap?>(initialValue = null, key1 = path) {
         value = if (path.isNullOrBlank()) null else withContext(Dispatchers.IO) { decodePreview(path) }

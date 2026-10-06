@@ -9,6 +9,7 @@ import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
@@ -24,6 +25,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
@@ -1027,4 +1029,104 @@ fun DeveloperIdentityCard(
                 },
         )
     }
+}
+
+
+/*
+ * BB-PixWall subtle thinking indicator.
+ *
+ * Inspired by the visual behavior of a quiet processing light:
+ * a short soft highlight travels over a muted horizontal track.
+ *
+ * Important:
+ * - no rotating border
+ * - no whole-card pulsing
+ * - no scale animation
+ * - tiny 2dp draw area only
+ */
+@Composable
+fun ThinkingSweepLine(
+    modifier: Modifier = Modifier,
+    accent: Color =
+        MaterialTheme.colorScheme.primary,
+) {
+    val transition =
+        rememberInfiniteTransition(
+            label =
+                "bb_thinking_sweep"
+        )
+
+    val progress by
+        transition.animateFloat(
+            initialValue = -.30f,
+            targetValue = 1.30f,
+            animationSpec =
+                infiniteRepeatable(
+                    animation =
+                        tween(
+                            durationMillis =
+                                1650,
+                            easing =
+                                androidx.compose.animation
+                                    .core
+                                    .FastOutSlowInEasing,
+                        ),
+                    repeatMode =
+                        RepeatMode.Restart,
+                ),
+            label =
+                "bb_thinking_sweep_progress",
+        )
+
+    Box(
+        modifier =
+            modifier
+                .height(2.dp)
+                .clip(
+                    RoundedCornerShape(
+                        999.dp
+                    )
+                )
+                .background(
+                    MaterialTheme
+                        .colorScheme
+                        .outlineVariant
+                        .copy(
+                            alpha = .20f
+                        )
+                )
+                .drawWithContent {
+                    drawContent()
+
+                    val travel =
+                        size.width * progress
+
+                    val half =
+                        size.width * .18f
+
+                    drawRect(
+                        brush =
+                            Brush.horizontalGradient(
+                                colors =
+                                    listOf(
+                                        Color.Transparent,
+                                        accent.copy(
+                                            alpha = .12f
+                                        ),
+                                        accent.copy(
+                                            alpha = .88f
+                                        ),
+                                        accent.copy(
+                                            alpha = .12f
+                                        ),
+                                        Color.Transparent,
+                                    ),
+                                startX =
+                                    travel - half,
+                                endX =
+                                    travel + half,
+                            ),
+                    )
+                }
+    )
 }

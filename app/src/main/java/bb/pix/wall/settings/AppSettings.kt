@@ -22,6 +22,13 @@ enum class EngineMode(val label: String) { STANDARD("Standard"), ADVANCED("Advan
 
 enum class AspectPreference(val label: String) { ANY("Any"), PORTRAIT("Portrait"), LANDSCAPE("Landscape"), SCREEN_MATCH("Match screen"), }
 
+enum class SourcePriorityMode(val label: String) {
+    SMART_BALANCED("Smart balanced"),
+    PHOTOS_FIRST("Google Photos first"),
+    DRIVE_FIRST("Google Drive first"),
+    LOCAL_FIRST("Local first"),
+}
+
 data class AppSettings(
     val autoChange: Boolean = false,
     val triggerMode: TriggerMode = TriggerMode.INTERVAL,
@@ -61,6 +68,33 @@ data class AppSettings(
     val smartCropTolerancePct: Float = 1.5f,
     // Keep local storage footprint small even in Advance mode.
     val leanStorageMode: Boolean = true,
+
+    // Phase-1 final smart source/cache policy.
+    val sourcePriorityMode: SourcePriorityMode =
+        SourcePriorityMode.SMART_BALANCED,
+    val smartPairingEnabled: Boolean = true,
+    val cacheMaxMb: Int = 512,
+    val adaptiveResourceProtectionEnabled: Boolean = true,
+
+    // Adaptive environment / Mood Engine.
+    val moodEngineEnabled: Boolean = false,
+    val moodAmbientLightEnabled: Boolean = true,
+    val moodTimeEnabled: Boolean = true,
+    val moodDarkModeEnabled: Boolean = true,
+    val moodBatteryContextEnabled: Boolean = true,
+    val moodThermalProtectionEnabled: Boolean = true,
+    val moodStrength: Int = 60,
+    val moodDarkLuxThreshold: Int = 20,
+    val moodBrightLuxThreshold: Int = 800,
+    val moodWeatherEnabled: Boolean = false,
+    val moodUseDeviceLocation: Boolean = true,
+    val moodWeatherCity: String = "",
+    val moodWeatherInfluence: Int = 60,
+    val moodOutdoorTemperatureEnabled: Boolean = true,
+    val moodColdTemperatureC: Int = 15,
+    val moodHotTemperatureC: Int = 32,
+    val moodAutoReactEnabled: Boolean = false,
+    val moodAutoReactCooldownMinutes: Int = 60,
 
     // Intelligent ordering for Random Shuffle / Surprise only.
     // Explicit A-Z/date/size orders are never overridden.

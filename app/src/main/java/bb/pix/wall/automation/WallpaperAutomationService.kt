@@ -49,6 +49,42 @@ class WallpaperAutomationService : Service() {
         }
 
     private val applying = AtomicBoolean(false)
+
+    /*
+     * Performance Guard:
+     * deep maintenance stays single-flight and off the
+     * latency-sensitive screen event path.
+     */
+    private val healthAuditRunning =
+        AtomicBoolean(false)
+
+    @Volatile
+    private var lastFullHealthAt =
+        0L
+
+    private val fullHealthIntervalMs =
+        60L * 60L * 1000L
+
+    private val heartbeatIntervalMs =
+        5L * 60L * 1000L
+
+    private val startupHealthGraceMs =
+        30L * 60L * 1000L
+
+    /*
+     * Background maintenance is deliberately slower than wallpaper
+     * rotation. One service start / one screen event must never fan out
+     * into several cloud/cache jobs.
+     */
+    private val maintenanceRunning =
+        AtomicBoolean(false)
+
+    private val maintenanceCooldownMs =
+        10L * 60L * 1000L
+
+    private val rootTuneCooldownMs =
+        30L * 60L * 1000L
+
     private var screenRegistered = false
     @Volatile private var lastApplyStartedAt = 0L
 
@@ -66,51 +102,322 @@ class WallpaperAutomationService : Service() {
             if (matches) applyIfAllowed(s, "event:${action.substringAfterLast('.')}")
         }
     }
+    private val healthTask =
+        object : Runnable {
+            override fun run() {
+                val now =
+                    System.currentTimeMillis()
 
-    private val healthTask = object : Runnable {
-        override fun run() {
-            val latest = SettingsStore(this@WallpaperAutomationService).load()
-            EngineExecutors.io {
-                runCatching {
-                    EngineHealth.auditAndRepair(
+                /*
+                 * Cheap heartbeat only.
+                 * Deep audit/cache repair is NOT run every heartbeat.
+                 */
+                RuntimeStatus.setLong(
+                    applicationContext,
+                    "performance_heartbeat_at",
+                    now,
+                )
+
+                RuntimeStatus.set(
+                    applicationContext,
+                    "performance_guard",
+                    "Idle-safe • instant screen path armed",
+                )
+
+                val elapsed =
+                    now -
+                        lastFullHealthAt
+
+                if (
+                    elapsed >=
+                        fullHealthIntervalMs &&
+                    healthAuditRunning.compareAndSet(
+                        false,
+                        true,
+                    )
+                ) {
+                    lastFullHealthAt =
+                        now
+
+                    EngineExecutors.io {
+                        val started =
+                            System.currentTimeMillis()
+
+                        try {
+                            val latest =
+                                SettingsStore(
+                                    this@WallpaperAutomationService
+                                ).load()
+
+                            runCatching {
+                                EngineHealth.auditAndRepair(
+                                    applicationContext,
+                                    latest,
+                                    allowNetworkRefill =
+                                        false,
+                                )
+                            }
+
+                            if (
+                                latest.engineMode ==
+                                    EngineMode.ADVANCED &&
+                                latest.backgroundGuardEnabled
+                            ) {
+                                val lastTune =
+                                    RuntimeStatus.getLong(
+                                        applicationContext,
+                                        "root_last_tune",
+                                        0L,
+                                    )
+
+                                if (
+                                    System.currentTimeMillis() -
+                                        lastTune >=
+                                    30L * 60L * 1000L
+                                ) {
+                                    runCatching {
+                                        RootAccess.tuneBackground(
+                                            applicationContext
+                                        )
+                                    }
+                                }
+                            }
+                        } finally {
+                            val finished =
+                                System.currentTimeMillis()
+
+                            RuntimeStatus.setLong(
+                                applicationContext,
+                                "performance_full_audit_at",
+                                finished,
+                            )
+
+                            RuntimeStatus.setLong(
+                                applicationContext,
+                                "performance_full_audit_ms",
+                                finished - started,
+                            )
+
+                            RuntimeStatus.set(
+                                applicationContext,
+                                "performance_audit_state",
+                                "Complete • ${
+                                    finished -
+                                        started
+                                }ms",
+                            )
+
+                            healthAuditRunning.set(false)
+                        }
+                    }
+                } else {
+                    RuntimeStatus.set(
                         applicationContext,
-                        latest,
-                        allowNetworkRefill = true,
+                        "performance_audit_state",
+                        if (
+                            healthAuditRunning.get()
+                        ) {
+                            "Audit already running"
+                        } else {
+                            "Sleeping • deep audit throttled"
+                        },
                     )
                 }
 
+                handler.postDelayed(
+                    this,
+                    heartbeatIntervalMs,
+                )
+            }
+        }
+
+
+    private fun maybeTuneRoot(
+        settings: AppSettings,
+    ) {
+        if (
+            settings.engineMode != EngineMode.ADVANCED ||
+            !settings.backgroundGuardEnabled
+        ) {
+            return
+        }
+
+        val now =
+            System.currentTimeMillis()
+
+        val lastTune =
+            RuntimeStatus.getLong(
+                applicationContext,
+                "root_last_tune",
+                0L,
+            )
+
+        if (
+            now - lastTune <
+            rootTuneCooldownMs
+        ) {
+            RuntimeStatus.set(
+                applicationContext,
+                "root_guard_state",
+                "Sleeping • root tuning already fresh",
+            )
+
+            return
+        }
+
+        runCatching {
+            RootAccess.tuneBackground(
+                applicationContext
+            )
+        }
+
+        RuntimeStatus.set(
+            applicationContext,
+            "root_guard_state",
+            "Verified",
+        )
+    }
+
+    private fun scheduleMaintenance(
+        settings: AppSettings,
+        reason: String,
+        allowNetwork: Boolean,
+    ) {
+        val now =
+            System.currentTimeMillis()
+
+        val lastStarted =
+            RuntimeStatus.getLong(
+                applicationContext,
+                "maintenance_last_started",
+                0L,
+            )
+
+        if (
+            now - lastStarted <
+            maintenanceCooldownMs
+        ) {
+            RuntimeStatus.set(
+                applicationContext,
+                "maintenance_state",
+                "Deferred • cooldown • $reason",
+            )
+
+            return
+        }
+
+        if (
+            !maintenanceRunning.compareAndSet(
+                false,
+                true,
+            )
+        ) {
+            RuntimeStatus.set(
+                applicationContext,
+                "maintenance_state",
+                "Coalesced • already running",
+            )
+
+            return
+        }
+
+        RuntimeStatus.setLong(
+            applicationContext,
+            "maintenance_last_started",
+            now,
+        )
+
+        RuntimeStatus.set(
+            applicationContext,
+            "maintenance_state",
+            "Running • $reason",
+        )
+
+        EngineExecutors.io {
+            try {
+                val latest =
+                    SettingsStore(
+                        applicationContext
+                    ).load()
+
                 /*
-                 * Advanced Background Guard periodically re-verifies only
-                 * app-scoped root tuning. Do not hammer su every health pass.
+                 * First satisfy the queue from existing local/cache files.
+                 * This is cheap and network-free.
+                 */
+                val ready =
+                    runCatching {
+                        WallpaperController.ensureNext(
+                            applicationContext,
+                            latest,
+                            allowNetwork = false,
+                        )
+                    }.getOrDefault(false)
+
+                val target =
+                    latest.cacheTarget
+                        .coerceIn(4, 36)
+
+                /*
+                 * Refill only when inventory is actually below target.
+                 * primeCache() already applies thermal/battery policy.
                  */
                 if (
-                    latest.engineMode == EngineMode.ADVANCED &&
-                    latest.backgroundGuardEnabled
+                    WallpaperController.cacheCount() <
+                    target
                 ) {
-                    val lastTune =
-                        RuntimeStatus.getLong(
+                    runCatching {
+                        WallpaperController.primeCache(
                             applicationContext,
-                            "root_last_tune",
-                            0L,
+                            latest,
                         )
-
-                    if (
-                        System.currentTimeMillis() - lastTune >=
-                        30L * 60L * 1000L
-                    ) {
-                        runCatching {
-                            RootAccess.tuneBackground(
-                                applicationContext
-                            )
-                        }
                     }
                 }
-            }
 
-            handler.postDelayed(
-                this,
-                15 * 60_000L,
-            )
+                /*
+                 * Cloud preparation is last-resort only. A prepared local
+                 * pair means no network work is required for this pass.
+                 */
+                if (
+                    !ready &&
+                    allowNetwork &&
+                    bb.pix.wall.engine
+                        .WallpaperSourceEngine
+                        .networkAvailable(
+                            applicationContext
+                        )
+                ) {
+                    runCatching {
+                        WallpaperController.ensureNext(
+                            applicationContext,
+                            latest,
+                            allowNetwork = true,
+                        )
+                    }
+                }
+
+                maybeTuneRoot(
+                    latest
+                )
+            } finally {
+                val finished =
+                    System.currentTimeMillis()
+
+                RuntimeStatus.setLong(
+                    applicationContext,
+                    "maintenance_last_finished",
+                    finished,
+                )
+
+                RuntimeStatus.set(
+                    applicationContext,
+                    "maintenance_state",
+                    "Idle",
+                )
+
+                maintenanceRunning.set(
+                    false
+                )
+            }
         }
     }
 
@@ -141,56 +448,83 @@ class WallpaperAutomationService : Service() {
         val s = SettingsStore(this).load()
         if (!s.autoChange) { stopSelf(); return START_NOT_STICKY }
 
-        EngineExecutors.io { runCatching { EngineHealth.auditAndRepair(applicationContext, s, allowNetworkRefill = false) } }
+        val previousHealth =
+            RuntimeStatus.getLong(
+                applicationContext,
+                "engine_health_last",
+                0L,
+            )
 
-        if (s.engineMode == EngineMode.ADVANCED && s.backgroundGuardEnabled) {
-            EngineExecutors.io { runCatching { RootAccess.tuneBackground(applicationContext) } }
+        if (previousHealth > 0L) {
+            lastFullHealthAt =
+                previousHealth
         }
 
-        // Fast path: make sure next assets exist from local cache first. Never queue screen-off behind network work.
-        applyWorker.execute {
-            runCatching { WallpaperController.verifyCacheIntegrity() }
-            runCatching { WallpaperController.ensureNext(applicationContext, s, allowNetwork = false) }
+
+        if (
+            System.currentTimeMillis() -
+                previousHealth >=
+            startupHealthGraceMs &&
+            healthAuditRunning.compareAndSet(
+                false,
+                true,
+            )
+        ) {
             EngineExecutors.io {
-                runCatching {
-                    WallpaperController.warmApplyCaches(
+                val started =
+                    System.currentTimeMillis()
+
+                try {
+                    runCatching {
+                        EngineHealth.auditAndRepair(
+                            applicationContext,
+                            s,
+                            allowNetworkRefill =
+                                false,
+                        )
+                    }
+
+                    lastFullHealthAt =
+                        System.currentTimeMillis()
+                } finally {
+                    RuntimeStatus.setLong(
                         applicationContext,
-                        s,
+                        "performance_full_audit_ms",
+                        System.currentTimeMillis() -
+                            started,
                     )
+
+                    healthAuditRunning.set(false)
                 }
             }
         }
-        // Slow/network work is separate and never blocks the apply worker.
+
         EngineExecutors.io {
-            runCatching {
-                WallpaperController.warmBlurCaches(
-                    applicationContext,
-                    s,
-                )
-            }
+            maybeTuneRoot(
+                s
+            )
+        }
 
-            runCatching {
-                WallpaperController.primeCache(
-                    applicationContext,
-                    s,
-                )
-            }
-
+        /*
+         * Service startup is intentionally light.
+         * Queue preparation is local and immediate; all expensive work is
+         * coalesced behind the maintenance guard.
+         */
+        applyWorker.execute {
             runCatching {
                 WallpaperController.ensureNext(
                     applicationContext,
                     s,
-                    allowNetwork = true,
-                )
-            }
-
-            runCatching {
-                WallpaperController.warmApplyCaches(
-                    applicationContext,
-                    s,
+                    allowNetwork = false,
                 )
             }
         }
+
+        scheduleMaintenance(
+            settings = s,
+            reason = "service-start",
+            allowNetwork = true,
+        )
 
         if (s.triggerMode == TriggerMode.INTERVAL) {
             maybeRecoverMissedInterval(s)
@@ -232,12 +566,30 @@ class WallpaperAutomationService : Service() {
             conditionsDeniedReason(s)
 
         if (denied != null) {
+            RuntimeStatus.set(
+                applicationContext,
+                "automation_block_reason",
+                denied,
+            )
+
+            RuntimeStatus.set(
+                applicationContext,
+                "automation_state",
+                "Blocked • $denied",
+            )
+
             recordTrigger(
                 reason,
                 "blocked:$denied",
             )
             return
         }
+
+        RuntimeStatus.set(
+            applicationContext,
+            "automation_block_reason",
+            "None",
+        )
 
         if (!applying.compareAndSet(false, true)) {
             recordTrigger(reason, "busy")
@@ -254,6 +606,12 @@ class WallpaperAutomationService : Service() {
                 applicationContext,
                 "screen_event_received",
                 now,
+            )
+
+            RuntimeStatus.set(
+                applicationContext,
+                "instant_lock_path",
+                "Triggered • prepared/offline path",
             )
         }
 
@@ -309,6 +667,8 @@ class WallpaperAutomationService : Service() {
                         WallpaperController.nextWall(
                             applicationContext,
                             allowNetwork = false,
+                            preferLockFirst =
+                                screenOff,
                         )
 
                     if (!changed) {
@@ -322,9 +682,11 @@ class WallpaperAutomationService : Service() {
 
                         changed =
                             WallpaperController.nextWall(
-                                applicationContext,
-                                allowNetwork = false,
-                            )
+                            applicationContext,
+                            allowNetwork = false,
+                            preferLockFirst =
+                                screenOff,
+                        )
                     }
 
                     recordTrigger(
@@ -335,6 +697,36 @@ class WallpaperAutomationService : Service() {
                             "no-ready-wall"
                         },
                     )
+
+                    if (
+                        screenOff &&
+                        changed
+                    ) {
+                        val lockFinished =
+                            RuntimeStatus.getLong(
+                                applicationContext,
+                                "apply_lock_finished",
+                                0L,
+                            )
+
+                        val received =
+                            RuntimeStatus.getLong(
+                                applicationContext,
+                                "screen_event_received",
+                                now,
+                            )
+
+                        if (
+                            lockFinished >=
+                            received
+                        ) {
+                            RuntimeStatus.setLong(
+                                applicationContext,
+                                "instant_lock_visible_ms",
+                                lockFinished - received,
+                            )
+                        }
+                    }
 
                     RuntimeStatus.set(
                         applicationContext,
@@ -361,27 +753,15 @@ class WallpaperAutomationService : Service() {
                         )
                     }
 
-                    EngineExecutors.io {
-                        val latest =
+                    scheduleMaintenance(
+                        settings =
                             SettingsStore(
                                 applicationContext
-                            ).load()
-
-                        runCatching {
-                            WallpaperController.primeCache(
-                                applicationContext,
-                                latest,
-                            )
-                        }
-
-                        runCatching {
-                            WallpaperController.ensureNext(
-                                applicationContext,
-                                latest,
-                                allowNetwork = true,
-                            )
-                        }
-                    }
+                            ).load(),
+                        reason =
+                            "post-apply",
+                        allowNetwork = true,
+                    )
                 } catch (t: Throwable) {
                     RuntimeStatus.failure(
                         applicationContext,
@@ -397,10 +777,35 @@ class WallpaperAutomationService : Service() {
                     )
                 } finally {
                     if (screenOff) {
+                        val finished =
+                            System.currentTimeMillis()
+
                         RuntimeStatus.setLong(
                             applicationContext,
                             "screen_apply_finished",
-                            System.currentTimeMillis(),
+                            finished,
+                        )
+
+                        val received =
+                            RuntimeStatus.getLong(
+                                applicationContext,
+                                "screen_event_received",
+                                finished,
+                            )
+
+                        RuntimeStatus.setLong(
+                            applicationContext,
+                            "instant_lock_total_ms",
+                            finished - received,
+                        )
+
+                        RuntimeStatus.set(
+                            applicationContext,
+                            "instant_lock_path",
+                            "Complete • ${
+                                finished -
+                                    received
+                            }ms",
                         )
                     }
 

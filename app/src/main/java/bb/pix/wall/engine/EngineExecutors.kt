@@ -21,11 +21,25 @@ object EngineExecutors {
         LinkedBlockingQueue(48), factory("bbpw-io"),
         ThreadPoolExecutor.DiscardOldestPolicy()
     )
+    /*
+     * Latency-sensitive blur lane.
+     *
+     * Do not share this with cloud/cache IO. Blur Wall is user initiated
+     * and should begin immediately even while the wallpaper cache is busy.
+     */
+    val blur = Executors.newSingleThreadExecutor { r ->
+        Thread(r, "bbpw-blur-${ids.getAndIncrement()}").apply {
+            priority = Thread.NORM_PRIORITY
+            isDaemon = false
+        }
+    }
+
     val serial = Executors.newSingleThreadExecutor(factory("bbpw-serial"))
     val scheduler = ScheduledThreadPoolExecutor(1, factory("bbpw-sched")).apply {
         removeOnCancelPolicy = true
     }
 
     fun io(block: () -> Unit) = io.execute(block)
+    fun blur(block: () -> Unit) = blur.execute(block)
     fun serial(block: () -> Unit) = serial.execute(block)
 }

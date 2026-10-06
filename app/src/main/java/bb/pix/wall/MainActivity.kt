@@ -91,17 +91,63 @@ class MainActivity : ComponentActivity() {
         syncAutomation(initial)
         syncLan(initial, forceRestart = false)
         bb.pix.wall.engine.EngineExecutors.scheduler.schedule({
-            val latest = SettingsStore(applicationContext).load()
-            // Fast/local startup only. Do not hammer a 2k+ cloud album while the first frame is settling.
-            runCatching { WallpaperController.verifyCacheIntegrity() }
-            runCatching { WallpaperController.ensureNext(applicationContext, latest, allowNetwork = false) }
-            bb.pix.wall.engine.EngineExecutors.io {
-                if (WallpaperController.cacheCount() < latest.cacheTarget.coerceAtLeast(4)) {
-                    runCatching { WallpaperController.primeCache(applicationContext, latest) }
-                }
-                runCatching { WallpaperController.ensureNext(applicationContext, latest, allowNetwork = true) }
+            val latest =
+                SettingsStore(
+                    applicationContext
+                ).load()
+
+            /*
+             * Always make the prepared queue available locally.
+             * When automation is active its foreground service owns cloud
+             * maintenance, avoiding duplicate cache/root work at app launch.
+             */
+            runCatching {
+                WallpaperController.ensureNext(
+                    applicationContext,
+                    latest,
+                    allowNetwork = false,
+                )
             }
-        }, 1800, java.util.concurrent.TimeUnit.MILLISECONDS)
+
+            if (!latest.autoChange) {
+                bb.pix.wall.engine.EngineExecutors.io {
+                    val target =
+                        latest.cacheTarget
+                            .coerceIn(4, 36)
+
+                    val lastPrime =
+                        bb.pix.wall.engine.RuntimeStatus
+                            .getLong(
+                                applicationContext,
+                                "cache_prime_finished_at",
+                                0L,
+                            )
+
+                    if (
+                        WallpaperController.cacheCount() <
+                        target &&
+                        System.currentTimeMillis() -
+                            lastPrime >=
+                        10L * 60L * 1000L
+                    ) {
+                        runCatching {
+                            WallpaperController.primeCache(
+                                applicationContext,
+                                latest,
+                            )
+                        }
+                    }
+
+                    runCatching {
+                        WallpaperController.ensureNext(
+                            applicationContext,
+                            latest,
+                            allowNetwork = true,
+                        )
+                    }
+                }
+            }
+        }, 2500, java.util.concurrent.TimeUnit.MILLISECONDS)
     }
 
     private fun handleSettingsMutation(previous: AppSettings, updated: AppSettings, refresh: () -> Unit) {

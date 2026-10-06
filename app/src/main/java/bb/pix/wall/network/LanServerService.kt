@@ -48,7 +48,7 @@ class LanServerService : Service() {
             if (!st.lanEnabled) return@schedule
             // Listener is bound to 0.0.0.0, so an IP/capability change does not require
             // tearing down a healthy server. Repeated network callbacks previously caused
-            // restart races and the "Web dashboard is not ready" loop.
+            // restart races and the "Remote dashboard is not ready" loop.
             lastBoundIp = LanInfo.localIpv4()
             RuntimeStatus.set(this, "lan_ip", lastBoundIp)
             if (!running.get() || server?.isClosed != false || !acceptAlive) restartServer(st.lanPort)
@@ -61,8 +61,8 @@ class LanServerService : Service() {
         NetworkMonitor.register(this)
         NetworkMonitor.add(networkListener)
         startForeground(102, NotificationCompat.Builder(this, CHANNEL)
-            .setSmallIcon(R.drawable.ic_tile_web)
-            .setContentTitle("BB-PixWall Web")
+            .setSmallIcon(R.drawable.ic_tile_remote)
+            .setContentTitle("BB-Remote")
             .setContentText("Local dashboard service is active")
             .setOngoing(true).setSilent(true).build())
         watchdogFuture = EngineExecutors.scheduler.scheduleWithFixedDelay({
@@ -70,7 +70,7 @@ class LanServerService : Service() {
             if (st.lanEnabled && (!running.get() || server?.isClosed != false || !acceptAlive)) {
                 restartServer(st.lanPort)
             }
-        }, 4, 4, java.util.concurrent.TimeUnit.SECONDS)
+        }, 8, 20, java.util.concurrent.TimeUnit.SECONDS)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -198,9 +198,102 @@ class LanServerService : Service() {
 
         val token = dashboardToken()
         val mutationAllowed = method == "POST" && headers["x-bbpixwall-token"] == token
+
+
+        /*
+         * Web history image endpoint.
+         *
+         * /img/history/<entry-id>/home
+         * /img/history/<entry-id>/lock
+         */
+        if (path.startsWith("/img/history/")) {
+            val routeParts =
+                path.removePrefix(
+                    "/img/history/"
+                )
+                    .split('/')
+                    .filter {
+                        it.isNotBlank()
+                    }
+
+            if (routeParts.size != 2) {
+                sendText(
+                    s,
+                    404,
+                    "text/plain; charset=utf-8",
+                    "Invalid history path",
+                )
+                return
+            }
+
+            val historyId =
+                URLDecoder.decode(
+                    routeParts[0],
+                    "UTF-8",
+                )
+
+            val side =
+                routeParts[1]
+
+            val entry =
+                bb.pix.wall.engine
+                    .WallpaperLibrary
+                    .history()
+                    .firstOrNull {
+                        it.id == historyId
+                    }
+
+            val historyFile =
+                when (side) {
+                    "home" ->
+                        entry?.home
+
+                    "lock" ->
+                        entry?.lock
+
+                    else ->
+                        null
+                }
+
+            if (
+                historyFile == null ||
+                !historyFile.exists() ||
+                !historyFile.isFile
+            ) {
+                sendText(
+                    s,
+                    404,
+                    "text/plain; charset=utf-8",
+                    "History image unavailable",
+                )
+                return
+            }
+
+            sendFile(
+                s,
+                historyFile,
+            )
+
+            return
+        }
         when (path) {
             "/health" -> sendJson(s, 200, "{\"ok\":true,\"port\":$boundPort,\"ip\":${quote(LanInfo.localIpv4())},\"state\":${quote(bb.pix.wall.engine.RuntimeStatus.get(this, "lan_state"))}}")
             "/api/next" -> sendJson(s, if (mutationAllowed) 200 else 403, if (mutationAllowed) "{\"ok\":${WallpaperController.nextWall(this, userInitiated = true)}}" else "{\"error\":\"forbidden\"}")
+            "/api/previous" ->
+                if (mutationAllowed) {
+                    sendJson(
+                        s,
+                        200,
+                        "{\"ok\":${WallpaperController.previousWall(this)}}"
+                    )
+                } else {
+                    sendJson(
+                        s,
+                        403,
+                        "{\"error\":\"forbidden\"}"
+                    )
+                }
+
             "/api/save" -> if (mutationAllowed) {
                 val n = runCatching { WallpaperController.saveCurrent(this).size }.getOrDefault(0); sendJson(s, 200, "{\"saved\":$n}")
             } else sendJson(s, 403, "{\"error\":\"forbidden\"}")
@@ -216,6 +309,393 @@ class LanServerService : Service() {
                 sendJson(s, 200, "{\"ok\":true,\"cache\":${WallpaperController.cacheCount()}}")
             } else sendJson(s, 403, "{\"error\":\"forbidden\"}")
             "/api/cache-clear" -> if (mutationAllowed) sendJson(s, 200, "{\"cleared\":${WallpaperController.clearCache()}}") else sendJson(s, 403, "{\"error\":\"forbidden\"}")
+            "/api/refresh-next" ->
+                if (mutationAllowed) {
+                    WallpaperController.invalidateQueue()
+
+                    listOf(
+                        WallpaperFiles.nextHome,
+                        WallpaperFiles.nextLock,
+                    ).forEach { file ->
+                        file.delete()
+
+                        File(
+                            file.absolutePath +
+                                ".meta"
+                        ).delete()
+                    }
+
+                    val settings =
+                        SettingsStore(this)
+                            .load()
+
+                    val ready =
+                        runCatching {
+                            WallpaperController.ensureNext(
+                                this,
+                                settings,
+                            )
+                        }.getOrDefault(false)
+
+                    sendJson(
+                        s,
+                        200,
+                        "{\"ok\":$ready}",
+                    )
+                } else {
+                    sendJson(
+                        s,
+                        403,
+                        "{\"error\":\"forbidden\"}",
+                    )
+                }
+
+            "/api/surprise" ->
+                if (mutationAllowed) {
+                    WallpaperController.invalidateQueue()
+
+                    val ok =
+                        runCatching {
+                            WallpaperController.nextWall(
+                                this,
+                                userInitiated = true,
+                            )
+                        }.getOrDefault(false)
+
+                    sendJson(
+                        s,
+                        200,
+                        "{\"ok\":$ok}",
+                    )
+                } else {
+                    sendJson(
+                        s,
+                        403,
+                        "{\"error\":\"forbidden\"}",
+                    )
+                }
+
+            "/api/weather-refresh" ->
+                if (mutationAllowed) {
+                    val settings =
+                        SettingsStore(this)
+                            .load()
+
+                    bb.pix.wall.engine
+                        .WeatherMoodEngine
+                        .forceRefresh(
+                            this,
+                            settings,
+                        )
+
+                    sendJson(
+                        s,
+                        200,
+                        "{\"ok\":true}",
+                    )
+                } else {
+                    sendJson(
+                        s,
+                        403,
+                        "{\"error\":\"forbidden\"}",
+                    )
+                }
+
+            "/api/purge-blocked" ->
+                if (mutationAllowed) {
+                    val removed =
+                        WallpaperController
+                            .purgeBlockedCached(
+                                this
+                            )
+
+                    sendJson(
+                        s,
+                        200,
+                        "{\"removed\":$removed}",
+                    )
+                } else {
+                    sendJson(
+                        s,
+                        403,
+                        "{\"error\":\"forbidden\"}",
+                    )
+                }
+
+            "/api/premium-refresh" ->
+                if (mutationAllowed) {
+                    bb.pix.wall.engine
+                        .PremiumIntelligenceCenter
+                        .refresh(
+                            this,
+                            "web-refresh",
+                        )
+
+                    sendJson(
+                        s,
+                        200,
+                        "{\"ok\":true}",
+                    )
+                } else {
+                    sendJson(
+                        s,
+                        403,
+                        "{\"error\":\"forbidden\"}",
+                    )
+                }
+
+            "/api/reanalyze-current" ->
+                if (mutationAllowed) {
+                    bb.pix.wall.engine
+                        .EngineExecutors
+                        .io {
+                            bb.pix.wall.engine
+                                .PremiumIntelligenceCenter
+                                .reanalyzeCurrent(
+                                    applicationContext
+                                )
+                        }
+
+                    sendJson(
+                        s,
+                        200,
+                        "{\"scheduled\":true}",
+                    )
+                } else {
+                    sendJson(
+                        s,
+                        403,
+                        "{\"error\":\"forbidden\"}",
+                    )
+                }
+
+            "/api/rebuild-next" ->
+                if (mutationAllowed) {
+                    bb.pix.wall.engine
+                        .EngineExecutors
+                        .io {
+                            bb.pix.wall.engine
+                                .PremiumIntelligenceCenter
+                                .rebuildNext(
+                                    applicationContext
+                                )
+                        }
+
+                    sendJson(
+                        s,
+                        200,
+                        "{\"scheduled\":true}",
+                    )
+                } else {
+                    sendJson(
+                        s,
+                        403,
+                        "{\"error\":\"forbidden\"}",
+                    )
+                }
+
+            "/api/cache-integrity" ->
+                if (mutationAllowed) {
+                    val bad =
+                        bb.pix.wall.engine
+                            .PremiumIntelligenceCenter
+                            .cacheIntegrityAudit(
+                                this
+                            )
+
+                    sendJson(
+                        s,
+                        200,
+                        "{\"quarantined\":$bad}",
+                    )
+                } else {
+                    sendJson(
+                        s,
+                        403,
+                        "{\"error\":\"forbidden\"}",
+                    )
+                }
+
+            "/api/premium-self-heal" ->
+                if (mutationAllowed) {
+                    val result =
+                        bb.pix.wall.engine
+                            .PremiumIntelligenceCenter
+                            .fullRepair(
+                                this
+                            )
+
+                    sendJson(
+                        s,
+                        200,
+                        "{\"result\":${quote(result)}}",
+                    )
+                } else {
+                    sendJson(
+                        s,
+                        403,
+                        "{\"error\":\"forbidden\"}",
+                    )
+                }
+
+            "/api/reset-source-photos" ->
+                if (mutationAllowed) {
+                    bb.pix.wall.engine
+                        .PremiumIntelligenceCenter
+                        .resetSource(
+                            this,
+                            "photos",
+                        )
+
+                    sendJson(
+                        s,
+                        200,
+                        "{\"ok\":true}",
+                    )
+                } else {
+                    sendJson(
+                        s,
+                        403,
+                        "{\"error\":\"forbidden\"}",
+                    )
+                }
+
+            "/api/reset-source-drive" ->
+                if (mutationAllowed) {
+                    bb.pix.wall.engine
+                        .PremiumIntelligenceCenter
+                        .resetSource(
+                            this,
+                            "drive",
+                        )
+
+                    sendJson(
+                        s,
+                        200,
+                        "{\"ok\":true}",
+                    )
+                } else {
+                    sendJson(
+                        s,
+                        403,
+                        "{\"error\":\"forbidden\"}",
+                    )
+                }
+
+            "/api/export-intelligence" ->
+                if (mutationAllowed) {
+                    val file =
+                        bb.pix.wall.engine
+                            .PremiumIntelligenceCenter
+                            .exportReport(
+                                this
+                            )
+
+                    sendJson(
+                        s,
+                        200,
+                        "{\"path\":${quote(file.absolutePath)}}",
+                    )
+                } else {
+                    sendJson(
+                        s,
+                        403,
+                        "{\"error\":\"forbidden\"}",
+                    )
+                }
+
+            "/api/autonomy-audit" ->
+                if (mutationAllowed) {
+                    val report =
+                        bb.pix.wall.engine
+                            .AutonomousIntelligenceEngine
+                            .auditAndRepair(
+                                context = this,
+                                settings =
+                                    SettingsStore(this)
+                                        .load(),
+                                allowNetworkRefill =
+                                    false,
+                            )
+
+                    sendJson(
+                        s,
+                        200,
+                        "{\"grade\":${quote(report.grade)}," +
+                            "\"score\":${report.engineScore}," +
+                            "\"action\":${quote(report.action)}}",
+                    )
+                } else {
+                    sendJson(
+                        s,
+                        403,
+                        "{\"error\":\"forbidden\"}",
+                    )
+                }
+
+            "/api/history" ->
+                sendJson(
+                    s,
+                    200,
+                    historyJson(),
+                )
+
+            "/api/history-restore" ->
+                if (mutationAllowed) {
+                    val form =
+                        parseForm(body)
+
+                    val id =
+                        form["id"]
+                            .orEmpty()
+
+                    val entry =
+                        bb.pix.wall.engine
+                            .WallpaperLibrary
+                            .history()
+                            .firstOrNull {
+                                it.id == id
+                            }
+
+                    val ok =
+                        entry?.let {
+                            WallpaperController
+                                .restoreHistory(
+                                    this,
+                                    it,
+                                )
+                        } ?: false
+
+                    sendJson(
+                        s,
+                        200,
+                        "{\"ok\":$ok}",
+                    )
+                } else {
+                    sendJson(
+                        s,
+                        403,
+                        "{\"error\":\"forbidden\"}",
+                    )
+                }
+
+            "/api/library-action" ->
+                if (mutationAllowed) {
+                    sendJson(
+                        s,
+                        200,
+                        libraryActionJson(
+                            parseForm(body)
+                        ),
+                    )
+                } else {
+                    sendJson(
+                        s,
+                        403,
+                        "{\"error\":\"forbidden\"}",
+                    )
+                }
+
             "/api/logs" -> sendText(s, 200, "text/plain; charset=utf-8", runCatching { WallpaperFiles.runtimeLog.readLines().takeLast(80).joinToString("\n") }.getOrDefault("No logs yet"))
             "/api/triggers" -> sendText(s, 200, "text/plain; charset=utf-8", runCatching { WallpaperFiles.triggerHistory.readLines().takeLast(80).joinToString("\n") }.getOrDefault("No trigger history yet"))
             "/api/queue" -> sendJson(s, 200, queueJson())
@@ -236,96 +716,906 @@ class LanServerService : Service() {
             "/api/standard" -> if (mutationAllowed) {
                 val store = SettingsStore(this); store.save(store.load().copy(engineMode = EngineMode.STANDARD)); sendJson(s, 200, "{\"ok\":true}")
             } else sendJson(s, 403, "{\"error\":\"forbidden\"}")
-            "/img/current-home" -> sendFile(s, WallpaperFiles.currentHome)
-            "/img/current-lock" -> sendFile(s, WallpaperFiles.currentLock)
-            "/img/next-home" -> sendFile(s, WallpaperFiles.nextHome)
-            "/img/next-lock" -> sendFile(s, WallpaperFiles.nextLock)
+            "/img/current-home" ->
+                sendFile(
+                    s,
+                    WallpaperController.previewFile(
+                        this,
+                        WallpaperFiles.currentHome,
+                        true,
+                    )
+                )
+            "/img/current-lock" ->
+                sendFile(
+                    s,
+                    WallpaperController.previewFile(
+                        this,
+                        WallpaperFiles.currentLock,
+                        false,
+                    )
+                )
+            "/img/next-home" ->
+                sendFile(
+                    s,
+                    WallpaperFiles.nextHome,
+                )
+            "/img/next-lock" ->
+                sendFile(
+                    s,
+                    WallpaperFiles.nextLock,
+                )
             "/", "/index.html" -> sendText(s, 200, "text/html; charset=utf-8", dashboard(token))
             else -> sendText(s, 404, "text/plain; charset=utf-8", "Not found")
         }
     }
 
-    private fun updateSettings(form: Map<String, String>) {
-        val store = SettingsStore(this)
-        val old = store.load()
-        fun bool(k: String, fallback: Boolean) = form[k]?.let { it == "true" || it == "1" || it == "on" } ?: fallback
-        fun <T : Enum<T>> enumValue(raw: String?, values: Array<T>, fallback: T): T = values.firstOrNull { it.name == raw } ?: fallback
-        val updated = old.copy(
-            photosAlbumUrl = form["photosAlbumUrl"] ?: old.photosAlbumUrl,
-            driveFolderUrl = form["driveFolderUrl"] ?: old.driveFolderUrl,
-            autoChange = bool("autoChange", old.autoChange),
-            triggerMode = enumValue(form["triggerMode"], TriggerMode.entries.toTypedArray(), old.triggerMode),
-            intervalMinutes = form["intervalMinutes"]?.toIntOrNull()?.coerceIn(1, 240) ?: old.intervalMinutes,
-            targetMode = enumValue(form["targetMode"], WallpaperTargetMode.entries.toTypedArray(), old.targetMode),
-            wallpaperOrder = enumValue(form["wallpaperOrder"], WallpaperOrder.entries.toTypedArray(), old.wallpaperOrder),
-            appearanceMode = enumValue(form["appearanceMode"], AppearanceMode.entries.toTypedArray(), old.appearanceMode),
-            homeBlurEnabled = bool("homeBlurEnabled", old.homeBlurEnabled),
-            lockBlurEnabled = bool("lockBlurEnabled", old.lockBlurEnabled),
-            homeBlurRadius = form["homeBlurRadius"]?.toIntOrNull()?.coerceIn(0, 64) ?: old.homeBlurRadius,
-            lockBlurRadius = form["lockBlurRadius"]?.toIntOrNull()?.coerceIn(0, 64) ?: old.lockBlurRadius,
-            dataSaverEnabled = bool("dataSaverEnabled", old.dataSaverEnabled),
-            wifiOnly = bool("wifiOnly", old.wifiOnly),
-            mobileDataAllowed = bool("mobileDataAllowed", old.mobileDataAllowed),
-            chargingOnly = bool("chargingOnly", old.chargingOnly),
-            pauseBatterySaver = bool("pauseBatterySaver", old.pauseBatterySaver),
-            pauseLowBattery = bool("pauseLowBattery", old.pauseLowBattery),
-            lowBatteryThreshold = form["lowBatteryThreshold"]?.toIntOrNull()?.coerceIn(5,50) ?: old.lowBatteryThreshold,
-            quietHoursEnabled = bool("quietHoursEnabled", old.quietHoursEnabled),
-            quietStartHour = form["quietStartHour"]?.toIntOrNull()?.coerceIn(0,23) ?: old.quietStartHour,
-            quietEndHour = form["quietEndHour"]?.toIntOrNull()?.coerceIn(0,23) ?: old.quietEndHour,
-            cacheTarget = form["cacheTarget"]?.toIntOrNull()?.coerceIn(4,36) ?: old.cacheTarget,
-            backgroundGuardEnabled = bool("backgroundGuardEnabled", old.backgroundGuardEnabled),
-            smartCropEnabled = bool("smartCropEnabled", old.smartCropEnabled),
-            leanStorageMode = bool("leanStorageMode", old.leanStorageMode),
+    private fun updateSettings(
+        form: Map<String, String>,
+    ) {
+        val store =
+            SettingsStore(this)
 
-        )
+        val old =
+            store.load()
+
+        fun bool(
+            key: String,
+            fallback: Boolean,
+        ): Boolean =
+            form[key]?.let {
+                it == "true" ||
+                    it == "1" ||
+                    it == "on"
+            } ?: fallback
+
+        fun <T : Enum<T>> enumValue(
+            raw: String?,
+            values: Array<T>,
+            fallback: T,
+        ): T =
+            values.firstOrNull {
+                it.name == raw
+            } ?: fallback
+
+        val updated =
+            old.copy(
+                photosAlbumUrl =
+                    form["photosAlbumUrl"]
+                        ?: old.photosAlbumUrl,
+
+                driveFolderUrl =
+                    form["driveFolderUrl"]
+                        ?: old.driveFolderUrl,
+
+                autoChange =
+                    bool("autoChange", old.autoChange),
+
+                triggerMode =
+                    enumValue(
+                        form["triggerMode"],
+                        TriggerMode.entries.toTypedArray(),
+                        old.triggerMode,
+                    ),
+
+                intervalMinutes =
+                    form["intervalMinutes"]
+                        ?.toIntOrNull()
+                        ?.coerceIn(1, 240)
+                        ?: old.intervalMinutes,
+
+                targetMode =
+                    enumValue(
+                        form["targetMode"],
+                        WallpaperTargetMode.entries.toTypedArray(),
+                        old.targetMode,
+                    ),
+
+                wallpaperOrder =
+                    enumValue(
+                        form["wallpaperOrder"],
+                        WallpaperOrder.entries.toTypedArray(),
+                        old.wallpaperOrder,
+                    ),
+
+                appearanceMode =
+                    enumValue(
+                        form["appearanceMode"],
+                        AppearanceMode.entries.toTypedArray(),
+                        old.appearanceMode,
+                    ),
+
+                sourcePriorityMode =
+                    enumValue(
+                        form["sourcePriorityMode"],
+                        SourcePriorityMode.entries.toTypedArray(),
+                        old.sourcePriorityMode,
+                    ),
+
+                aspectPreference =
+                    enumValue(
+                        form["aspectPreference"],
+                        AspectPreference.entries.toTypedArray(),
+                        old.aspectPreference,
+                    ),
+
+                homeBlurEnabled =
+                    bool(
+                        "homeBlurEnabled",
+                        old.homeBlurEnabled,
+                    ),
+
+                lockBlurEnabled =
+                    bool(
+                        "lockBlurEnabled",
+                        old.lockBlurEnabled,
+                    ),
+
+                homeBlurRadius =
+                    form["homeBlurRadius"]
+                        ?.toIntOrNull()
+                        ?.coerceIn(0, 64)
+                        ?: old.homeBlurRadius,
+
+                lockBlurRadius =
+                    form["lockBlurRadius"]
+                        ?.toIntOrNull()
+                        ?.coerceIn(0, 64)
+                        ?: old.lockBlurRadius,
+
+                dataSaverEnabled =
+                    bool(
+                        "dataSaverEnabled",
+                        old.dataSaverEnabled,
+                    ),
+
+                wifiOnly =
+                    bool(
+                        "wifiOnly",
+                        old.wifiOnly,
+                    ),
+
+                mobileDataAllowed =
+                    bool(
+                        "mobileDataAllowed",
+                        old.mobileDataAllowed,
+                    ),
+
+                chargingOnly =
+                    bool(
+                        "chargingOnly",
+                        old.chargingOnly,
+                    ),
+
+                pauseBatterySaver =
+                    bool(
+                        "pauseBatterySaver",
+                        old.pauseBatterySaver,
+                    ),
+
+                pauseLowBattery =
+                    bool(
+                        "pauseLowBattery",
+                        old.pauseLowBattery,
+                    ),
+
+                lowBatteryThreshold =
+                    form["lowBatteryThreshold"]
+                        ?.toIntOrNull()
+                        ?.coerceIn(5, 50)
+                        ?: old.lowBatteryThreshold,
+
+                quietHoursEnabled =
+                    bool(
+                        "quietHoursEnabled",
+                        old.quietHoursEnabled,
+                    ),
+
+                quietStartHour =
+                    form["quietStartHour"]
+                        ?.toIntOrNull()
+                        ?.coerceIn(0, 23)
+                        ?: old.quietStartHour,
+
+                quietEndHour =
+                    form["quietEndHour"]
+                        ?.toIntOrNull()
+                        ?.coerceIn(0, 23)
+                        ?: old.quietEndHour,
+
+                cacheTarget =
+                    form["cacheTarget"]
+                        ?.toIntOrNull()
+                        ?.coerceIn(4, 36)
+                        ?: old.cacheTarget,
+
+                cacheMaxMb =
+                    form["cacheMaxMb"]
+                        ?.toIntOrNull()
+                        ?.coerceIn(128, 2048)
+                        ?: old.cacheMaxMb,
+
+                lowStorageReserveMb =
+                    form["lowStorageReserveMb"]
+                        ?.toIntOrNull()
+                        ?.coerceIn(256, 8192)
+                        ?: old.lowStorageReserveMb,
+
+                backgroundGuardEnabled =
+                    bool(
+                        "backgroundGuardEnabled",
+                        old.backgroundGuardEnabled,
+                    ),
+
+                smartCropEnabled =
+                    bool(
+                        "smartCropEnabled",
+                        old.smartCropEnabled,
+                    ),
+
+                smartCropTolerancePct =
+                    form["smartCropTolerancePct"]
+                        ?.toFloatOrNull()
+                        ?.coerceIn(0.2f, 5f)
+                        ?: old.smartCropTolerancePct,
+
+                perceptualDistance =
+                    form["perceptualDistance"]
+                        ?.toIntOrNull()
+                        ?.coerceIn(0, 24)
+                        ?: old.perceptualDistance,
+
+                leanStorageMode =
+                    bool(
+                        "leanStorageMode",
+                        old.leanStorageMode,
+                    ),
+
+                smartPairingEnabled =
+                    bool(
+                        "smartPairingEnabled",
+                        old.smartPairingEnabled,
+                    ),
+
+                adaptiveResourceProtectionEnabled =
+                    bool(
+                        "adaptiveResourceProtectionEnabled",
+                        old.adaptiveResourceProtectionEnabled,
+                    ),
+
+                decisionEngineEnabled =
+                    bool(
+                        "decisionEngineEnabled",
+                        old.decisionEngineEnabled,
+                    ),
+
+                moodEngineEnabled =
+                    bool(
+                        "moodEngineEnabled",
+                        old.moodEngineEnabled,
+                    ),
+
+                moodAmbientLightEnabled =
+                    bool(
+                        "moodAmbientLightEnabled",
+                        old.moodAmbientLightEnabled,
+                    ),
+
+                moodTimeEnabled =
+                    bool(
+                        "moodTimeEnabled",
+                        old.moodTimeEnabled,
+                    ),
+
+                moodDarkModeEnabled =
+                    bool(
+                        "moodDarkModeEnabled",
+                        old.moodDarkModeEnabled,
+                    ),
+
+                moodBatteryContextEnabled =
+                    bool(
+                        "moodBatteryContextEnabled",
+                        old.moodBatteryContextEnabled,
+                    ),
+
+                moodThermalProtectionEnabled =
+                    bool(
+                        "moodThermalProtectionEnabled",
+                        old.moodThermalProtectionEnabled,
+                    ),
+
+                moodStrength =
+                    form["moodStrength"]
+                        ?.toIntOrNull()
+                        ?.coerceIn(0, 100)
+                        ?: old.moodStrength,
+
+                moodDarkLuxThreshold =
+                    form["moodDarkLuxThreshold"]
+                        ?.toIntOrNull()
+                        ?.coerceIn(1, 200)
+                        ?: old.moodDarkLuxThreshold,
+
+                moodBrightLuxThreshold =
+                    form["moodBrightLuxThreshold"]
+                        ?.toIntOrNull()
+                        ?.coerceIn(100, 10_000)
+                        ?: old.moodBrightLuxThreshold,
+
+                moodWeatherEnabled =
+                    bool(
+                        "moodWeatherEnabled",
+                        old.moodWeatherEnabled,
+                    ),
+
+                moodUseDeviceLocation =
+                    bool(
+                        "moodUseDeviceLocation",
+                        old.moodUseDeviceLocation,
+                    ),
+
+                moodWeatherCity =
+                    form["moodWeatherCity"]
+                        ?: old.moodWeatherCity,
+
+                moodWeatherInfluence =
+                    form["moodWeatherInfluence"]
+                        ?.toIntOrNull()
+                        ?.coerceIn(0, 100)
+                        ?: old.moodWeatherInfluence,
+
+                moodOutdoorTemperatureEnabled =
+                    bool(
+                        "moodOutdoorTemperatureEnabled",
+                        old.moodOutdoorTemperatureEnabled,
+                    ),
+
+                moodColdTemperatureC =
+                    form["moodColdTemperatureC"]
+                        ?.toIntOrNull()
+                        ?.coerceIn(-10, 30)
+                        ?: old.moodColdTemperatureC,
+
+                moodHotTemperatureC =
+                    form["moodHotTemperatureC"]
+                        ?.toIntOrNull()
+                        ?.coerceIn(20, 50)
+                        ?: old.moodHotTemperatureC,
+
+                moodAutoReactEnabled =
+                    bool(
+                        "moodAutoReactEnabled",
+                        old.moodAutoReactEnabled,
+                    ),
+
+                moodAutoReactCooldownMinutes =
+                    form["moodAutoReactCooldownMinutes"]
+                        ?.toIntOrNull()
+                        ?.coerceIn(15, 180)
+                        ?: old.moodAutoReactCooldownMinutes,
+            )
+
         store.save(updated)
-        val automationIntent = Intent(this, WallpaperAutomationService::class.java)
-        if (updated.autoChange) startForegroundService(automationIntent) else stopService(automationIntent)
-        val blurChanged = old.homeBlurEnabled != updated.homeBlurEnabled || old.lockBlurEnabled != updated.lockBlurEnabled || old.homeBlurRadius != updated.homeBlurRadius || old.lockBlurRadius != updated.lockBlurRadius
-        if (blurChanged && WallpaperController.blurMasterEnabled(this)) Thread { WallpaperController.setBlurMasterAndReapply(this, true) }.start()
-        form["theme"]?.let { raw ->
-            ThemeProfile.entries.firstOrNull { it.name == raw }?.let { getSharedPreferences("bb_pixwall_ui", Context.MODE_PRIVATE).edit().putString("theme", it.name).apply() }
+
+        val automationIntent =
+            Intent(
+                this,
+                WallpaperAutomationService::class.java,
+            )
+
+        if (updated.autoChange) {
+            startForegroundService(
+                automationIntent
+            )
+        } else {
+            stopService(
+                automationIntent
+            )
         }
-        val webPipelineChanged =
-            false
-        val sourcePipelineChanged =
-            old.photosAlbumUrl != updated.photosAlbumUrl ||
-                old.driveFolderUrl != updated.driveFolderUrl ||
-                old.wallpaperOrder != updated.wallpaperOrder ||
-                old.dataSaverEnabled != updated.dataSaverEnabled ||
-                webPipelineChanged
 
-        if (sourcePipelineChanged) {
-            bb.pix.wall.engine.WallpaperSourceEngine
-                .invalidateCloudIndex()
+        bb.pix.wall.automation
+            .MoodAutoReactReceiver
+            .schedule(
+                this,
+                updated.moodAutoReactEnabled,
+            )
 
-            if (webPipelineChanged) {
-                WallpaperController.clearCache()
+        val blurChanged =
+            old.homeBlurEnabled !=
+                updated.homeBlurEnabled ||
+                old.lockBlurEnabled !=
+                updated.lockBlurEnabled ||
+                old.homeBlurRadius !=
+                updated.homeBlurRadius ||
+                old.lockBlurRadius !=
+                updated.lockBlurRadius
+
+        if (
+            blurChanged &&
+            WallpaperController
+                .blurMasterEnabled(this)
+        ) {
+            Thread {
+                WallpaperController
+                    .setBlurMasterAndReapply(
+                        this,
+                        true,
+                    )
+            }.start()
+        }
+
+        form["theme"]
+            ?.let { raw ->
+                ThemeProfile.entries
+                    .firstOrNull {
+                        it.name == raw
+                    }
+                    ?.let { theme ->
+                        getSharedPreferences(
+                            "bb_pixwall_ui",
+                            Context.MODE_PRIVATE,
+                        ).edit()
+                            .putString(
+                                "theme",
+                                theme.name,
+                            )
+                            .apply()
+                    }
             }
 
-            WallpaperController.invalidateQueue()
+        val sourcePipelineChanged =
+            old.photosAlbumUrl !=
+                updated.photosAlbumUrl ||
+                old.driveFolderUrl !=
+                updated.driveFolderUrl ||
+                old.wallpaperOrder !=
+                updated.wallpaperOrder ||
+                old.sourcePriorityMode !=
+                updated.sourcePriorityMode ||
+                old.dataSaverEnabled !=
+                updated.dataSaverEnabled ||
+                old.aspectPreference !=
+                updated.aspectPreference ||
+                old.perceptualDistance !=
+                updated.perceptualDistance
+
+        if (sourcePipelineChanged) {
+            bb.pix.wall.engine
+                .WallpaperSourceEngine
+                .invalidateCloudIndex()
+
+            WallpaperController
+                .invalidateQueue()
+        }
+
+        val weatherChanged =
+            old.moodWeatherEnabled !=
+                updated.moodWeatherEnabled ||
+                old.moodUseDeviceLocation !=
+                updated.moodUseDeviceLocation ||
+                old.moodWeatherCity !=
+                updated.moodWeatherCity
+
+        if (
+            weatherChanged &&
+            updated.moodWeatherEnabled
+        ) {
+            bb.pix.wall.engine
+                .WeatherMoodEngine
+                .forceRefresh(
+                    this,
+                    updated,
+                )
         }
 
         Thread {
             runCatching {
-                WallpaperController.primeCache(
-                    this,
-                    updated
-                )
+                WallpaperController
+                    .purgeBlockedCached(this)
 
-                WallpaperController.ensureNext(
-                    this,
-                    updated
-                )
+                WallpaperController
+                    .primeCache(
+                        this,
+                        updated,
+                    )
+
+                WallpaperController
+                    .ensureNext(
+                        this,
+                        updated,
+                    )
             }
         }.start()
     }
 
     private fun settingsJson(): String {
-        val s = SettingsStore(this).load(); val st = WallpaperController.state()
-        val theme = getSharedPreferences("bb_pixwall_ui", Context.MODE_PRIVATE).getString("theme", ThemeProfile.SIGNATURE.name)
-        return """{"engineMode":"${s.engineMode.name}","cache":${WallpaperController.cacheCount()},"offlineReady":${WallpaperController.offlineReadyCount()},"photosAlbumUrl":${quote(s.photosAlbumUrl)},"driveFolderUrl":${quote(s.driveFolderUrl)},"autoChange":${s.autoChange},"triggerMode":"${s.triggerMode.name}","intervalMinutes":${s.intervalMinutes},"targetMode":"${s.targetMode.name}","wallpaperOrder":"${s.wallpaperOrder.name}","homeBlurEnabled":${s.homeBlurEnabled},"homeBlurRadius":${s.homeBlurRadius},"lockBlurEnabled":${s.lockBlurEnabled},"lockBlurRadius":${s.lockBlurRadius},"appearanceMode":"${s.appearanceMode.name}","dataSaverEnabled":${s.dataSaverEnabled},"wifiOnly":${s.wifiOnly},"mobileDataAllowed":${s.mobileDataAllowed},"chargingOnly":${s.chargingOnly},"pauseBatterySaver":${s.pauseBatterySaver},"pauseLowBattery":${s.pauseLowBattery},"lowBatteryThreshold":${s.lowBatteryThreshold},"quietHoursEnabled":${s.quietHoursEnabled},"quietStartHour":${s.quietStartHour},"quietEndHour":${s.quietEndHour},"cacheTarget":${s.cacheTarget},"backgroundGuardEnabled":${s.backgroundGuardEnabled},"smartCropEnabled":${s.smartCropEnabled},"leanStorageMode":${s.leanStorageMode},"lastPipeline":${quote(bb.pix.wall.engine.RuntimeStatus.get(this,"last_pipeline","Waiting"))},"lastAspect":${quote(bb.pix.wall.engine.RuntimeStatus.get(this,"last_aspect","Unknown"))},"selectionReason":${quote(bb.pix.wall.engine.RuntimeStatus.get(this,"selection_reason","Waiting"))},"rootState":${quote(bb.pix.wall.engine.RuntimeStatus.get(this,"root_state","Not checked"))},"rootProvider":${quote(bb.pix.wall.engine.RuntimeStatus.get(this,"root_provider","Unknown"))},"rootCaps":${quote(bb.pix.wall.engine.RuntimeStatus.get(this,"root_caps","Not scanned"))},"theme":${quote(theme)},"blurMaster":${WallpaperController.blurMasterEnabled(this)},"currentHome":${quote(st.currentHome)},"currentLock":${quote(st.currentLock)},"nextHome":${quote(st.nextHome)},"nextLock":${quote(st.nextLock)},"activeSource":${quote(bb.pix.wall.engine.RuntimeStatus.get(this,"active_source","None"))},"photosHealth":${quote(bb.pix.wall.engine.RuntimeStatus.get(this,"source_photos"))},"driveHealth":${quote(bb.pix.wall.engine.RuntimeStatus.get(this,"source_drive"))},"localHealth":${quote(bb.pix.wall.engine.RuntimeStatus.get(this,"source_local"))},"lastError":${quote(bb.pix.wall.engine.RuntimeStatus.get(this,"last_error",""))},"lastTrigger":${quote(bb.pix.wall.engine.RuntimeStatus.get(this,"last_trigger",""))},"lanState":${quote(bb.pix.wall.engine.RuntimeStatus.get(this,"lan_state","Stopped"))},"nextRun":${bb.pix.wall.engine.RuntimeStatus.getLong(this,"next_run",0L)}}"""
+        val x =
+            SettingsStore(this)
+                .load()
+
+        val state =
+            WallpaperController
+                .state()
+
+        val theme =
+            getSharedPreferences(
+                "bb_pixwall_ui",
+                Context.MODE_PRIVATE,
+            ).getString(
+                "theme",
+                ThemeProfile.SIGNATURE.name,
+            )
+
+        return buildString {
+            append("{")
+
+            append("\"engineMode\":${quote(x.engineMode.name)},")
+            append("\"cache\":${WallpaperController.cacheCount()},")
+            append("\"cacheBytes\":${WallpaperController.cacheBytes()},")
+            append("\"cacheBreakdown\":${quote(WallpaperController.cacheBreakdown())},")
+            append("\"offlineReady\":${WallpaperController.offlineReadyCount()},")
+            append("\"cycleProgress\":${quote(WallpaperController.cycleProgress(this@LanServerService))},")
+
+            append("\"photosAlbumUrl\":${quote(x.photosAlbumUrl)},")
+            append("\"driveFolderUrl\":${quote(x.driveFolderUrl)},")
+            append("\"sourcePriorityMode\":${quote(x.sourcePriorityMode.name)},")
+
+            append("\"autoChange\":${x.autoChange},")
+            append("\"triggerMode\":${quote(x.triggerMode.name)},")
+            append("\"intervalMinutes\":${x.intervalMinutes},")
+            append("\"targetMode\":${quote(x.targetMode.name)},")
+            append("\"wallpaperOrder\":${quote(x.wallpaperOrder.name)},")
+
+            append("\"homeBlurEnabled\":${x.homeBlurEnabled},")
+            append("\"homeBlurRadius\":${x.homeBlurRadius},")
+            append("\"lockBlurEnabled\":${x.lockBlurEnabled},")
+            append("\"lockBlurRadius\":${x.lockBlurRadius},")
+
+            append("\"appearanceMode\":${quote(x.appearanceMode.name)},")
+            append("\"dataSaverEnabled\":${x.dataSaverEnabled},")
+            append("\"wifiOnly\":${x.wifiOnly},")
+            append("\"mobileDataAllowed\":${x.mobileDataAllowed},")
+            append("\"chargingOnly\":${x.chargingOnly},")
+            append("\"pauseBatterySaver\":${x.pauseBatterySaver},")
+            append("\"pauseLowBattery\":${x.pauseLowBattery},")
+            append("\"lowBatteryThreshold\":${x.lowBatteryThreshold},")
+            append("\"quietHoursEnabled\":${x.quietHoursEnabled},")
+            append("\"quietStartHour\":${x.quietStartHour},")
+            append("\"quietEndHour\":${x.quietEndHour},")
+
+            append("\"cacheTarget\":${x.cacheTarget},")
+            append("\"cacheMaxMb\":${x.cacheMaxMb},")
+            append("\"lowStorageReserveMb\":${x.lowStorageReserveMb},")
+            append("\"backgroundGuardEnabled\":${x.backgroundGuardEnabled},")
+            append("\"smartCropEnabled\":${x.smartCropEnabled},")
+            append("\"smartCropTolerancePct\":${x.smartCropTolerancePct},")
+            append("\"aspectPreference\":${quote(x.aspectPreference.name)},")
+            append("\"perceptualDistance\":${x.perceptualDistance},")
+            append("\"leanStorageMode\":${x.leanStorageMode},")
+            append("\"smartPairingEnabled\":${x.smartPairingEnabled},")
+            append("\"adaptiveResourceProtectionEnabled\":${x.adaptiveResourceProtectionEnabled},")
+            append("\"decisionEngineEnabled\":${x.decisionEngineEnabled},")
+
+            append("\"moodEngineEnabled\":${x.moodEngineEnabled},")
+            append("\"moodAmbientLightEnabled\":${x.moodAmbientLightEnabled},")
+            append("\"moodTimeEnabled\":${x.moodTimeEnabled},")
+            append("\"moodDarkModeEnabled\":${x.moodDarkModeEnabled},")
+            append("\"moodBatteryContextEnabled\":${x.moodBatteryContextEnabled},")
+            append("\"moodThermalProtectionEnabled\":${x.moodThermalProtectionEnabled},")
+            append("\"moodStrength\":${x.moodStrength},")
+            append("\"moodDarkLuxThreshold\":${x.moodDarkLuxThreshold},")
+            append("\"moodBrightLuxThreshold\":${x.moodBrightLuxThreshold},")
+            append("\"moodWeatherEnabled\":${x.moodWeatherEnabled},")
+            append("\"moodUseDeviceLocation\":${x.moodUseDeviceLocation},")
+            append("\"moodWeatherCity\":${quote(x.moodWeatherCity)},")
+            append("\"moodWeatherInfluence\":${x.moodWeatherInfluence},")
+            append("\"moodOutdoorTemperatureEnabled\":${x.moodOutdoorTemperatureEnabled},")
+            append("\"moodColdTemperatureC\":${x.moodColdTemperatureC},")
+            append("\"moodHotTemperatureC\":${x.moodHotTemperatureC},")
+            append("\"moodAutoReactEnabled\":${x.moodAutoReactEnabled},")
+            append("\"moodAutoReactCooldownMinutes\":${x.moodAutoReactCooldownMinutes},")
+
+            append("\"theme\":${quote(theme)},")
+            append("\"blurMaster\":${WallpaperController.blurMasterEnabled(this@LanServerService)},")
+
+            append("\"currentHome\":${quote(state.currentHome)},")
+            append("\"currentLock\":${quote(state.currentLock)},")
+            append("\"nextHome\":${quote(state.nextHome)},")
+            append("\"nextLock\":${quote(state.nextLock)},")
+
+            append("\"currentHomeInfo\":${wallInfoJson(WallpaperFiles.currentHome, true)},")
+            append("\"currentLockInfo\":${wallInfoJson(WallpaperFiles.currentLock, false)},")
+            append("\"nextHomeInfo\":${wallInfoJson(WallpaperFiles.nextHome, true, false)},")
+            append("\"nextLockInfo\":${wallInfoJson(WallpaperFiles.nextLock, false, false)},")
+
+            append("\"activeSource\":${quote(RuntimeStatus.get(this@LanServerService, "active_source", "None"))},")
+            append("\"photosHealth\":${quote(RuntimeStatus.get(this@LanServerService, "source_photos", "Unknown"))},")
+            append("\"driveHealth\":${quote(RuntimeStatus.get(this@LanServerService, "source_drive", "Unknown"))},")
+            append("\"localHealth\":${quote(RuntimeStatus.get(this@LanServerService, "source_local", "Unknown"))},")
+
+            append("\"lastPipeline\":${quote(RuntimeStatus.get(this@LanServerService, "last_pipeline", "Waiting"))},")
+            append("\"lastAspect\":${quote(RuntimeStatus.get(this@LanServerService, "last_aspect", "Unknown"))},")
+            append("\"selectionReason\":${quote(RuntimeStatus.get(this@LanServerService, "selection_reason", "Waiting"))},")
+
+            append("\"visualProfile\":${quote(RuntimeStatus.get(this@LanServerService, "visual_last_decision", RuntimeStatus.get(this@LanServerService, "visual_last_profile", "Waiting")))},")
+            append("\"visualPalette\":${quote(RuntimeStatus.get(this@LanServerService, "visual_last_palette", "Waiting"))},")
+            append("\"visualDetail\":${quote(RuntimeStatus.get(this@LanServerService, "visual_last_detail", "Waiting"))},")
+            append("\"visualPairing\":${quote(RuntimeStatus.get(this@LanServerService, "visual_pairing", "Waiting"))},")
+            append("\"autonomousGrade\":${quote(RuntimeStatus.get(this@LanServerService, "autonomous_grade", "Waiting"))},")
+            append("\"autonomousHealth\":${quote(RuntimeStatus.get(this@LanServerService, "autonomous_health", "Waiting"))},")
+            append("\"selfHealLast\":${quote(RuntimeStatus.get(this@LanServerService, "self_heal_last", "Waiting"))},")
+            append("\"watchdogState\":${quote(RuntimeStatus.get(this@LanServerService, "watchdog_state", "Waiting"))},")
+            append("\"storagePressure\":${quote(RuntimeStatus.get(this@LanServerService, "storage_pressure", "Waiting"))},")
+            append("\"adaptiveCacheTargetV3\":${quote(RuntimeStatus.get(this@LanServerService, "adaptive_cache_target_v3", "Waiting"))},")
+            append("\"sourcePhotosTrust\":${quote(RuntimeStatus.get(this@LanServerService, "source_photos_trust", "Learning"))},")
+            append("\"sourceDriveTrust\":${quote(RuntimeStatus.get(this@LanServerService, "source_drive_trust", "Learning"))},")
+            append("\"sourceResilienceLast\":${quote(RuntimeStatus.get(this@LanServerService, "source_resilience_last", "Waiting"))},")
+            append("\"wallpaperDna\":${quote(RuntimeStatus.get(this@LanServerService, "wallpaper_dna", "Waiting"))},")
+            append("\"wallpaperFamily\":${quote(RuntimeStatus.get(this@LanServerService, "wallpaper_family", "Waiting"))},")
+            append("\"wallpaperEntropy\":${quote(RuntimeStatus.get(this@LanServerService, "wallpaper_entropy", "Waiting"))},")
+            append("\"familyFatigue\":${quote(RuntimeStatus.get(this@LanServerService, "family_fatigue", "Learning"))},")
+            append("\"pairStory\":${quote(RuntimeStatus.get(this@LanServerService, "pair_story", "Waiting"))},")
+            append("\"tasteConfidenceV2\":${quote(RuntimeStatus.get(this@LanServerService, "taste_confidence_v2", "Learning"))},")
+            append("\"learningMode\":${quote(RuntimeStatus.get(this@LanServerService, "learning_mode", "Explore"))},")
+            append("\"diversityBudget\":${quote(RuntimeStatus.get(this@LanServerService, "diversity_budget", "Waiting"))},")
+            append("\"contextConfidence\":${quote(RuntimeStatus.get(this@LanServerService, "context_confidence", "Waiting"))},")
+            append("\"contextConflict\":${quote(RuntimeStatus.get(this@LanServerService, "context_conflict", "Waiting"))},")
+            append("\"contextLuxSmoothed\":${quote(RuntimeStatus.get(this@LanServerService, "context_lux_smoothed", "Waiting"))},")
+            append("\"contextWeatherStable\":${quote(RuntimeStatus.get(this@LanServerService, "context_weather_stable", "Waiting"))},")
+            append("\"decisionTraceId\":${quote(RuntimeStatus.get(this@LanServerService, "decision_trace_id", "-"))},")
+            append("\"decisionConfidenceV2\":${quote(RuntimeStatus.get(this@LanServerService, "decision_confidence_v2", "Waiting"))},")
+            append("\"decisionBreakdownV2\":${quote(RuntimeStatus.get(this@LanServerService, "decision_breakdown_v2", "Waiting"))},")
+            append("\"decisionWhyV2\":${quote(RuntimeStatus.get(this@LanServerService, "decision_why_v2", "Waiting"))},")
+            append("\"decisionWhyNotRunner\":${quote(RuntimeStatus.get(this@LanServerService, "decision_why_not_runner", "Waiting"))},")
+            append("\"shadowRank\":${quote(RuntimeStatus.get(this@LanServerService, "shadow_rank", "Waiting"))},")
+            append("\"qualityGuardLast\":${quote(RuntimeStatus.get(this@LanServerService, "quality_guard_last", "No rejection"))},")
+            append("\"applyJournal\":${quote(RuntimeStatus.get(this@LanServerService, "apply_journal", "Idle"))},")
+            append("\"crashRecovery\":${quote(RuntimeStatus.get(this@LanServerService, "crash_recovery", "None"))},")
+            append("\"premiumHomeDna\":${quote(RuntimeStatus.get(this@LanServerService, "premium_home_dna", "Waiting"))},")
+            append("\"premiumHomeFamily\":${quote(RuntimeStatus.get(this@LanServerService, "premium_home_family", "Waiting"))},")
+            append("\"premiumHomePalette\":${quote(RuntimeStatus.get(this@LanServerService, "premium_home_palette", "Waiting"))},")
+            append("\"premiumHomeVisual\":${quote(RuntimeStatus.get(this@LanServerService, "premium_home_visual", "Waiting"))},")
+            append("\"premiumHomeRole\":${quote(RuntimeStatus.get(this@LanServerService, "premium_home_role", "Waiting"))},")
+            append("\"premiumHomeQuality\":${quote(RuntimeStatus.get(this@LanServerService, "premium_home_quality", "Waiting"))},")
+            append("\"premiumHomeAmoled\":${quote(RuntimeStatus.get(this@LanServerService, "premium_home_amoled", "Waiting"))},")
+            append("\"premiumHomeReadability\":${quote(RuntimeStatus.get(this@LanServerService, "premium_home_readability", "Waiting"))},")
+            append("\"premiumHomeCrop\":${quote(RuntimeStatus.get(this@LanServerService, "premium_home_crop", "Waiting"))},")
+            append("\"premiumHomeEntropy\":${quote(RuntimeStatus.get(this@LanServerService, "premium_home_entropy", "Waiting"))},")
+            append("\"premiumLockDna\":${quote(RuntimeStatus.get(this@LanServerService, "premium_lock_dna", "Waiting"))},")
+            append("\"premiumLockFamily\":${quote(RuntimeStatus.get(this@LanServerService, "premium_lock_family", "Waiting"))},")
+            append("\"premiumLockPalette\":${quote(RuntimeStatus.get(this@LanServerService, "premium_lock_palette", "Waiting"))},")
+            append("\"premiumLockVisual\":${quote(RuntimeStatus.get(this@LanServerService, "premium_lock_visual", "Waiting"))},")
+            append("\"premiumLockRole\":${quote(RuntimeStatus.get(this@LanServerService, "premium_lock_role", "Waiting"))},")
+            append("\"premiumLockQuality\":${quote(RuntimeStatus.get(this@LanServerService, "premium_lock_quality", "Waiting"))},")
+            append("\"premiumLockAmoled\":${quote(RuntimeStatus.get(this@LanServerService, "premium_lock_amoled", "Waiting"))},")
+            append("\"premiumLockReadability\":${quote(RuntimeStatus.get(this@LanServerService, "premium_lock_readability", "Waiting"))},")
+            append("\"premiumLockCrop\":${quote(RuntimeStatus.get(this@LanServerService, "premium_lock_crop", "Waiting"))},")
+            append("\"premiumLockEntropy\":${quote(RuntimeStatus.get(this@LanServerService, "premium_lock_entropy", "Waiting"))},")
+            append("\"premiumPairSummary\":${quote(RuntimeStatus.get(this@LanServerService, "premium_pair_summary", "Waiting"))},")
+            append("\"premiumPairHarmony\":${quote(RuntimeStatus.get(this@LanServerService, "premium_pair_harmony", "Waiting"))},")
+            append("\"premiumPairBrightness\":${quote(RuntimeStatus.get(this@LanServerService, "premium_pair_brightness", "Waiting"))},")
+            append("\"premiumPairPalette\":${quote(RuntimeStatus.get(this@LanServerService, "premium_pair_palette", "Waiting"))},")
+            append("\"premiumPairStyle\":${quote(RuntimeStatus.get(this@LanServerService, "premium_pair_style", "Waiting"))},")
+            append("\"premiumCacheMap\":${quote(RuntimeStatus.get(this@LanServerService, "premium_cache_map", "Waiting"))},")
+            append("\"premiumCacheSize\":${quote(RuntimeStatus.get(this@LanServerService, "premium_cache_size", "Waiting"))},")
+            append("\"premiumCacheReadiness\":${quote(RuntimeStatus.get(this@LanServerService, "premium_cache_readiness", "Waiting"))},")
+            append("\"premiumCacheHealth\":${quote(RuntimeStatus.get(this@LanServerService, "premium_cache_health", "Waiting"))},")
+            append("\"premiumSourcePhotos\":${quote(RuntimeStatus.get(this@LanServerService, "premium_source_photos", "Learning"))},")
+            append("\"premiumSourceDrive\":${quote(RuntimeStatus.get(this@LanServerService, "premium_source_drive", "Learning"))},")
+            append("\"premiumWatchdogAge\":${quote(RuntimeStatus.get(this@LanServerService, "premium_watchdog_age", "Waiting"))},")
+            append("\"premiumLastChangeAge\":${quote(RuntimeStatus.get(this@LanServerService, "premium_last_change_age", "Waiting"))},")
+            append("\"premiumApplyTiming\":${quote(RuntimeStatus.get(this@LanServerService, "premium_apply_timing", "Waiting"))},")
+            append("\"premiumDecision\":${quote(RuntimeStatus.get(this@LanServerService, "premium_decision", "Waiting"))},")
+            append("\"premiumLearning\":${quote(RuntimeStatus.get(this@LanServerService, "premium_learning", "Waiting"))},")
+            append("\"premiumContext\":${quote(RuntimeStatus.get(this@LanServerService, "premium_context", "Waiting"))},")
+            append("\"premiumLibrary\":${quote(RuntimeStatus.get(this@LanServerService, "premium_library", "Waiting"))},")
+            append("\"premiumRecovery\":${quote(RuntimeStatus.get(this@LanServerService, "premium_recovery", "Waiting"))},")
+            append("\"premiumEventTimeline\":${quote(RuntimeStatus.get(this@LanServerService, "premium_event_timeline", "No events yet"))},")
+            append("\"premiumExportPath\":${quote(RuntimeStatus.get(this@LanServerService, "premium_export_path", "-"))},")
+            append("\"engineHealth\":${quote(RuntimeStatus.get(this@LanServerService, "engine_health", "Waiting"))},")
+            append("\"resourcePolicy\":${quote(RuntimeStatus.get(this@LanServerService, "resource_policy", "Waiting"))},")
+            append("\"blockedCachePurge\":${quote(RuntimeStatus.get(this@LanServerService, "blocked_cache_purge", "0"))},")
+
+            append("\"moodProfileLabel\":${quote(RuntimeStatus.get(this@LanServerService, "mood_profile_label", "Waiting"))},")
+            append("\"moodProfileSummary\":${quote(RuntimeStatus.get(this@LanServerService, "mood_profile_summary", "Waiting"))},")
+            append("\"moodLastFactors\":${quote(RuntimeStatus.get(this@LanServerService, "mood_last_factors", "Waiting"))},")
+            append("\"moodAutoReactStatus\":${quote(RuntimeStatus.get(this@LanServerService, "mood_auto_react", "Off"))},")
+            append("\"adaptiveMoodContext\":${quote(RuntimeStatus.get(this@LanServerService, "adaptive_mood_context", "Waiting"))},")
+            append("\"ambientLux\":${quote(RuntimeStatus.get(this@LanServerService, "adaptive_mood_lux", "Unavailable"))},")
+            append("\"dayPhase\":${quote(RuntimeStatus.get(this@LanServerService, "adaptive_mood_phase", "Unknown"))},")
+            append("\"thermalStatus\":${quote(RuntimeStatus.get(this@LanServerService, "adaptive_mood_thermal", "Waiting"))},")
+            append("\"weatherStatus\":${quote(RuntimeStatus.get(this@LanServerService, "weather_mood_status", "Waiting"))},")
+            append("\"locationStatus\":${quote(RuntimeStatus.get(this@LanServerService, "weather_location_status", "Waiting"))},")
+            append("\"locationPermission\":${quote(bb.pix.wall.engine.MoodLocationEngine.permissionLabel(this@LanServerService))},")
+
+            append("\"lastError\":${quote(RuntimeStatus.get(this@LanServerService, "last_error", ""))},")
+            append("\"lastTrigger\":${quote(RuntimeStatus.get(this@LanServerService, "last_trigger", "None"))},")
+            append("\"lanState\":${quote(RuntimeStatus.get(this@LanServerService, "lan_state", "Stopped"))},")
+            append("\"nextRun\":${RuntimeStatus.getLong(this@LanServerService, "next_run", 0L)},")
+
+            append("\"rootState\":${quote(RuntimeStatus.get(this@LanServerService, "root_state", "Not checked"))},")
+            append("\"rootProvider\":${quote(RuntimeStatus.get(this@LanServerService, "root_provider", "Unknown"))},")
+            append("\"rootCaps\":${quote(RuntimeStatus.get(this@LanServerService, "root_caps", "Not scanned"))},")
+
+            append("\"historyCount\":${bb.pix.wall.engine.WallpaperLibrary.history().size},")
+            append("\"previousAvailable\":${WallpaperController.previousAvailable()}")
+
+            append("}")
+        }
+    }
+
+    private fun wallInfoJson(
+        file: File,
+        home: Boolean,
+        allowBlur: Boolean = true,
+    ): String {
+        val info =
+            WallpaperController.displayWallpaperInfo(
+                file.takeIf { it.exists() }
+                    ?.absolutePath
+            )
+
+        val settings =
+            SettingsStore(this).load()
+
+        val blur =
+            allowBlur &&
+            WallpaperController
+                .blurMasterEnabled(this) &&
+                if (home) {
+                    settings.homeBlurEnabled &&
+                        settings.homeBlurRadius > 0
+                } else {
+                    settings.lockBlurEnabled &&
+                        settings.lockBlurRadius > 0
+                }
+
+        val radius =
+            if (home) {
+                settings.homeBlurRadius
+            } else {
+                settings.lockBlurRadius
+            }
+
+        return buildString {
+            append("{")
+            append("\"exists\":${info.exists},")
+            append("\"resolution\":${quote(info.resolution)},")
+            append("\"format\":${quote(info.format)},")
+            append("\"size\":${quote(info.sizeLabel)},")
+            append("\"bytes\":${info.bytes},")
+            append("\"source\":${quote(info.source)},")
+            append("\"quality\":${quote(info.quality)},")
+            append("\"blur\":$blur,")
+            append("\"radius\":$radius")
+            append("}")
+        }
+    }
+
+    private fun historyJson(): String =
+        bb.pix.wall.engine
+            .WallpaperLibrary
+            .history()
+            .take(40)
+            .joinToString(
+                prefix = "[",
+                postfix = "]",
+            ) { entry ->
+                buildString {
+                    append("{")
+                    append("\"id\":${quote(entry.id)},")
+                    append("\"createdAt\":${entry.createdAt},")
+                    append("\"home\":${entry.home != null && entry.home.exists()},")
+                    append("\"lock\":${entry.lock != null && entry.lock.exists()}")
+                    append("}")
+                }
+            }
+
+    private fun librarySlot(
+        slot: String,
+    ): File? =
+        when (slot) {
+            "current-home" ->
+                WallpaperFiles.currentHome
+
+            "current-lock" ->
+                WallpaperFiles.currentLock
+
+            "next-home" ->
+                WallpaperFiles.nextHome
+
+            "next-lock" ->
+                WallpaperFiles.nextLock
+
+            else ->
+                null
+        }
+
+    private fun libraryActionJson(
+        form: Map<String, String>,
+    ): String {
+        val action =
+            form["action"]
+                .orEmpty()
+
+        val file =
+            librarySlot(
+                form["slot"]
+                    .orEmpty()
+            )
+                ?: return "{\"ok\":false,\"error\":\"bad slot\"}"
+
+        if (!file.exists()) {
+            return "{\"ok\":false,\"error\":\"unavailable\"}"
+        }
+
+        val ok =
+            when (action) {
+                "favorite" ->
+                    bb.pix.wall.engine
+                        .WallpaperLibrary
+                        .favorite(file) != null
+
+                "unfavorite" ->
+                    bb.pix.wall.engine
+                        .WallpaperLibrary
+                        .removeFavorite(file)
+
+                "pin" ->
+                    bb.pix.wall.engine
+                        .WallpaperLibrary
+                        .setPinned(
+                            file,
+                            true,
+                        )
+
+                "unpin" ->
+                    bb.pix.wall.engine
+                        .WallpaperLibrary
+                        .setPinned(
+                            file,
+                            false,
+                        )
+
+                "save-original" ->
+                    bb.pix.wall.engine
+                        .WallpaperLibrary
+                        .saveOriginal(
+                            file,
+                            form["slot"]
+                                .orEmpty(),
+                        ) != null
+
+                "never" -> {
+                    val changed =
+                        bb.pix.wall.engine
+                            .WallpaperLibrary
+                            .neverShowAgain(
+                                file
+                            )
+
+                    if (changed) {
+                        WallpaperController
+                            .purgeBlockedCached(
+                                this
+                            )
+
+                        WallpaperController
+                            .ensureNext(
+                                this,
+                                SettingsStore(this)
+                                    .load(),
+                            )
+                    }
+
+                    changed
+                }
+
+                else ->
+                    false
+            }
+
+        return "{\"ok\":$ok}"
     }
 
     private fun queueJson(): String {
@@ -355,7 +1645,16 @@ class LanServerService : Service() {
     private fun sendText(socket: Socket, code: Int, type: String, body: String) = sendBytes(socket, code, type, body.toByteArray(Charsets.UTF_8))
     private fun sendBytes(socket: Socket, code: Int, type: String, bytes: ByteArray) {
         val reason = when (code) { 200 -> "OK"; 403 -> "Forbidden"; 404 -> "Not Found"; 429 -> "Too Many Requests"; 500 -> "Error"; else -> "OK" }
-        val header = "HTTP/1.1 $code $reason\r\nContent-Type: $type\r\nContent-Length: ${bytes.size}\r\nConnection: close\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nContent-Security-Policy: default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' data:\r\n\r\n"
+        val header =
+            "HTTP/1.1 $code $reason\r\n" +
+                "Content-Type: $type\r\n" +
+                "Content-Length: ${bytes.size}\r\n" +
+                "Connection: close\r\n" +
+                "Cache-Control: no-store\r\n" +
+                "X-Content-Type-Options: nosniff\r\n" +
+                "X-Frame-Options: DENY\r\n" +
+                "Referrer-Policy: no-referrer\r\n" +
+                "Content-Security-Policy: default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' data:\r\n\r\n"
         try {
             val out = socket.getOutputStream()
             out.write(header.toByteArray(Charsets.UTF_8))
@@ -368,32 +1667,12 @@ class LanServerService : Service() {
         }
     }
 
-    private fun dashboard(token: String): String = """
-<!doctype html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'><title>BB-PixWall</title>
-<style>
-:root{color-scheme:dark}*{box-sizing:border-box}body{font-family:system-ui,-apple-system,sans-serif;background:#09090b;color:#f5f5f7;margin:0;padding:20px;max-width:920px;margin:auto}.head{display:flex;align-items:center;gap:12px}.badge{padding:6px 10px;border-radius:99px;background:#232329;font-size:13px}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.thumb{background:#151519;border:1px solid #2d2d34;border-radius:18px;overflow:hidden}.thumb img{width:100%;aspect-ratio:.85;object-fit:cover;background:#0d0d10}.thumb b{display:block;padding:9px 11px}.card{background:#18181c;border:1px solid #2d2d34;border-radius:22px;padding:18px;margin:14px 0}.row{display:flex;gap:10px;flex-wrap:wrap}.field{display:grid;gap:6px;margin:11px 0}input,select{width:100%;background:#101014;color:#f5f5f7;border:1px solid #414148;border-radius:12px;padding:12px;font:inherit}button{font:inherit;font-weight:700;padding:12px 15px;border:0;border-radius:13px;background:#e4473e;color:#fff;cursor:pointer}.card h2{color:#d2a928}.secondary{background:#292930;color:#f5f5f7}.muted{color:#aaaab5}.two{display:grid;grid-template-columns:1fr 1fr;gap:12px}@media(max-width:620px){.two{grid-template-columns:1fr}.grid{gap:8px}}
-</style></head><body>
-<div class='head'><h1 style='margin-right:auto'>BB-PixWall</h1><span class='badge' id='mode'>Standard</span></div><p class='muted'>Full local Wi-Fi control panel</p><div class='card'><h2>Live status</h2><div class='two'><div>Active source: <b id='activeSource'>-</b></div><div>Cache: <b id='cache'>0</b></div><div>Photos: <b id='photosHealth'>-</b></div><div>Drive: <b id='driveHealth'>-</b></div><div>Web: <b id='webHealth'>-</b></div><div>Local: <b id='localHealth'>-</b></div><div>Next run: <b id='nextRun'>-</b></div></div><p class='muted' id='lastError'></p></div>
-<div class='grid'><div class='thumb'><img src='/img/current-home?t=1'><b>Current Home</b></div><div class='thumb'><img src='/img/current-lock?t=1'><b>Current Lock</b></div><div class='thumb'><img src='/img/next-home?t=1'><b>Next Home</b></div><div class='thumb'><img src='/img/next-lock?t=1'><b>Next Lock</b></div></div>
-<div class='card'><div class='row'><button onclick="act('/api/next')">Next Wall</button><button onclick="act('/api/save')">Save Wall</button><button onclick="act('/api/blur')">Blur Wall</button><button class='secondary' onclick="act('/api/prepare')">Prepare / Cache</button><button class='secondary' onclick="act('/api/test-sources')">Test sources</button><button class='secondary' onclick="act('/api/cache-clear')">Clear Cache</button></div><p id='status' class='muted'></p></div>
-<div class='card'><h2>Sources & order</h2><div class='field'><label>Google Photos public album</label><input id='photosAlbumUrl'></div><div class='field'><label>Google Drive public mirror</label><input id='driveFolderUrl'></div><div class='field'><label>Wallpaper order</label><select id='wallpaperOrder'>${options(WallpaperOrder.entries.map { it.name to it.label })}</select></div></div>
-
-<div class='card'><h2>Automation</h2><div class='two'><div class='field'><label>Automatic change</label><select id='autoChange'><option value='true'>On</option><option value='false'>Off</option></select></div><div class='field'><label>Trigger</label><select id='triggerMode'>${options(TriggerMode.entries.map { it.name to it.label })}</select></div><div class='field'><label>Interval minutes</label><input id='intervalMinutes' type='number' min='1' max='240'></div><div class='field'><label>Target</label><select id='targetMode'>${options(WallpaperTargetMode.entries.map { it.name to it.label })}</select></div></div></div>
-<div class='card'><h2>Network, cache & reliability</h2><div class='two'><div class='field'><label>Data Saver</label><select id='dataSaverEnabled'><option value='true'>On</option><option value='false'>Off</option></select></div><div class='field'><label>Wi-Fi only</label><select id='wifiOnly'><option value='true'>On</option><option value='false'>Off</option></select></div><div class='field'><label>Charging only</label><select id='chargingOnly'><option value='true'>On</option><option value='false'>Off</option></select></div><div class='field'><label>Pause in Battery Saver</label><select id='pauseBatterySaver'><option value='true'>On</option><option value='false'>Off</option></select></div><div class='field'><label>Prefetch cache (4–36)</label><input id='cacheTarget' type='number' min='4' max='36'></div><div class='field'><label>Pause below 15% battery</label><select id='pauseLowBattery'><option value='true'>On</option><option value='false'>Off</option></select></div><div class='field'><label>Quiet hours</label><select id='quietHoursEnabled'><option value='true'>On</option><option value='false'>Off</option></select></div><div class='field'><label>Quiet start hour</label><input id='quietStartHour' type='number' min='0' max='23'></div><div class='field'><label>Quiet end hour</label><input id='quietEndHour' type='number' min='0' max='23'></div><div class='field'><label>Background guard</label><select id='backgroundGuardEnabled'><option value='true'>On</option><option value='false'>Off</option></select></div></div></div>
-<div class='card'><h2>Blur</h2><div class='two'><div><div class='field'><label>Home blur</label><select id='homeBlurEnabled'><option value='true'>On</option><option value='false'>Off</option></select></div><div class='field'><label>Home intensity 0–64</label><input id='homeBlurRadius' type='range' min='0' max='64'></div></div><div><div class='field'><label>Lock blur</label><select id='lockBlurEnabled'><option value='true'>On</option><option value='false'>Off</option></select></div><div class='field'><label>Lock intensity 0–64</label><input id='lockBlurRadius' type='range' min='0' max='64'></div></div></div></div>
-<div class='card'><h2>Appearance</h2><div class='two'><div class='field'><label>Color mode</label><select id='appearanceMode'>${options(AppearanceMode.entries.map { it.name to it.label })}</select></div><div class='field'><label>Theme</label><select id='theme'>${options(ThemeProfile.entries.map { it.name to it.title })}</select></div></div></div>
-<div class='card'><h2>Engine & quality</h2><p class='muted'>Advance uses only verified root capabilities. Wallpaper commits still use Android WallpaperManager.</p><div class='row'><button onclick="act('/api/advanced')">Request Advance / su</button><button class='secondary' onclick="act('/api/standard')">Use Standard</button><button class='secondary' onclick="loadRoot()">Root diagnostics</button></div><div class='two'><div class='field'><label>Smart Crop (mismatch only)</label><select id='smartCropEnabled'><option value='true'>On</option><option value='false'>Off</option></select></div><div class='field'><label>Lean local storage</label><select id='leanStorageMode'><option value='true'>On</option><option value='false'>Off</option></select></div></div><p class='muted'>9:20-compatible images are streamed untouched. Only accidental aspect mismatches may be cropped.</p><pre id='rootDiag' style='white-space:pre-wrap;background:#0b0b0d;padding:12px;border-radius:12px'></pre></div>
-<div class='card'><h2>Diagnostics</h2><p class='muted'>Live runtime log</p><pre id='logs' style='white-space:pre-wrap;max-height:260px;overflow:auto;background:#0b0b0d;padding:12px;border-radius:12px'></pre><button onclick='loadLogs()' class='secondary'>Refresh logs</button> <button onclick="act('/api/debug-report')" class='secondary'>Export debug</button></div><div class='card'><button onclick='saveSettings()'>Save all settings</button></div>
-<script>
-const token=${jsString(token)}; const ids=['photosAlbumUrl','driveFolderUrl','autoChange','triggerMode','intervalMinutes','targetMode','wallpaperOrder','homeBlurEnabled','homeBlurRadius','lockBlurEnabled','lockBlurRadius','appearanceMode','dataSaverEnabled','wifiOnly','chargingOnly','pauseBatterySaver','pauseLowBattery','quietHoursEnabled','quietStartHour','quietEndHour','cacheTarget','backgroundGuardEnabled','smartCropEnabled','leanStorageMode','theme'];
-async function act(p){let r=await fetch(p,{method:'POST',headers:{'X-BBPixWall-Token':token}});document.getElementById('status').textContent=await r.text();setTimeout(load,300)}
-async function load(){let s=await (await fetch('/api/settings',{cache:'no-store'})).json();ids.forEach(id=>{let e=document.getElementById(id);if(!e||s[id]===undefined)return;if(e.type==='checkbox')e.checked=Boolean(s[id]);else e.value=String(s[id])});document.getElementById('mode').textContent=s.engineMode==='ADVANCED'?'Advance':'Standard';document.getElementById('cache').textContent=s.cache;document.getElementById('activeSource').textContent=s.activeSource||'None';document.getElementById('photosHealth').textContent=s.photosHealth||'-';document.getElementById('driveHealth').textContent=s.driveHealth||'-';document.getElementById('webHealth').textContent=s.webHealth||'-';document.getElementById('localHealth').textContent=s.localHealth||'-';document.getElementById('webDisplayProfile').textContent=s.webDisplayProfile||'Waiting';document.getElementById('webNetworkClass').textContent=s.webNetworkClass||'Waiting';document.getElementById('webPrefetchPolicy').textContent=s.webPrefetchPolicy||'Waiting';document.getElementById('nextRun').textContent=s.nextRun?new Date(s.nextRun).toLocaleTimeString():'Event/manual';document.getElementById('lastError').textContent=s.lastError?'Last error: '+s.lastError:'';document.getElementById('rootDiag').textContent='Root: '+(s.rootState||'Unknown')+' • '+(s.rootProvider||'')+'\n'+(s.rootCaps||'')+'\nPipeline: '+(s.lastPipeline||'-')+'\nAspect: '+(s.lastAspect||'-')+'\nWhy: '+(s.selectionReason||'-');document.querySelectorAll('.thumb img').forEach(i=>i.src=i.src.split('?')[0]+'?t='+Date.now())}
-async function loadRoot(){document.getElementById('rootDiag').textContent=await (await fetch('/api/root-diagnostics',{cache:'no-store'})).text()}
-async function loadLogs(){document.getElementById('logs').textContent=await (await fetch('/api/logs',{cache:'no-store'})).text()}
-async function saveSettings(){let p=new URLSearchParams();ids.forEach(id=>{let e=document.getElementById(id);if(!e)return;p.set(id,e.type==='checkbox'?(e.checked?'true':'false'):e.value)});let r=await fetch('/api/settings',{method:'POST',headers:{'X-BBPixWall-Token':token,'Content-Type':'application/x-www-form-urlencoded'},body:p});document.getElementById('status').textContent=r.ok?'Saved':'Save failed';await load()}
-load();loadLogs();setInterval(load,3000)
-</script></body></html>
-""".trimIndent()
+    private fun dashboard(
+        token: String,
+    ): String =
+        WebRemoteDashboard.render(
+            token
+        )
 
     private fun options(items: List<Pair<String, String>>) = items.joinToString("") { "<option value='${it.first}'>${escapeHtml(it.second)}</option>" }
     private fun escapeHtml(v: String) = v.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("'", "&#39;")
@@ -407,5 +1686,5 @@ load();loadLogs();setInterval(load,3000)
     private fun quote(v: String?) = if (v == null) "null" else "\"${v.replace("\\", "\\\\").replace("\"", "\\\"")}\""
     private fun jsString(v: String) = quote(v)
     private fun createChannel() { getSystemService(NotificationManager::class.java).createNotificationChannel(NotificationChannel(CHANNEL, "Wi-Fi dashboard", NotificationManager.IMPORTANCE_LOW)) }
-    companion object { const val CHANNEL = "bb_pixwall_web" }
+    companion object { const val CHANNEL = "bb_pixwall_remote" }
 }

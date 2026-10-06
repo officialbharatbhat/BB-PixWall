@@ -116,6 +116,25 @@ object DecisionEngine {
                 context
             )
 
+        val adaptiveMood =
+            AdaptiveMoodEngine.snapshot(
+                context = context,
+                settings = settings,
+            )
+
+        val weatherMood =
+            WeatherMoodEngine.snapshot(
+                context = context,
+                settings = settings,
+            )
+
+        Phase1FinalEngine.publishMoodProfile(
+            context = context,
+            settings = settings,
+            adaptive = adaptiveMood,
+            weather = weatherMood,
+        )
+
         val styleIds =
             buildList {
                 candidates.forEach {
@@ -182,6 +201,42 @@ object DecisionEngine {
 
         val styleMs =
             (System.nanoTime() - styleStartedNs) / 1_000_000L
+
+        val visualProfiles =
+            VisualIntelligenceEngine.profiles(
+                context,
+                candidates.map {
+                    it.id
+                },
+            )
+
+        val visualDecisions =
+            candidates.associate { candidate ->
+                candidate.id to
+                    VisualIntelligenceEngine.decision(
+                        visualProfiles[
+                            candidate.id
+                        ]
+                    )
+            }
+
+        val autonomousDecisions =
+            candidates.associate { candidate ->
+                candidate.id to
+                    AutonomousIntelligenceEngine
+                        .decision(
+                            context = context,
+                            settings = settings,
+                            candidateId =
+                                candidate.id,
+                            source =
+                                candidate.source,
+                            visual =
+                                visualProfiles[
+                                    candidate.id
+                                ],
+                        )
+            }
 
         val tiesStartedNs =
             System.nanoTime()
@@ -350,6 +405,14 @@ object DecisionEngine {
                         styleDecisions[
                             candidate.id
                         ],
+                    visualDecision =
+                        visualDecisions[
+                            candidate.id
+                        ],
+                    autonomousDecision =
+                        autonomousDecisions[
+                            candidate.id
+                        ],
                     candidateTraits =
                         traitsById[
                             candidate.id
@@ -359,6 +422,10 @@ object DecisionEngine {
                     mood = mood,
                     deviceContext =
                         deviceContext,
+                    adaptiveMood =
+                        adaptiveMood,
+                    weatherMood =
+                        weatherMood,
                     tie =
                         stableTies[
                             candidate.id
@@ -386,6 +453,12 @@ object DecisionEngine {
                     "mood-" in it.reason
             }
 
+        val visualActivity =
+            ranked.count {
+                "visual+" in it.reason ||
+                    "visual-" in it.reason
+            }
+
         val diversityActivity =
             ranked.count {
                 "diversity-" in it.reason
@@ -406,6 +479,7 @@ object DecisionEngine {
             context,
             "decision_feature_activity",
             "mood=$moodActivity • " +
+                "visual=$visualActivity • " +
                 "diversity=$diversityActivity • " +
                 "explore=$explorationActivity • " +
                 "context=$contextActivity",
@@ -433,10 +507,43 @@ object DecisionEngine {
                     top.score.toString(),
                 )
 
+
+                visualProfiles[
+                    top.candidate.id
+                ]?.let { visual ->
+                    RuntimeStatus.set(
+                        context,
+                        "visual_last_decision",
+                        VisualIntelligenceEngine.describe(
+                            visual
+                        ),
+                    )
+
+                    RuntimeStatus.set(
+                        context,
+                        "visual_last_palette",
+                        visual.palette,
+                    )
+                }
+
+                RuntimeStatus.set(
+                    context,
+                    "adaptive_mood_last_decision",
+                    adaptiveMood.label,
+                )
+
                 RuntimeStatus.set(
                     context,
                     "decision_last_reason",
                     top.reason,
+                )
+
+                RuntimeStatus.set(
+                    context,
+                    "mood_last_factors",
+                    Phase1FinalEngine.factorSummary(
+                        top.reason
+                    ),
                 )
 
                 RuntimeStatus.set(
@@ -473,6 +580,51 @@ object DecisionEngine {
                     "decision_alternatives",
                     alternatives,
                 )
+
+                val runner =
+                    ranked.getOrNull(1)
+
+                val shadow =
+                    autonomousDecisions
+                        .entries
+                        .filter {
+                            it.value != null
+                        }
+                        .maxByOrNull {
+                            it.value
+                                ?.influence
+                                ?: Int.MIN_VALUE
+                        }
+
+                AutonomousIntelligenceEngine
+                    .publishDecisionTrace(
+                        context = context,
+                        topId =
+                            top.candidate.id,
+                        topSource =
+                            top.candidate.source,
+                        topScore =
+                            top.score,
+                        topReason =
+                            top.reason,
+                        runnerId =
+                            runner
+                                ?.candidate
+                                ?.id,
+                        runnerScore =
+                            runner
+                                ?.score,
+                        runnerReason =
+                            runner
+                                ?.reason,
+                        shadowId =
+                            shadow
+                                ?.key,
+                        shadowInfluence =
+                            shadow
+                                ?.value
+                                ?.influence,
+                    )
 
                 RuntimeStatus.setLong(
                     context,
@@ -537,10 +689,14 @@ object DecisionEngine {
         sourceHealth: SourceHealth,
         tasteRaw: Int,
         styleDecision: WallpaperStyleLearning.StyleDecision?,
+        visualDecision: VisualIntelligenceEngine.Decision?,
+        autonomousDecision: AutonomousIntelligenceEngine.Decision?,
         candidateTraits: WallpaperStyleLearning.Traits?,
         diversityTraits: List<Pair<String, WallpaperStyleLearning.Traits>>,
         mood: SessionMoodLearning.Snapshot,
         deviceContext: ContextAwareness.Snapshot,
+        adaptiveMood: AdaptiveMoodEngine.Snapshot,
+        weatherMood: WeatherMoodEngine.Snapshot,
         tie: Long,
         now: Long,
     ): Ranked {
@@ -550,15 +706,10 @@ object DecisionEngine {
             mutableListOf<String>()
 
         val sourceScore =
-            when (
-                candidate.source
-                    .lowercase()
-            ) {
-                "photos" -> 36
-                "drive" -> 24
-                "local" -> 10
-                else -> 0
-            }
+            Phase1FinalEngine.sourceBaseScore(
+                settings = settings,
+                source = candidate.source,
+            )
 
         score += sourceScore
         reasons +=
@@ -710,6 +861,46 @@ object DecisionEngine {
                 }
         }
 
+        if (
+            visualDecision != null &&
+            visualDecision.influence != 0
+        ) {
+            score +=
+                visualDecision.influence
+
+            reasons +=
+                if (
+                    visualDecision.influence > 0
+                ) {
+                    "visual+${visualDecision.influence}" +
+                        "(${visualDecision.label}; " +
+                        "${visualDecision.explanation})"
+                } else {
+                    "visual${visualDecision.influence}" +
+                        "(${visualDecision.label}; " +
+                        "${visualDecision.explanation})"
+                }
+        }
+
+        if (
+            autonomousDecision != null &&
+            autonomousDecision.influence != 0
+        ) {
+            score +=
+                autonomousDecision.influence
+
+            reasons +=
+                if (
+                    autonomousDecision.influence > 0
+                ) {
+                    "autonomy+${autonomousDecision.influence}" +
+                        "(${autonomousDecision.reason})"
+                } else {
+                    "autonomy${autonomousDecision.influence}" +
+                        "(${autonomousDecision.reason})"
+                }
+        }
+
         val moodInfluence =
             candidateTraits
                 ?.let {
@@ -735,10 +926,14 @@ object DecisionEngine {
         }
 
         val contextInfluence =
-            ContextAwareness.visualInfluence(
-                deviceContext,
-                candidateTraits,
-            )
+            if (settings.moodEngineEnabled) {
+                0
+            } else {
+                ContextAwareness.visualInfluence(
+                    deviceContext,
+                    candidateTraits,
+                )
+            }
 
         if (contextInfluence != 0) {
             score += contextInfluence
@@ -748,6 +943,42 @@ object DecisionEngine {
                     "context+$contextInfluence"
                 } else {
                     "context$contextInfluence"
+                }
+        }
+
+        val adaptiveInfluence =
+            AdaptiveMoodEngine.influence(
+                snapshot = adaptiveMood,
+                traits = candidateTraits,
+                settings = settings,
+            )
+
+        if (adaptiveInfluence != 0) {
+            score += adaptiveInfluence
+
+            reasons +=
+                if (adaptiveInfluence > 0) {
+                    "adaptive+$adaptiveInfluence"
+                } else {
+                    "adaptive$adaptiveInfluence"
+                }
+        }
+
+        val weatherInfluence =
+            WeatherMoodEngine.influence(
+                snapshot = weatherMood,
+                traits = candidateTraits,
+                settings = settings,
+            )
+
+        if (weatherInfluence != 0) {
+            score += weatherInfluence
+
+            reasons +=
+                if (weatherInfluence > 0) {
+                    "weather+$weatherInfluence"
+                } else {
+                    "weather$weatherInfluence"
                 }
         }
 
@@ -971,6 +1202,22 @@ object DecisionEngine {
                     out +=
                         "resembles disliked style"
 
+                part.startsWith("visual+") ->
+                    out +=
+                        "strong visual quality/composition"
+
+                part.startsWith("visual-") ->
+                    out +=
+                        "visual quality/composition penalty"
+
+                part.startsWith("autonomy+") ->
+                    out +=
+                        "autonomous diversity/transition fit"
+
+                part.startsWith("autonomy-") ->
+                    out +=
+                        "autonomous fatigue/transition guard"
+
                 part.startsWith("mood+") ->
                     out +=
                         "matches current session mood"
@@ -986,6 +1233,22 @@ object DecisionEngine {
                 part.startsWith("context-") ->
                     out +=
                         "less suited to current theme"
+
+                part.startsWith("adaptive+") ->
+                    out +=
+                        "fits current environment"
+
+                part.startsWith("adaptive-") ->
+                    out +=
+                        "less suited to current environment"
+
+                part.startsWith("weather+") ->
+                    out +=
+                        "matches current weather"
+
+                part.startsWith("weather-") ->
+                    out +=
+                        "less suited to current weather"
 
                 part.startsWith("diversity-") ->
                     out +=
