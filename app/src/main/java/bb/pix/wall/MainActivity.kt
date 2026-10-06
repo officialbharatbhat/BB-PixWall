@@ -135,13 +135,15 @@ class MainActivity : ComponentActivity() {
                     applicationContext
                 ).load()
 
-            bb.pix.wall.engine.EngineExecutors.io {
-                runCatching {
-                    WallpaperController.ensureNext(
-                        applicationContext,
-                        latest,
-                        allowNetwork = true,
-                    )
+            if (!latest.autoChange) {
+                bb.pix.wall.engine.EngineExecutors.io {
+                    runCatching {
+                        WallpaperController.ensureNext(
+                            applicationContext,
+                            latest,
+                            allowNetwork = true,
+                        )
+                    }
                 }
             }
         }, 1200L, java.util.concurrent.TimeUnit.MILLISECONDS)
@@ -218,7 +220,7 @@ class MainActivity : ComponentActivity() {
             blurDebounce.postDelayed({
                 if (generation != blurGeneration) return@postDelayed
                 bb.pix.wall.engine.EngineExecutors.io {
-                    runCatching { WallpaperController.setBlurMasterAndReapply(applicationContext, WallpaperController.blurMasterEnabled(applicationContext)) }
+                    runCatching { WallpaperController.setBlurMasterAndReapply(applicationContext, updated.homeBlurEnabled || updated.lockBlurEnabled) }
                     runOnUiThread(refresh)
                 }
             }, if (blurToggleChanged) 80L else 420L)
