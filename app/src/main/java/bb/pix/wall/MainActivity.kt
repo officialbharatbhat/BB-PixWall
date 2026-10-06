@@ -74,9 +74,12 @@ class MainActivity : ComponentActivity() {
                                 moodWeatherEnabled = false,
                                 sourcePriorityMode =
                                     bb.pix.wall.settings.SourcePriorityMode.PHOTOS_FIRST,
+                                smartCropEnabled = false,
+                                dataSaverEnabled = false,
+                                adaptiveResourceProtectionEnabled = false,
                                 cacheTarget =
                                     requested.cacheTarget
-                                        .coerceIn(4, 8),
+                                        .coerceIn(4, 4),
                             )
 
                         val previous =
