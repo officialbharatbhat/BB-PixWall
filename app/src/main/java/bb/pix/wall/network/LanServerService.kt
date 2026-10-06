@@ -422,208 +422,42 @@ class LanServerService : Service() {
                     )
                 }
 
-            "/api/premium-refresh" ->
-                if (mutationAllowed) {
-                    bb.pix.wall.engine
-                        .PremiumIntelligenceCenter
-                        .refresh(
-                            this,
-                            "web-refresh",
-                        )
-
-                    sendJson(
-                        s,
-                        200,
-                        "{\"ok\":true}",
-                    )
-                } else {
-                    sendJson(
-                        s,
-                        403,
-                        "{\"error\":\"forbidden\"}",
-                    )
-                }
-
-            "/api/reanalyze-current" ->
-                if (mutationAllowed) {
-                    bb.pix.wall.engine
-                        .EngineExecutors
-                        .io {
-                            bb.pix.wall.engine
-                                .PremiumIntelligenceCenter
-                                .reanalyzeCurrent(
-                                    applicationContext
-                                )
-                        }
-
-                    sendJson(
-                        s,
-                        200,
-                        "{\"scheduled\":true}",
-                    )
-                } else {
-                    sendJson(
-                        s,
-                        403,
-                        "{\"error\":\"forbidden\"}",
-                    )
-                }
+            "/api/premium-refresh",
+            "/api/reanalyze-current",
+            "/api/cache-integrity",
+            "/api/premium-self-heal",
+            "/api/reset-source-photos",
+            "/api/reset-source-drive",
+            "/api/export-intelligence",
+            "/api/autonomy-audit" ->
+                sendJson(
+                    s,
+                    410,
+                    "{\"error\":\"disabled-in-lite\"}",
+                )
 
             "/api/rebuild-next" ->
                 if (mutationAllowed) {
+                    WallpaperController.invalidateQueue()
+
                     bb.pix.wall.engine
                         .EngineExecutors
                         .io {
-                            bb.pix.wall.engine
-                                .PremiumIntelligenceCenter
-                                .rebuildNext(
-                                    applicationContext
+                            runCatching {
+                                WallpaperController.ensureNext(
+                                    applicationContext,
+                                    SettingsStore(
+                                        applicationContext
+                                    ).load(),
+                                    allowNetwork = true,
                                 )
+                            }
                         }
 
                     sendJson(
                         s,
                         200,
                         "{\"scheduled\":true}",
-                    )
-                } else {
-                    sendJson(
-                        s,
-                        403,
-                        "{\"error\":\"forbidden\"}",
-                    )
-                }
-
-            "/api/cache-integrity" ->
-                if (mutationAllowed) {
-                    val bad =
-                        bb.pix.wall.engine
-                            .PremiumIntelligenceCenter
-                            .cacheIntegrityAudit(
-                                this
-                            )
-
-                    sendJson(
-                        s,
-                        200,
-                        "{\"quarantined\":$bad}",
-                    )
-                } else {
-                    sendJson(
-                        s,
-                        403,
-                        "{\"error\":\"forbidden\"}",
-                    )
-                }
-
-            "/api/premium-self-heal" ->
-                if (mutationAllowed) {
-                    val result =
-                        bb.pix.wall.engine
-                            .PremiumIntelligenceCenter
-                            .fullRepair(
-                                this
-                            )
-
-                    sendJson(
-                        s,
-                        200,
-                        "{\"result\":${quote(result)}}",
-                    )
-                } else {
-                    sendJson(
-                        s,
-                        403,
-                        "{\"error\":\"forbidden\"}",
-                    )
-                }
-
-            "/api/reset-source-photos" ->
-                if (mutationAllowed) {
-                    bb.pix.wall.engine
-                        .PremiumIntelligenceCenter
-                        .resetSource(
-                            this,
-                            "photos",
-                        )
-
-                    sendJson(
-                        s,
-                        200,
-                        "{\"ok\":true}",
-                    )
-                } else {
-                    sendJson(
-                        s,
-                        403,
-                        "{\"error\":\"forbidden\"}",
-                    )
-                }
-
-            "/api/reset-source-drive" ->
-                if (mutationAllowed) {
-                    bb.pix.wall.engine
-                        .PremiumIntelligenceCenter
-                        .resetSource(
-                            this,
-                            "drive",
-                        )
-
-                    sendJson(
-                        s,
-                        200,
-                        "{\"ok\":true}",
-                    )
-                } else {
-                    sendJson(
-                        s,
-                        403,
-                        "{\"error\":\"forbidden\"}",
-                    )
-                }
-
-            "/api/export-intelligence" ->
-                if (mutationAllowed) {
-                    val file =
-                        bb.pix.wall.engine
-                            .PremiumIntelligenceCenter
-                            .exportReport(
-                                this
-                            )
-
-                    sendJson(
-                        s,
-                        200,
-                        "{\"path\":${quote(file.absolutePath)}}",
-                    )
-                } else {
-                    sendJson(
-                        s,
-                        403,
-                        "{\"error\":\"forbidden\"}",
-                    )
-                }
-
-            "/api/autonomy-audit" ->
-                if (mutationAllowed) {
-                    val report =
-                        bb.pix.wall.engine
-                            .AutonomousIntelligenceEngine
-                            .auditAndRepair(
-                                context = this,
-                                settings =
-                                    SettingsStore(this)
-                                        .load(),
-                                allowNetworkRefill =
-                                    false,
-                            )
-
-                    sendJson(
-                        s,
-                        200,
-                        "{\"grade\":${quote(report.grade)}," +
-                            "\"score\":${report.engineScore}," +
-                            "\"action\":${quote(report.action)}}",
                     )
                 } else {
                     sendJson(
@@ -800,7 +634,7 @@ class LanServerService : Service() {
                 intervalMinutes =
                     form["intervalMinutes"]
                         ?.toIntOrNull()
-                        ?.coerceIn(1, 240)
+                        ?.coerceIn(1, 300)
                         ?: old.intervalMinutes,
 
                 targetMode =
@@ -946,153 +780,30 @@ class LanServerService : Service() {
                         old.backgroundGuardEnabled,
                     ),
 
-                smartCropEnabled =
-                    bool(
-                        "smartCropEnabled",
-                        old.smartCropEnabled,
-                    ),
-
+                smartCropEnabled = false,
                 smartCropTolerancePct =
-                    form["smartCropTolerancePct"]
-                        ?.toFloatOrNull()
-                        ?.coerceIn(0.2f, 5f)
-                        ?: old.smartCropTolerancePct,
-
+                    old.smartCropTolerancePct,
                 perceptualDistance =
-                    form["perceptualDistance"]
-                        ?.toIntOrNull()
-                        ?.coerceIn(0, 24)
-                        ?: old.perceptualDistance,
+                    old.perceptualDistance,
+                leanStorageMode = true,
+                smartPairingEnabled = false,
+                adaptiveResourceProtectionEnabled = false,
+                decisionEngineEnabled = false,
+                sourcePriorityMode =
+                    SourcePriorityMode.PHOTOS_FIRST,
+                cacheTarget =
+                    old.cacheTarget.coerceIn(4, 8),
+                moodEngineEnabled = false,
+                moodAmbientLightEnabled = false,
+                moodTimeEnabled = false,
+                moodDarkModeEnabled = false,
+                moodBatteryContextEnabled = false,
+                moodThermalProtectionEnabled = false,
+                moodWeatherEnabled = false,
+                moodUseDeviceLocation = false,
+                moodOutdoorTemperatureEnabled = false,
+                moodAutoReactEnabled = false,
 
-                leanStorageMode =
-                    bool(
-                        "leanStorageMode",
-                        old.leanStorageMode,
-                    ),
-
-                smartPairingEnabled =
-                    bool(
-                        "smartPairingEnabled",
-                        old.smartPairingEnabled,
-                    ),
-
-                adaptiveResourceProtectionEnabled =
-                    bool(
-                        "adaptiveResourceProtectionEnabled",
-                        old.adaptiveResourceProtectionEnabled,
-                    ),
-
-                decisionEngineEnabled =
-                    bool(
-                        "decisionEngineEnabled",
-                        old.decisionEngineEnabled,
-                    ),
-
-                moodEngineEnabled =
-                    bool(
-                        "moodEngineEnabled",
-                        old.moodEngineEnabled,
-                    ),
-
-                moodAmbientLightEnabled =
-                    bool(
-                        "moodAmbientLightEnabled",
-                        old.moodAmbientLightEnabled,
-                    ),
-
-                moodTimeEnabled =
-                    bool(
-                        "moodTimeEnabled",
-                        old.moodTimeEnabled,
-                    ),
-
-                moodDarkModeEnabled =
-                    bool(
-                        "moodDarkModeEnabled",
-                        old.moodDarkModeEnabled,
-                    ),
-
-                moodBatteryContextEnabled =
-                    bool(
-                        "moodBatteryContextEnabled",
-                        old.moodBatteryContextEnabled,
-                    ),
-
-                moodThermalProtectionEnabled =
-                    bool(
-                        "moodThermalProtectionEnabled",
-                        old.moodThermalProtectionEnabled,
-                    ),
-
-                moodStrength =
-                    form["moodStrength"]
-                        ?.toIntOrNull()
-                        ?.coerceIn(0, 100)
-                        ?: old.moodStrength,
-
-                moodDarkLuxThreshold =
-                    form["moodDarkLuxThreshold"]
-                        ?.toIntOrNull()
-                        ?.coerceIn(1, 200)
-                        ?: old.moodDarkLuxThreshold,
-
-                moodBrightLuxThreshold =
-                    form["moodBrightLuxThreshold"]
-                        ?.toIntOrNull()
-                        ?.coerceIn(100, 10_000)
-                        ?: old.moodBrightLuxThreshold,
-
-                moodWeatherEnabled =
-                    bool(
-                        "moodWeatherEnabled",
-                        old.moodWeatherEnabled,
-                    ),
-
-                moodUseDeviceLocation =
-                    bool(
-                        "moodUseDeviceLocation",
-                        old.moodUseDeviceLocation,
-                    ),
-
-                moodWeatherCity =
-                    form["moodWeatherCity"]
-                        ?: old.moodWeatherCity,
-
-                moodWeatherInfluence =
-                    form["moodWeatherInfluence"]
-                        ?.toIntOrNull()
-                        ?.coerceIn(0, 100)
-                        ?: old.moodWeatherInfluence,
-
-                moodOutdoorTemperatureEnabled =
-                    bool(
-                        "moodOutdoorTemperatureEnabled",
-                        old.moodOutdoorTemperatureEnabled,
-                    ),
-
-                moodColdTemperatureC =
-                    form["moodColdTemperatureC"]
-                        ?.toIntOrNull()
-                        ?.coerceIn(-10, 30)
-                        ?: old.moodColdTemperatureC,
-
-                moodHotTemperatureC =
-                    form["moodHotTemperatureC"]
-                        ?.toIntOrNull()
-                        ?.coerceIn(20, 50)
-                        ?: old.moodHotTemperatureC,
-
-                moodAutoReactEnabled =
-                    bool(
-                        "moodAutoReactEnabled",
-                        old.moodAutoReactEnabled,
-                    ),
-
-                moodAutoReactCooldownMinutes =
-                    form["moodAutoReactCooldownMinutes"]
-                        ?.toIntOrNull()
-                        ?.coerceIn(15, 180)
-                        ?: old.moodAutoReactCooldownMinutes,
             )
 
         store.save(updated)
@@ -1113,13 +824,6 @@ class LanServerService : Service() {
             )
         }
 
-        bb.pix.wall.automation
-            .MoodAutoReactReceiver
-            .schedule(
-                this,
-                updated.moodAutoReactEnabled,
-            )
-
         val blurChanged =
             old.homeBlurEnabled !=
                 updated.homeBlurEnabled ||
@@ -1130,16 +834,13 @@ class LanServerService : Service() {
                 old.lockBlurRadius !=
                 updated.lockBlurRadius
 
-        if (
-            blurChanged &&
-            WallpaperController
-                .blurMasterEnabled(this)
-        ) {
+        if (blurChanged) {
             Thread {
                 WallpaperController
                     .setBlurMasterAndReapply(
                         this,
-                        true,
+                        updated.homeBlurEnabled ||
+                            updated.lockBlurEnabled,
                     )
             }.start()
         }
@@ -1188,41 +889,13 @@ class LanServerService : Service() {
                 .invalidateQueue()
         }
 
-        val weatherChanged =
-            old.moodWeatherEnabled !=
-                updated.moodWeatherEnabled ||
-                old.moodUseDeviceLocation !=
-                updated.moodUseDeviceLocation ||
-                old.moodWeatherCity !=
-                updated.moodWeatherCity
-
-        if (
-            weatherChanged &&
-            updated.moodWeatherEnabled
-        ) {
-            bb.pix.wall.engine
-                .WeatherMoodEngine
-                .forceRefresh(
-                    this,
-                    updated,
-                )
-        }
-
         Thread {
             runCatching {
-                WallpaperController
-                    .purgeBlockedCached(this)
-
-                WallpaperController
-                    .primeCache(
-                        this,
-                        updated,
-                    )
-
                 WallpaperController
                     .ensureNext(
                         this,
                         updated,
+                        allowNetwork = true,
                     )
             }
         }.start()
