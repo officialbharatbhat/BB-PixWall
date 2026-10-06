@@ -51,18 +51,6 @@ object WallpaperSourceEngine {
 
         if (settings.photosAlbumUrl.isNotBlank()) {
                 if (!network) RuntimeStatus.source(context, "photos", "Offline")
-                else if (
-                    !AutonomousIntelligenceEngine.sourceAllowed(
-                        context,
-                        "photos",
-                    )
-                ) {
-                    RuntimeStatus.source(
-                        context,
-                        "photos",
-                        "Circuit open",
-                    )
-                }
                 else if (!sourceBackoffExpired(context, "photos")) RuntimeStatus.source(context, "photos", "Backoff")
                 else {
                     val started = System.currentTimeMillis()
@@ -108,18 +96,6 @@ object WallpaperSourceEngine {
                 // This keeps network and storage churn low for the user's cloud-first setup.
                 if (photosOk) RuntimeStatus.source(context, "drive", "Standby mirror")
                 else if (!network) RuntimeStatus.source(context, "drive", "Offline")
-                else if (
-                    !AutonomousIntelligenceEngine.sourceAllowed(
-                        context,
-                        "drive",
-                    )
-                ) {
-                    RuntimeStatus.source(
-                        context,
-                        "drive",
-                        "Circuit open",
-                    )
-                }
                 else if (!sourceBackoffExpired(context, "drive")) RuntimeStatus.source(context, "drive", "Backoff")
                 else {
                     val started = System.currentTimeMillis()
@@ -183,17 +159,10 @@ object WallpaperSourceEngine {
             .toSortedMap()
             .values
             .flatMap { group ->
-                val base = sortGroup(
+                sortGroup(
                     group,
                     settings.wallpaperOrder,
                     seed,
-                )
-
-                DecisionEngine.rank(
-                    context = context,
-                    settings = settings,
-                    candidates = base,
-                    seed = seed,
                 )
             }
 
@@ -279,14 +248,6 @@ object WallpaperSourceEngine {
                 else -> "Healthy"
             }
         )
-
-        AutonomousIntelligenceEngine
-            .recordSourceSuccess(
-                context = context,
-                source = source,
-                latencyMs = ms,
-                itemCount = count,
-            )
     }
 
     private fun sourceFingerprint(items: List<Candidate>): String {
@@ -315,16 +276,6 @@ object WallpaperSourceEngine {
         RuntimeStatus.setLong(context, "${source}_backoff_until", System.currentTimeMillis() + backoff)
         RuntimeStatus.set(context, "fallback_reason", "$source failed: ${error.message ?: error.javaClass.simpleName}")
         RuntimeStatus.source(context, source, "Failed")
-
-        AutonomousIntelligenceEngine
-            .recordSourceFailure(
-                context = context,
-                source = source,
-                latencyMs = ms,
-                detail =
-                    error.message
-                        ?: error.javaClass.simpleName,
-            )
     }
 
     private fun sourceBackoffExpired(context: Context, source: String): Boolean =
