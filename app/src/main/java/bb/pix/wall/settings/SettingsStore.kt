@@ -130,12 +130,12 @@ class SettingsStore(context: Context) {
             pauseBatterySaver =
                 prefs.getBoolean(
                     "pause_battery_saver",
-                    true,
+                    false,
                 ),
             pauseLowBattery =
                 prefs.getBoolean(
                     "pause_low_battery",
-                    true,
+                    false,
                 ),
             lowBatteryThreshold =
                 prefs.getInt(
@@ -188,7 +188,7 @@ class SettingsStore(context: Context) {
             smartCropEnabled =
                 prefs.getBoolean(
                     "smart_crop_enabled",
-                    true,
+                    false,
                 ),
             smartCropTolerancePct =
                 prefs.getFloat(
@@ -221,7 +221,7 @@ class SettingsStore(context: Context) {
             adaptiveResourceProtectionEnabled =
                 prefs.getBoolean(
                     "adaptive_resource_protection",
-                    true,
+                    false,
                 ),
             moodEngineEnabled =
                 prefs.getBoolean(
