@@ -531,29 +531,28 @@ fun CollapsibleSection(
                     tokens.cardRadius
                 }
             ),
-        color =
-            MaterialTheme.colorScheme
-                .surface
-                .copy(alpha = .92f),
-        border =
-            androidx.compose.foundation
-                .BorderStroke(
-                    width =
-                        tokens.borderWidth,
-                    color =
-                        MaterialTheme.colorScheme
-                            .outline
-                            .copy(
-                                alpha =
-                                    tokens.cardBorderAlpha
-                            ),
-                ),
+        color = Color.Transparent,
+        border = null,
     ) {
         Column {
             Row(
                 modifier =
                     Modifier
                         .fillMaxWidth()
+                        .clip(
+                            RoundedCornerShape(
+                                if (tokens.sharpControls) {
+                                    0.dp
+                                } else {
+                                    tokens.cardRadius
+                                }
+                            )
+                        )
+                        .background(
+                            MaterialTheme.colorScheme
+                                .surface
+                                .copy(alpha = .72f)
+                        )
                         .clickable {
                             expanded =
                                 !expanded
@@ -562,7 +561,7 @@ fun CollapsibleSection(
                             horizontal =
                                 tokens
                                     .contentPadding,
-                            vertical = 9.dp,
+                            vertical = 12.dp,
                         ),
                 verticalAlignment =
                     Alignment.CenterVertically,
@@ -631,13 +630,10 @@ fun CollapsibleSection(
                         Modifier
                             .fillMaxWidth()
                             .padding(
-                                start =
-                                    tokens
-                                        .contentPadding,
-                                end =
-                                    tokens
-                                        .contentPadding,
-                                bottom = 10.dp,
+                                start = 4.dp,
+                                end = 4.dp,
+                                top = 10.dp,
+                                bottom = 4.dp,
                             ),
                     verticalArrangement =
                         Arrangement.spacedBy(
@@ -826,208 +822,164 @@ fun DeveloperIdentityCard(
     val tokens =
         LocalDesignTokens.current
 
-    val accent =
-        themeAccent(theme)
-
-    val gmailColors =
-        listOf(
-            Color(0xFF4285F4),
-            Color(0xFFEA4335),
-            Color(0xFFFBBC05),
-            Color(0xFF34A853),
-        )
-
-    val instagramColors =
-        listOf(
-            Color(0xFF833AB4),
-            Color(0xFFE1306C),
-            Color(0xFFF77737),
-        )
-
-    val githubColors =
-        listOf(
-            MaterialTheme.colorScheme
-                .onSurfaceVariant,
-            MaterialTheme.colorScheme
-                .onSurface,
-        )
-
-    val youtubeColors =
-        listOf(
-            Color(0xFFFF0000),
-            Color(0xFFD90000),
-        )
-
-    val telegramColors =
-        listOf(
-            Color(0xFF229ED9),
-            Color(0xFF55BDEB),
-        )
-
-    Box(
+    Surface(
         modifier =
-            Modifier
-                .fillMaxWidth()
-                .padding(
-                    horizontal = 8.dp,
-                    vertical = 5.dp,
-                )
-    ) {
-        Surface(
-            modifier =
-                Modifier.fillMaxWidth(),
-            shape =
-                RoundedCornerShape(
-                    tokens.cardRadius
-                ),
-            color =
+            Modifier.fillMaxWidth(),
+        shape =
+            RoundedCornerShape(
+                tokens.cardRadius
+            ),
+        color =
+            MaterialTheme.colorScheme
+                .surface
+                .copy(alpha = .94f),
+        border =
+            androidx.compose.foundation.BorderStroke(
+                1.dp,
                 MaterialTheme.colorScheme
-                    .surface
-                    .copy(alpha = .94f),
+                    .outlineVariant
+                    .copy(alpha = .50f),
+            ),
+    ) {
+        Column(
+            modifier =
+                Modifier.padding(
+                    horizontal = 16.dp,
+                    vertical = 16.dp,
+                ),
+            verticalArrangement =
+                Arrangement.spacedBy(10.dp),
         ) {
-            Column(
-                modifier =
-                    Modifier.padding(
-                        horizontal = 12.dp,
-                        vertical = 12.dp,
-                    ),
-                verticalArrangement =
-                    Arrangement.spacedBy(10.dp),
-            ) {
-                Text(
-                    text = "Developer",
-                    style =
-                        MaterialTheme.typography
-                            .labelMedium,
-                    color =
-                        MaterialTheme.colorScheme
-                            .onSurfaceVariant,
-                )
+            Text(
+                text = "DEVELOPER",
+                style =
+                    MaterialTheme.typography
+                        .labelSmall,
+                color =
+                    MaterialTheme.colorScheme
+                        .onSurfaceVariant,
+            )
 
-                OrbitNameBadge(
-                    text = "Bharat Bhat",
-                    theme = theme,
-                    prominent = true,
-                )
+            Text(
+                text = "Bharat Bhat",
+                style =
+                    MaterialTheme.typography
+                        .titleLarge,
+                fontWeight =
+                    FontWeight.SemiBold,
+            )
 
-                BrandDrawableButton(
-                    label =
-                        "bkbhatinfo@gmail.com",
-                    iconRes =
-                        R.drawable.ic_brand_gmail,
-                    colors = gmailColors,
-                    preserveIconColors = true,
-                ) {
+            Text(
+                text = "BB-PixWall",
+                style =
+                    MaterialTheme.typography
+                        .bodySmall,
+                color =
+                    MaterialTheme.colorScheme
+                        .onSurfaceVariant,
+            )
+
+            HorizontalDivider(
+                color =
+                    MaterialTheme.colorScheme
+                        .outlineVariant
+                        .copy(alpha = .45f)
+            )
+
+            OutlinedButton(
+                onClick = {
                     openUri(
                         context,
                         "mailto:bkbhatinfo@gmail.com",
                     )
-                }
+                },
+                modifier =
+                    Modifier.fillMaxWidth(),
+            ) {
+                Icon(
+                    painterResource(
+                        R.drawable.ic_brand_gmail
+                    ),
+                    null,
+                    Modifier.size(18.dp),
+                )
+                Spacer(Modifier.width(8.dp))
+                Text("bkbhatinfo@gmail.com")
+            }
 
-                BrandDrawableButton(
-                    label =
-                        "@officialbharatbhat",
-                    iconRes =
-                        R.drawable.ic_brand_github,
-                    colors = githubColors,
-                ) {
+            OutlinedButton(
+                onClick = {
                     openUri(
                         context,
                         "https://github.com/officialbharatbhat",
                     )
-                }
+                },
+                modifier =
+                    Modifier.fillMaxWidth(),
+            ) {
+                Icon(
+                    painterResource(
+                        R.drawable.ic_brand_github
+                    ),
+                    null,
+                    Modifier.size(18.dp),
+                )
+                Spacer(Modifier.width(8.dp))
+                Text("@officialbharatbhat")
+            }
 
-                Row(
-                    modifier =
-                        Modifier.fillMaxWidth(),
-                    horizontalArrangement =
-                        Arrangement.spacedBy(
-                            6.dp
-                        ),
-                ) {
-                    BrandButton(
-                        label = "YouTube",
-                        icon =
-                            Icons.Outlined
-                                .PlayCircle,
-                        colors =
-                            youtubeColors,
-                        enabled =
-                            youtubeUrl
-                                .isNotBlank(),
-                        modifier =
-                            Modifier.weight(1f),
-                    ) {
+            Row(
+                modifier =
+                    Modifier.fillMaxWidth(),
+                horizontalArrangement =
+                    Arrangement.spacedBy(8.dp),
+            ) {
+                OutlinedButton(
+                    onClick = {
                         openUri(
                             context,
                             youtubeUrl,
                         )
-                    }
+                    },
+                    enabled =
+                        youtubeUrl.isNotBlank(),
+                    modifier =
+                        Modifier.weight(1f),
+                ) {
+                    Text("YouTube")
+                }
 
-                    BrandButton(
-                        label = "Instagram",
-                        icon =
-                            Icons.Outlined
-                                .PhotoCamera,
-                        colors =
-                            instagramColors,
-                        enabled =
-                            instagramUrl
-                                .isNotBlank(),
-                        modifier =
-                            Modifier.weight(1f),
-                    ) {
+                OutlinedButton(
+                    onClick = {
                         openUri(
                             context,
                             instagramUrl,
                         )
-                    }
+                    },
+                    enabled =
+                        instagramUrl.isNotBlank(),
+                    modifier =
+                        Modifier.weight(1f),
+                ) {
+                    Text("Instagram")
+                }
 
-                    BrandButton(
-                        label = "Telegram",
-                        icon =
-                            Icons.Outlined.Send,
-                        colors =
-                            telegramColors,
-                        enabled =
-                            telegramUrl
-                                .isNotBlank(),
-                        modifier =
-                            Modifier.weight(1f),
-                    ) {
+                OutlinedButton(
+                    onClick = {
                         openUri(
                             context,
                             telegramUrl,
                         )
-                    }
+                    },
+                    enabled =
+                        telegramUrl.isNotBlank(),
+                    modifier =
+                        Modifier.weight(1f),
+                ) {
+                    Text("Telegram")
                 }
             }
         }
-
-        OrbitBorder(
-            modifier =
-                Modifier.matchParentSize(),
-            color = accent,
-            radius =
-                tokens.cardRadius,
-            durationMs =
-                when (theme) {
-                    ThemeProfile.CINEMATIC ->
-                        4200
-
-                    ThemeProfile.CYBER ->
-                        1800
-
-                    ThemeProfile.LUXE ->
-                        4600
-
-                    ThemeProfile.SIGNATURE ->
-                        2800
-
-                    ThemeProfile.MATERIAL_PRO ->
-                        3300
-                },
-        )
     }
 }
 
