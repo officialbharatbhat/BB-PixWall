@@ -88,21 +88,6 @@ class WallpaperAutomationService : Service() {
                     return
                 }
 
-                if (
-                    action == Intent.ACTION_SCREEN_ON &&
-                    WallpaperController.hasDeferredHome(
-                        applicationContext
-                    )
-                ) {
-                    normalWorker.execute {
-                        runCatching {
-                            WallpaperController.completeDeferredHome(
-                                applicationContext
-                            )
-                        }
-                    }
-                }
-
                 val matches =
                     when (settings.triggerMode) {
                         TriggerMode.SCREEN_OFF ->
