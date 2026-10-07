@@ -47,7 +47,14 @@ class WallpaperAutomationService : Service() {
     private val screenWorker =
         Executors.newSingleThreadExecutor { runnable ->
             Thread(
-                runnable,
+                {
+                    runCatching {
+                        android.os.Process.setThreadPriority(
+                            android.os.Process.THREAD_PRIORITY_DISPLAY
+                        )
+                    }
+                    runnable.run()
+                },
                 "bbpix-lite-screen",
             ).apply {
                 priority =
@@ -79,6 +86,21 @@ class WallpaperAutomationService : Service() {
 
                 if (!settings.autoChange) {
                     return
+                }
+
+                if (
+                    action == Intent.ACTION_SCREEN_ON &&
+                    WallpaperController.hasDeferredHome(
+                        applicationContext
+                    )
+                ) {
+                    normalWorker.execute {
+                        runCatching {
+                            WallpaperController.completeDeferredHome(
+                                applicationContext
+                            )
+                        }
+                    }
                 }
 
                 val matches =
@@ -203,6 +225,11 @@ class WallpaperAutomationService : Service() {
         EngineExecutors.io {
             runCatching {
                 WallpaperController.primeCache(
+                    applicationContext,
+                    settings,
+                )
+
+                WallpaperController.warmNextBlurCaches(
                     applicationContext,
                     settings,
                 )
@@ -361,13 +388,18 @@ class WallpaperAutomationService : Service() {
         worker.execute {
             try {
                 var changed =
-                    WallpaperController.nextWall(
-                        applicationContext,
-                        allowNetwork = false,
-                        userInitiated = false,
-                        preferLockFirst =
-                            screenOff,
-                    )
+                    if (screenOff) {
+                        WallpaperController.screenOffFastWall(
+                            applicationContext
+                        )
+                    } else {
+                        WallpaperController.nextWall(
+                            applicationContext,
+                            allowNetwork = false,
+                            userInitiated = false,
+                            preferLockFirst = false,
+                        )
+                    }
 
                 if (!changed) {
                     runCatching {
@@ -379,13 +411,18 @@ class WallpaperAutomationService : Service() {
                     }
 
                     changed =
-                        WallpaperController.nextWall(
-                            applicationContext,
-                            allowNetwork = false,
-                            userInitiated = false,
-                            preferLockFirst =
-                                screenOff,
-                        )
+                        if (screenOff) {
+                            WallpaperController.screenOffFastWall(
+                                applicationContext
+                            )
+                        } else {
+                            WallpaperController.nextWall(
+                                applicationContext,
+                                allowNetwork = false,
+                                userInitiated = false,
+                                preferLockFirst = false,
+                            )
+                        }
                 }
 
                 recordTrigger(
