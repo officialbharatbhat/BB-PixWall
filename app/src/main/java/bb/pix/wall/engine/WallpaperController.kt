@@ -2808,6 +2808,116 @@ fun invalidateQueue() =
                 .mapNotNull(::candidateId)
                 .toMutableSet()
 
+        fun imageFiles(dir: File): List<File> =
+            dir.listFiles()
+                .orEmpty()
+                .filter {
+                    it.isFile &&
+                        it.extension.lowercase() in
+                        setOf("jpg", "jpeg", "png", "webp", "avif")
+                }
+                .sortedBy {
+                    it.lastModified()
+                }
+
+        fun deleteWithMeta(file: File) {
+            runCatching {
+                file.delete()
+            }
+            runCatching {
+                File(
+                    file.absolutePath + ".meta"
+                ).delete()
+            }
+        }
+
+        fun moveWithMeta(
+            src: File,
+            dstDir: File,
+        ): Boolean {
+            dstDir.mkdirs()
+
+            val dst =
+                File(
+                    dstDir,
+                    src.name,
+                )
+
+            if (dst.exists()) {
+                return false
+            }
+
+            val srcMeta =
+                File(
+                    src.absolutePath + ".meta"
+                )
+
+            val dstMeta =
+                File(
+                    dst.absolutePath + ".meta"
+                )
+
+            return runCatching {
+                if (!src.renameTo(dst)) {
+                    src.copyTo(
+                        dst,
+                        overwrite = false,
+                    )
+                    src.delete()
+                }
+
+                if (srcMeta.exists()) {
+                    if (!srcMeta.renameTo(dstMeta)) {
+                        srcMeta.copyTo(
+                            dstMeta,
+                            overwrite = false,
+                        )
+                        srcMeta.delete()
+                    }
+                }
+
+                true
+            }.getOrDefault(false)
+        }
+
+        /*
+         * Normalize tiers before deciding whether refill is needed.
+         * Old Lite builds could leave more Warm files than the current
+         * contract. Keep a strict 4 Hot + 8 Warm ready reserve.
+         */
+        while (
+            imageCount(WallpaperFiles.hotCache) <
+                hotTarget &&
+            imageCount(WallpaperFiles.warmCache) > 0
+        ) {
+            val promote =
+                imageFiles(
+                    WallpaperFiles.warmCache
+                ).firstOrNull()
+                    ?: break
+
+            if (
+                !moveWithMeta(
+                    promote,
+                    WallpaperFiles.hotCache,
+                )
+            ) {
+                break
+            }
+        }
+
+        imageFiles(
+            WallpaperFiles.hotCache
+        )
+            .drop(hotTarget)
+            .forEach(::deleteWithMeta)
+
+        imageFiles(
+            WallpaperFiles.warmCache
+        )
+            .drop(warmTarget)
+            .forEach(::deleteWithMeta)
+
         fun totalReady(): Int =
             imageCount(WallpaperFiles.hotCache) +
                 imageCount(WallpaperFiles.warmCache)
