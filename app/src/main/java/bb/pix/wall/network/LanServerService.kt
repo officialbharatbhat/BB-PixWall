@@ -175,14 +175,7 @@ class LanServerService : Service() {
     }
 
     private fun handle(socket: Socket) = socket.use { s ->
-        if (
-            !GlobalRemoteAccess.isAllowedClient(
-                this,
-                s.inetAddress,
-            )
-        ) {
-            return
-        }
+        if (!(s.inetAddress.isSiteLocalAddress || s.inetAddress.isLoopbackAddress)) return
         val host = s.inetAddress.hostAddress ?: "local"
         s.soTimeout = 10_000
         val reader = BufferedReader(InputStreamReader(s.getInputStream(), Charsets.UTF_8))
