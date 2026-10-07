@@ -4,6 +4,11 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Environment
 import android.provider.Settings
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -59,6 +64,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -818,21 +824,67 @@ private fun LiteHeader(
                 )
             }
 
-            Text(
-                RuntimeStatus.get(
-                    LocalContext.current,
-                    "last_pipeline",
-                    "Original-quality fast apply",
-                ),
-                style =
-                    MaterialTheme.typography
-                        .bodySmall,
-                color =
-                    MaterialTheme.colorScheme
-                        .onSurfaceVariant,
-            )
+            CinematicSubtitle()
         }
     }
+}
+
+
+@Composable
+private fun CinematicSubtitle() {
+    val transition =
+        rememberInfiniteTransition(
+            label = "lite_subtitle_slide"
+        )
+
+    val offset by
+        transition.animateFloat(
+            initialValue = -4f,
+            targetValue = 4f,
+            animationSpec =
+                infiniteRepeatable(
+                    animation =
+                        tween(
+                            durationMillis = 1800,
+                        ),
+                    repeatMode =
+                        RepeatMode.Reverse,
+                ),
+            label = "lite_subtitle_offset",
+        )
+
+    val alpha by
+        transition.animateFloat(
+            initialValue = .72f,
+            targetValue = 1f,
+            animationSpec =
+                infiniteRepeatable(
+                    animation =
+                        tween(
+                            durationMillis = 1800,
+                        ),
+                    repeatMode =
+                        RepeatMode.Reverse,
+                ),
+            label = "lite_subtitle_alpha",
+        )
+
+    Text(
+        text = "Automatic Wallpaper Changer",
+        modifier =
+            Modifier.graphicsLayer {
+                translationX = offset
+                this.alpha = alpha
+            },
+        style =
+            MaterialTheme.typography
+                .labelLarge,
+        fontWeight =
+            FontWeight.Bold,
+        color =
+            MaterialTheme.colorScheme
+                .onSurfaceVariant,
+    )
 }
 
 @Composable
