@@ -1,11 +1,6 @@
 name: Release BB-PixWall Lite v1.0.0
 
 on:
-  push:
-    branches:
-      - lite-edition
-    paths:
-      - ".github/workflows/release-lite-v1.0.0.yml"
   workflow_dispatch:
 
 permissions:
@@ -16,45 +11,8 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout Lite branch
-        uses: actions/checkout@v4
-        with:
-          ref: lite-edition
-          fetch-depth: 0
-
-      - name: Set up JDK
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "21"
-
-      - name: Make Gradle executable
-        run: chmod +x gradlew
-
-      - name: Build Lite APK
+      - name: Stop
         run: |
-          ./gradlew :app:assembleDebug --no-daemon \
-            -PBBPIX_STORE_FILE=/tmp/unused.jks \
-            -PBBPIX_STORE_PASSWORD=unused \
-            -PBBPIX_KEY_ALIAS=unused \
-            -PBBPIX_KEY_PASSWORD=unused
-
-      - name: Prepare release assets
-        run: |
-          cp app/build/outputs/apk/debug/app-debug.apk BB-PixWall-Lite-v1.0.0.apk
-          sha256sum BB-PixWall-Lite-v1.0.0.apk > BB-PixWall-Lite-v1.0.0.apk.sha256
-
-      - name: Create GitHub release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          if gh release view lite-v1.0.0 >/dev/null 2>&1; then
-            gh release delete lite-v1.0.0 --yes --cleanup-tag
-          fi
-
-          gh release create lite-v1.0.0 \
-            BB-PixWall-Lite-v1.0.0.apk \
-            BB-PixWall-Lite-v1.0.0.apk.sha256 \
-            --target "$GITHUB_SHA" \
-            --title "BB-PixWall Lite v1.0.0" \
-            --notes-file RELEASE_NOTES_LITE_1.0.0.md
+          echo "Automatic release disabled."
+          echo "BB-PixWall Lite must be published from the signed, minified release APK."
+          exit 1
