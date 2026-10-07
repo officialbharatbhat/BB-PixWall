@@ -455,6 +455,41 @@ fun invalidateQueue() =
 
         purgeBlockedCached(context)
 
+        fun metaId(file: File): String? =
+            runCatching {
+                val meta =
+                    File(file.absolutePath + ".meta")
+
+                if (!meta.exists()) {
+                    return@runCatching null
+                }
+
+                Properties().apply {
+                    meta.inputStream().use(::load)
+                }.getProperty("id")
+                    ?.trim()
+                    ?.takeIf(String::isNotEmpty)
+            }.getOrNull()
+
+        fun splitPairDistinct(): Boolean {
+            if (
+                !WallpaperFiles.nextHome.exists() ||
+                !WallpaperFiles.nextLock.exists()
+            ) {
+                return false
+            }
+
+            val homeId =
+                metaId(WallpaperFiles.nextHome)
+
+            val lockId =
+                metaId(WallpaperFiles.nextLock)
+
+            return homeId == null ||
+                lockId == null ||
+                homeId != lockId
+        }
+
         fun targetReady(): Boolean =
             when (settings.targetMode) {
                 WallpaperTargetMode.HOME ->
@@ -468,16 +503,26 @@ fun invalidateQueue() =
                         WallpaperFiles.nextLock.exists()
 
                 WallpaperTargetMode.BOTH_DIFFERENT ->
-                    WallpaperFiles.nextHome.exists() &&
-                        WallpaperFiles.nextLock.exists()
+                    splitPairDistinct()
             }
+
+        if (
+            settings.targetMode ==
+                WallpaperTargetMode.BOTH_DIFFERENT &&
+            WallpaperFiles.nextHome.exists() &&
+            WallpaperFiles.nextLock.exists() &&
+            !splitPairDistinct()
+        ) {
+            WallpaperFiles.nextLock.delete()
+            File(
+                WallpaperFiles.nextLock.absolutePath +
+                    ".meta"
+            ).delete()
+        }
 
         if (targetReady()) {
             return true
         }
-
-
-
 
         val cached =
             cacheImageFiles()
@@ -505,6 +550,7 @@ fun invalidateQueue() =
 
         fun consumeInto(
             dest: File,
+            excludedId: String? = null,
         ): Boolean {
             if (dest.exists()) {
                 return true
@@ -521,6 +567,17 @@ fun invalidateQueue() =
                     continue
                 }
 
+                val srcId =
+                    metaId(src)
+
+                if (
+                    excludedId != null &&
+                    srcId != null &&
+                    srcId == excludedId
+                ) {
+                    continue
+                }
+
                 val srcMeta =
                     File(
                         src.absolutePath +
@@ -533,72 +590,64 @@ fun invalidateQueue() =
                             ".meta"
                     )
 
-                return try {
-                    dest.parentFile?.mkdirs()
+                val ok =
+                    try {
+                        dest.parentFile?.mkdirs()
 
-                    dest.delete()
-                    destMeta.delete()
-
-                    /*
-                     * Same filesystem in normal BB-PixWall layout,
-                     * so rename is nearly instant. Copy fallback keeps
-                     * this safe if Android/storage decides to be dramatic.
-                     */
-                    val moved =
-                        src.renameTo(dest)
-
-                    if (!moved) {
-                        src.copyTo(
-                            dest,
-                            overwrite = true,
-                        )
-                        src.delete()
-                    }
-
-                    if (srcMeta.exists()) {
-                        val metaMoved =
-                            srcMeta.renameTo(
-                                destMeta
-                            )
-
-                        if (!metaMoved) {
-                            srcMeta.copyTo(
-                                destMeta,
-                                overwrite = true,
-                            )
-                            srcMeta.delete()
-                        }
-                    }
-
-                    if (
-                        dest.exists() &&
-                        dest.length() > 0L
-                    ) {
-                        log(
-                            "NEXT cache-fast ${src.parentFile?.name} -> ${dest.name}"
-                        )
-
-                        RuntimeStatus.set(
-                            context,
-                            "next_cache_fastpath",
-                            "${src.parentFile?.name ?: "cache"} -> ${dest.name}",
-                        )
-
-                        true
-                    } else {
                         dest.delete()
                         destMeta.delete()
+
+                        val moved =
+                            src.renameTo(dest)
+
+                        if (!moved) {
+                            src.copyTo(
+                                dest,
+                                overwrite = true,
+                            )
+                            src.delete()
+                        }
+
+                        if (srcMeta.exists()) {
+                            val metaMoved =
+                                srcMeta.renameTo(
+                                    destMeta
+                                )
+
+                            if (!metaMoved) {
+                                srcMeta.copyTo(
+                                    destMeta,
+                                    overwrite = true,
+                                )
+                                srcMeta.delete()
+                            }
+                        }
+
+                        dest.exists() &&
+                            dest.length() > 0L
+                    } catch (t: Throwable) {
+                        dest.delete()
+                        destMeta.delete()
+
+                        log(
+                            "NEXT cache-fast failed ${src.name}: ${t.message}"
+                        )
+
                         false
                     }
-                } catch (t: Throwable) {
-                    dest.delete()
-                    destMeta.delete()
 
+                if (ok) {
                     log(
-                        "NEXT cache-fast failed ${src.name}: ${t.message}"
+                        "NEXT cache-fast ${src.parentFile?.name} -> ${dest.name}"
                     )
 
-                    false
+                    RuntimeStatus.set(
+                        context,
+                        "next_cache_fastpath",
+                        "${src.parentFile?.name ?: "cache"} -> ${dest.name}",
+                    )
+
+                    return true
                 }
             }
 
@@ -638,11 +687,17 @@ fun invalidateQueue() =
                     )
                 }
 
+                val homeId =
+                    metaId(
+                        WallpaperFiles.nextHome
+                    )
+
                 if (
                     !WallpaperFiles.nextLock.exists()
                 ) {
                     consumeInto(
-                        WallpaperFiles.nextLock
+                        WallpaperFiles.nextLock,
+                        excludedId = homeId,
                     )
                 }
             }
@@ -658,30 +713,6 @@ fun invalidateQueue() =
         )
 
         return ready
-    }
-
-    private fun deferredPrefs(
-        context: Context,
-    ) =
-        context.getSharedPreferences(
-            "bb_pixwall_lite_deferred",
-            Context.MODE_PRIVATE,
-        )
-
-    fun hasDeferredHome(
-        context: Context,
-    ): Boolean =
-        deferredPrefs(context)
-            .getBoolean("pending_home", false)
-
-    private fun setDeferredHome(
-        context: Context,
-        pending: Boolean,
-    ) {
-        deferredPrefs(context)
-            .edit()
-            .putBoolean("pending_home", pending)
-            .apply()
     }
 
     fun warmNextBlurCaches(
@@ -732,36 +763,85 @@ fun invalidateQueue() =
         }
     }
 
+    private fun deletePreparedPair() {
+        WallpaperFiles.nextHome.delete()
+        File(
+            WallpaperFiles.nextHome.absolutePath +
+                ".meta"
+        ).delete()
+
+        WallpaperFiles.nextLock.delete()
+        File(
+            WallpaperFiles.nextLock.absolutePath +
+                ".meta"
+        ).delete()
+    }
+
+    private fun stageNextPairFromLocalCache(
+        context: Context,
+        settings: AppSettings,
+    ) {
+        runCatching {
+            prepareNextFromPredictiveCache(
+                context,
+                settings,
+            )
+        }
+
+        RuntimeStatus.set(
+            context,
+            "next_state",
+            if (
+                when (settings.targetMode) {
+                    WallpaperTargetMode.HOME ->
+                        WallpaperFiles.nextHome.exists()
+
+                    WallpaperTargetMode.LOCK ->
+                        WallpaperFiles.nextLock.exists()
+
+                    WallpaperTargetMode.BOTH_SAME ->
+                        WallpaperFiles.nextHome.exists() ||
+                            WallpaperFiles.nextLock.exists()
+
+                    WallpaperTargetMode.BOTH_DIFFERENT ->
+                        WallpaperFiles.nextHome.exists() &&
+                            WallpaperFiles.nextLock.exists()
+                }
+            ) {
+                "Ready"
+            } else {
+                "Preparing"
+            },
+        )
+    }
+
     fun screenOffFastWall(
         context: Context,
     ): Boolean {
         val settings =
             SettingsStore(context).load()
 
+        val now =
+            System.currentTimeMillis()
+
         if (
-            settings.targetMode != WallpaperTargetMode.BOTH_SAME &&
-            settings.targetMode != WallpaperTargetMode.BOTH_DIFFERENT &&
-            settings.targetMode != WallpaperTargetMode.LOCK
+            now - lastApplyStartedAt <
+            350L
         ) {
-            return nextWall(
-                context = context,
-                allowNetwork = false,
-                userInitiated = false,
-                preferLockFirst = true,
+            return false
+        }
+
+        if (
+            !applying.compareAndSet(
+                false,
+                true,
             )
-        }
-
-        val now = System.currentTimeMillis()
-
-        if (now - lastApplyStartedAt < 350L) {
+        ) {
             return false
         }
 
-        if (!applying.compareAndSet(false, true)) {
-            return false
-        }
-
-        lastApplyStartedAt = now
+        lastApplyStartedAt =
+            now
 
         return try {
             if (
@@ -777,50 +857,160 @@ fun invalidateQueue() =
                 )
             }
 
-            val lockSrc =
-                when (settings.targetMode) {
-                    WallpaperTargetMode.BOTH_SAME ->
-                        WallpaperFiles.nextHome
-                            .takeIf(File::exists)
-                            ?: WallpaperFiles.nextLock
-
-                    WallpaperTargetMode.BOTH_DIFFERENT,
-                    WallpaperTargetMode.LOCK ->
-                        WallpaperFiles.nextLock
-
-                    else ->
-                        WallpaperFiles.nextLock
-                }
-
-            if (!lockSrc.exists()) {
-                return false
-            }
-
             val wm =
-                WallpaperManager.getInstance(context)
+                WallpaperManager.getInstance(
+                    context
+                )
 
             val master =
                 blurMasterEnabled(context)
 
-            val changed =
-                applyFile(
+            fun applyPrepared(
+                src: File,
+                flag: Int,
+                blurEnabled: Boolean,
+                radius: Int,
+                current: File,
+            ): Boolean {
+                if (!src.exists()) {
+                    return false
+                }
+
+                return applyFile(
                     context = context,
                     settings = settings,
                     wm = wm,
-                    src = lockSrc,
-                    flag = WallpaperManager.FLAG_LOCK,
+                    src = src,
+                    flag = flag,
                     doBlur =
                         master &&
-                            settings.lockBlurEnabled,
-                    radius =
-                        settings.lockBlurRadius,
-                    current =
-                        WallpaperFiles.currentLock,
+                            blurEnabled,
+                    radius = radius,
+                    current = current,
                 )
+            }
+
+            val changed =
+                when (settings.targetMode) {
+                    WallpaperTargetMode.HOME ->
+                        applyPrepared(
+                            src =
+                                WallpaperFiles.nextHome,
+                            flag =
+                                WallpaperManager.FLAG_SYSTEM,
+                            blurEnabled =
+                                settings.homeBlurEnabled,
+                            radius =
+                                settings.homeBlurRadius,
+                            current =
+                                WallpaperFiles.currentHome,
+                        )
+
+                    WallpaperTargetMode.LOCK ->
+                        applyPrepared(
+                            src =
+                                WallpaperFiles.nextLock,
+                            flag =
+                                WallpaperManager.FLAG_LOCK,
+                            blurEnabled =
+                                settings.lockBlurEnabled,
+                            radius =
+                                settings.lockBlurRadius,
+                            current =
+                                WallpaperFiles.currentLock,
+                        )
+
+                    WallpaperTargetMode.BOTH_SAME -> {
+                        val src =
+                            WallpaperFiles.nextHome
+                                .takeIf(File::exists)
+                                ?: WallpaperFiles.nextLock
+
+                        if (!src.exists()) {
+                            false
+                        } else {
+                            /*
+                             * One WallpaperManager transaction updates both
+                             * targets. This is faster and avoids two SystemUI
+                             * wallpaper refreshes for the same source.
+                             */
+                            val bothApplied =
+                                applyFile(
+                                    context = context,
+                                    settings = settings,
+                                    wm = wm,
+                                    src = src,
+                                    flag =
+                                        WallpaperManager.FLAG_SYSTEM or
+                                            WallpaperManager.FLAG_LOCK,
+                                    doBlur = false,
+                                    radius = 0,
+                                    current =
+                                        WallpaperFiles.currentHome,
+                                )
+
+                            if (bothApplied) {
+                                src.copyTo(
+                                    WallpaperFiles.currentLock,
+                                    overwrite = true,
+                                )
+
+                                copyWallpaperMeta(
+                                    src,
+                                    WallpaperFiles.currentLock,
+                                )
+                            }
+
+                            bothApplied
+                        }
+                    }
+
+                    WallpaperTargetMode.BOTH_DIFFERENT -> {
+                        /*
+                         * Lock commits first, then Home immediately while
+                         * the display is still off. No wake-time deferred
+                         * wallpaper work.
+                         */
+                        val lockChanged =
+                            applyPrepared(
+                                src =
+                                    WallpaperFiles.nextLock,
+                                flag =
+                                    WallpaperManager.FLAG_LOCK,
+                                blurEnabled =
+                                    settings.lockBlurEnabled,
+                                radius =
+                                    settings.lockBlurRadius,
+                                current =
+                                    WallpaperFiles.currentLock,
+                            )
+
+                        val homeChanged =
+                            applyPrepared(
+                                src =
+                                    WallpaperFiles.nextHome,
+                                flag =
+                                    WallpaperManager.FLAG_SYSTEM,
+                                blurEnabled =
+                                    settings.homeBlurEnabled,
+                                radius =
+                                    settings.homeBlurRadius,
+                                current =
+                                    WallpaperFiles.currentHome,
+                            )
+
+                        lockChanged ||
+                            homeChanged
+                    }
+                }
 
             if (!changed) {
                 return false
             }
+
+            recordSeenForCurrent(
+                settings.targetMode
+            )
 
             RuntimeStatus.setLong(
                 context,
@@ -828,145 +1018,40 @@ fun invalidateQueue() =
                 System.currentTimeMillis(),
             )
 
-            if (settings.targetMode == WallpaperTargetMode.LOCK) {
-                recordSeenForCurrent(
-                    WallpaperTargetMode.LOCK
-                )
+            deletePreparedPair()
 
-                WallpaperFiles.nextLock.delete()
-                File(
-                    WallpaperFiles.nextLock.absolutePath +
-                        ".meta"
-                ).delete()
-
-                EngineExecutors.io {
-                    runCatching {
-                        WallpaperLibrary.captureCurrent(
-                            WallpaperTargetMode.LOCK
-                        )
-                    }
-
-                    runCatching {
-                        primeCache(
-                            context,
-                            SettingsStore(context).load(),
-                        )
-                    }
-                }
-            } else {
-                setDeferredHome(
-                    context,
-                    true,
-                )
-            }
+            /*
+             * Re-stage from already-local Hot/Warm cache synchronously.
+             * This is rename/copy only; no cloud access. Web therefore
+             * gets Next Home/Lock immediately after an apply.
+             */
+            stageNextPairFromLocalCache(
+                context,
+                settings,
+            )
 
             RuntimeStatus.set(
                 context,
                 "screen_off_fast",
-                "lock committed",
+                "targets committed • next staged",
             )
 
-            true
-        } finally {
-            applying.set(false)
-        }
-    }
-
-    fun completeDeferredHome(
-        context: Context,
-    ): Boolean {
-        if (!hasDeferredHome(context)) {
-            return false
-        }
-
-        val settings =
-            SettingsStore(context).load()
-
-        if (
-            settings.targetMode != WallpaperTargetMode.BOTH_SAME &&
-            settings.targetMode != WallpaperTargetMode.BOTH_DIFFERENT
-        ) {
-            setDeferredHome(context, false)
-            return false
-        }
-
-        val src =
-            WallpaperFiles.nextHome
-
-        if (!src.exists()) {
-            setDeferredHome(context, false)
-            return false
-        }
-
-        if (!applying.compareAndSet(false, true)) {
-            return false
-        }
-
-        return try {
-            val wm =
-                WallpaperManager.getInstance(context)
-
-            val master =
-                blurMasterEnabled(context)
-
-            val changed =
-                applyFile(
-                    context = context,
-                    settings = settings,
-                    wm = wm,
-                    src = src,
-                    flag = WallpaperManager.FLAG_SYSTEM,
-                    doBlur =
-                        master &&
-                            settings.homeBlurEnabled,
-                    radius =
-                        settings.homeBlurRadius,
-                    current =
-                        WallpaperFiles.currentHome,
-                )
-
-            if (changed) {
-                setDeferredHome(context, false)
-
-                recordSeenForCurrent(
-                    settings.targetMode
-                )
-
-                WallpaperFiles.nextHome.delete()
-                File(
-                    WallpaperFiles.nextHome.absolutePath +
-                        ".meta"
-                ).delete()
-
-                WallpaperFiles.nextLock.delete()
-                File(
-                    WallpaperFiles.nextLock.absolutePath +
-                        ".meta"
-                ).delete()
-
-                EngineExecutors.io {
-                    runCatching {
-                        WallpaperLibrary.captureCurrent(
-                            settings.targetMode
-                        )
-                    }
-
-                    runCatching {
-                        primeCache(
-                            context,
-                            SettingsStore(context).load(),
-                        )
-                    }
+            EngineExecutors.io {
+                runCatching {
+                    WallpaperLibrary.captureCurrent(
+                        settings.targetMode
+                    )
                 }
 
-                RuntimeStatus.set(
-                    context,
-                    "screen_off_fast",
-                    "home deferred complete",
-                )
+                runCatching {
+                    primeCache(
+                        context,
+                        SettingsStore(context).load(),
+                    )
+                }
             }
 
-            changed
+            true
         } finally {
             applying.set(false)
         }
@@ -1304,6 +1389,12 @@ fun invalidateQueue() =
                     WallpaperFiles.nextLock.absolutePath +
                         ".meta"
                 ).delete()
+
+                stageNextPairFromLocalCache(
+                    context,
+                    settings,
+                )
+
                 RuntimeStatus.success(context, "Wallpaper applied: ${settings.targetMode.label}")
 
                 RuntimeStatus.set(
