@@ -1002,10 +1002,15 @@ fun invalidateQueue() =
                 RuntimeStatus.setLong(context, "last_change", System.currentTimeMillis())
                 EngineExecutors.io {
                     runCatching {
-                        ensureNext(
+                        WallpaperLibrary.captureCurrent(
+                            settings.targetMode
+                        )
+                    }
+
+                    runCatching {
+                        primeCache(
                             context,
                             SettingsStore(context).load(),
-                            allowNetwork = true,
                         )
                     }
                 }
@@ -2756,13 +2761,147 @@ fun invalidateQueue() =
         }
     }
 
+    private fun primeLiteHotCache(
+        context: Context,
+        settings: AppSettings,
+    ) {
+        val target = 4
+
+        fun candidateId(file: File): String? =
+            runCatching {
+                val meta =
+                    File(
+                        file.absolutePath + ".meta"
+                    )
+
+                if (!meta.exists()) {
+                    return@runCatching null
+                }
+
+                Properties().apply {
+                    meta.inputStream().use(::load)
+                }.getProperty("id")
+                    ?.trim()
+                    ?.takeIf(String::isNotEmpty)
+            }.getOrNull()
+
+        val existingIds =
+            (
+                cacheImageFiles() +
+                    listOf(
+                        WallpaperFiles.currentHome,
+                        WallpaperFiles.currentLock,
+                        WallpaperFiles.nextHome,
+                        WallpaperFiles.nextLock,
+                    )
+            )
+                .filter(File::exists)
+                .mapNotNull(::candidateId)
+                .toMutableSet()
+
+        val currentCount =
+            cacheImageFiles().size
+
+        if (currentCount >= target) {
+            RuntimeStatus.set(
+                context,
+                "cache_progress",
+                "Lite hot cache • $currentCount/$target",
+            )
+            return
+        }
+
+        val candidates =
+            WallpaperSourceEngine.collect(
+                context,
+                settings,
+                allowNetwork = true,
+            )
+
+        var added = 0
+
+        for (candidate in candidates) {
+            if (
+                cacheImageFiles().size >= target ||
+                candidate.id in existingIds ||
+                WallpaperLibrary.isBlocked(candidate.id)
+            ) {
+                continue
+            }
+
+            val staging =
+                File(
+                    WallpaperFiles.backup,
+                    ".lite_hot_${System.nanoTime()}.part",
+                )
+
+            try {
+                fetchTo(
+                    candidate,
+                    staging,
+                )
+
+                validateImage(staging)
+
+                val ext =
+                    detectImageExtension(staging)
+
+                val dest =
+                    File(
+                        WallpaperFiles.hotCache,
+                        "lite_${System.currentTimeMillis()}_$added.$ext",
+                    )
+
+                dest.parentFile?.mkdirs()
+
+                if (!staging.renameTo(dest)) {
+                    staging.copyTo(
+                        dest,
+                        overwrite = true,
+                    )
+                    staging.delete()
+                }
+
+                writeMeta(
+                    dest,
+                    candidate.source,
+                    candidate.id,
+                )
+
+                existingIds += candidate.id
+                added++
+
+                RuntimeStatus.set(
+                    context,
+                    "cache_progress",
+                    "Lite hot cache • ${cacheImageFiles().size}/$target",
+                )
+            } catch (t: Throwable) {
+                staging.delete()
+                File(
+                    staging.absolutePath + ".meta"
+                ).delete()
+
+                log(
+                    "LITE CACHE skip ${candidate.id}: ${t.message}"
+                )
+            }
+        }
+
+        RuntimeStatus.set(
+            context,
+            "cache_refill_result",
+            "Lite hot cache • ${cacheImageFiles().size}/$target • added=$added",
+        )
+    }
+
     private fun primeCacheImpl(context: Context, settings: AppSettings) {
         requireStorage()
 
         RuntimeStatus.set(
             context,
             "cache_progress",
-            "Lite • preparing next pair only",
+            "Lite • preparing next + hot cache",
         )
 
         runCatching {
@@ -2770,6 +2909,17 @@ fun invalidateQueue() =
                 context,
                 settings,
                 allowNetwork = true,
+            )
+        }
+
+        runCatching {
+            primeLiteHotCache(
+                context,
+                settings,
+            )
+        }.onFailure {
+            log(
+                "LITE CACHE refill failed: ${it.message}"
             )
         }
 
@@ -5120,7 +5270,7 @@ fun invalidateQueue() =
          * destructive downscale.
          */
         val maxWorkingPixels =
-            6_000_000L
+            3_500_000L
 
         val scale =
             if (
