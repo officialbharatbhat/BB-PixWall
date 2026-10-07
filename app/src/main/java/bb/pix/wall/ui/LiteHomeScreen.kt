@@ -4,6 +4,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Environment
 import android.provider.Settings
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -61,6 +62,7 @@ import bb.pix.wall.settings.EngineMode
 import bb.pix.wall.settings.TriggerMode
 import bb.pix.wall.settings.WallpaperOrder
 import bb.pix.wall.settings.WallpaperTargetMode
+import bb.pix.wall.ui.theme.ThemeProfile
 import kotlin.math.roundToInt
 
 @Composable
@@ -607,7 +609,13 @@ fun LiteHomeScreen(
                 }
             }
 
-            LiteDeveloperCard()
+            DeveloperIdentityCard(
+                context = context,
+                theme = ThemeProfile.MATERIAL_PRO,
+                youtubeUrl = "https://www.youtube.com/@sloverbofficial",
+                instagramUrl = "https://www.instagram.com/officialbharatbhat",
+                telegramUrl = "https://t.me/BharatBhat",
+            )
 
             Spacer(Modifier.height(8.dp))
         }
@@ -642,14 +650,54 @@ private fun LiteHeader(
                     modifier =
                         Modifier.weight(1f)
                 ) {
-                    Text(
-                        "BB-PixWall Lite",
-                        style =
-                            MaterialTheme.typography
-                                .headlineSmall,
-                        fontWeight =
-                            FontWeight.Bold,
-                    )
+                    Row(
+                        verticalAlignment =
+                            Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            "BB-PixWall",
+                            style =
+                                MaterialTheme.typography
+                                    .headlineSmall,
+                            fontWeight =
+                                FontWeight.Bold,
+                        )
+
+                        Spacer(
+                            Modifier.size(7.dp)
+                        )
+
+                        androidx.compose.material3.Surface(
+                            shape =
+                                RoundedCornerShape(8.dp),
+                            color =
+                                Color(0xFF00F5FF)
+                                    .copy(alpha = .10f),
+                            border =
+                                BorderStroke(
+                                    1.dp,
+                                    Color(0xFF00F5FF)
+                                        .copy(alpha = .75f),
+                                ),
+                        ) {
+                            Text(
+                                "(Lite)",
+                                modifier =
+                                    Modifier.padding(
+                                        horizontal = 7.dp,
+                                        vertical = 3.dp,
+                                    ),
+                                style =
+                                    MaterialTheme.typography
+                                        .labelSmall,
+                                fontWeight =
+                                    FontWeight.Bold,
+                                color =
+                                    Color(0xFF72F8FF),
+                            )
+                        }
+                    }
+
                     Text(
                         "V${BuildConfig.VERSION_NAME.substringBeforeLast(".0")}",
                         style =
@@ -661,29 +709,29 @@ private fun LiteHeader(
                     )
                 }
 
-                if (
-                    settings.engineMode ==
-                    EngineMode.STANDARD
-                ) {
-                    AssistChip(
-                        onClick =
-                            onRequestAdvanced,
-                        label = {
-                            Text(
-                                "Standard • without root"
-                            )
+                AssistChip(
+                    onClick =
+                        if (
+                            settings.engineMode ==
+                            EngineMode.STANDARD
+                        ) {
+                            onRequestAdvanced
+                        } else {
+                            {}
                         },
-                    )
-                } else {
-                    AssistChip(
-                        onClick = {},
-                        label = {
-                            Text(
-                                "Advanced • root enabled"
-                            )
-                        },
-                    )
-                }
+                    label = {
+                        Text(
+                            if (
+                                settings.engineMode ==
+                                EngineMode.ADVANCED
+                            ) {
+                                "Advance"
+                            } else {
+                                "Standard"
+                            }
+                        )
+                    },
+                )
             }
 
             Text(
@@ -858,124 +906,4 @@ private fun LiteBlurControl(
         },
         valueRange = 1f..100f,
     )
-}
-
-@Composable
-private fun LiteDeveloperCard() {
-    val context = LocalContext.current
-
-    Card(
-        modifier =
-            Modifier.fillMaxWidth(),
-    ) {
-        Column(
-            modifier =
-                Modifier.padding(12.dp),
-            verticalArrangement =
-                Arrangement.spacedBy(8.dp),
-        ) {
-            Text(
-                "Developer Information",
-                style =
-                    MaterialTheme.typography
-                        .titleMedium,
-                fontWeight =
-                    FontWeight.SemiBold,
-            )
-
-            Text(
-                "Bharat Bhat",
-                fontWeight =
-                    FontWeight.Medium,
-            )
-
-            Text(
-                "bkbhatinfo@gmail.com",
-                modifier =
-                    Modifier.clickable {
-                        runCatching {
-                            context.startActivity(
-                                Intent(
-                                    Intent.ACTION_SENDTO,
-                                    Uri.parse(
-                                        "mailto:bkbhatinfo@gmail.com"
-                                    ),
-                                )
-                            )
-                        }
-                    },
-                color =
-                    MaterialTheme.colorScheme.primary,
-            )
-
-            Row(
-                modifier =
-                    Modifier.fillMaxWidth(),
-                horizontalArrangement =
-                    Arrangement.spacedBy(8.dp),
-            ) {
-                LiteLink(
-                    "Instagram",
-                    "https://www.instagram.com/officialbharatbhat",
-                    Modifier.weight(1f),
-                )
-                LiteLink(
-                    "Telegram",
-                    "https://t.me/BharatBhat",
-                    Modifier.weight(1f),
-                )
-            }
-
-            Row(
-                modifier =
-                    Modifier.fillMaxWidth(),
-                horizontalArrangement =
-                    Arrangement.spacedBy(8.dp),
-            ) {
-                LiteLink(
-                    "Facebook",
-                    "https://www.facebook.com/officialbharatbhat",
-                    Modifier.weight(1f),
-                )
-                LiteLink(
-                    "YouTube",
-                    "https://www.youtube.com/@sloverbofficial",
-                    Modifier.weight(1f),
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun LiteLink(
-    label: String,
-    url: String,
-    modifier: Modifier = Modifier,
-) {
-    val context = LocalContext.current
-
-    OutlinedButton(
-        onClick = {
-            runCatching {
-                context.startActivity(
-                    Intent(
-                        Intent.ACTION_VIEW,
-                        Uri.parse(url),
-                    )
-                )
-            }
-        },
-        modifier = modifier,
-        contentPadding =
-            PaddingValues(
-                horizontal = 8.dp,
-                vertical = 6.dp,
-            ),
-    ) {
-        Text(
-            label,
-            maxLines = 1,
-        )
-    }
 }
