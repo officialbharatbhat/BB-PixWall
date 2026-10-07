@@ -2765,8 +2765,8 @@ fun invalidateQueue() =
         context: Context,
         settings: AppSettings,
     ) {
-        val hotTarget = 4
-        val warmTarget = 8
+        val hotTarget = 32
+        val warmTarget = 64
         val totalTarget = hotTarget + warmTarget
 
         fun imageCount(dir: File): Int =
@@ -2883,7 +2883,7 @@ fun invalidateQueue() =
         /*
          * Normalize tiers before deciding whether refill is needed.
          * Old Lite builds could leave more Warm files than the current
-         * contract. Keep a strict 4 Hot + 8 Warm ready reserve.
+         * contract. Keep a strict 32 Hot + 64 Warm ready reserve.
          */
         while (
             imageCount(WallpaperFiles.hotCache) <
@@ -2926,8 +2926,8 @@ fun invalidateQueue() =
             RuntimeStatus.set(
                 context,
                 "cache_progress",
-                "Lite ready • hot=${imageCount(WallpaperFiles.hotCache)}" +
-                    " • warm=${imageCount(WallpaperFiles.warmCache)}",
+                "Lite ready • hot=${imageCount(WallpaperFiles.hotCache)}/32" +
+                    " • warm=${imageCount(WallpaperFiles.warmCache)}/64",
             )
             return
         }
