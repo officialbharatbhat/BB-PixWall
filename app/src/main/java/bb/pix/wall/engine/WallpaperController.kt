@@ -660,6 +660,318 @@ fun invalidateQueue() =
         return ready
     }
 
+    private fun deferredPrefs(
+        context: Context,
+    ) =
+        context.getSharedPreferences(
+            "bb_pixwall_lite_deferred",
+            Context.MODE_PRIVATE,
+        )
+
+    fun hasDeferredHome(
+        context: Context,
+    ): Boolean =
+        deferredPrefs(context)
+            .getBoolean("pending_home", false)
+
+    private fun setDeferredHome(
+        context: Context,
+        pending: Boolean,
+    ) {
+        deferredPrefs(context)
+            .edit()
+            .putBoolean("pending_home", pending)
+            .apply()
+    }
+
+    fun warmNextBlurCaches(
+        context: Context,
+        settings: AppSettings =
+            SettingsStore(context).load(),
+    ) {
+        if (!blurMasterEnabled(context)) return
+
+        val homeSrc =
+            WallpaperFiles.nextHome
+
+        val lockSrc =
+            when (settings.targetMode) {
+                WallpaperTargetMode.BOTH_SAME ->
+                    WallpaperFiles.nextHome
+                        .takeIf(File::exists)
+                        ?: WallpaperFiles.nextLock
+
+                else ->
+                    WallpaperFiles.nextLock
+            }
+
+        if (
+            settings.homeBlurEnabled &&
+            settings.homeBlurRadius > 0 &&
+            homeSrc.exists()
+        ) {
+            runCatching {
+                prepareBlurCache(
+                    homeSrc,
+                    settings.homeBlurRadius,
+                )
+            }
+        }
+
+        if (
+            settings.lockBlurEnabled &&
+            settings.lockBlurRadius > 0 &&
+            lockSrc.exists()
+        ) {
+            runCatching {
+                prepareBlurCache(
+                    lockSrc,
+                    settings.lockBlurRadius,
+                )
+            }
+        }
+    }
+
+    fun screenOffFastWall(
+        context: Context,
+    ): Boolean {
+        val settings =
+            SettingsStore(context).load()
+
+        if (
+            settings.targetMode != WallpaperTargetMode.BOTH_SAME &&
+            settings.targetMode != WallpaperTargetMode.BOTH_DIFFERENT &&
+            settings.targetMode != WallpaperTargetMode.LOCK
+        ) {
+            return nextWall(
+                context = context,
+                allowNetwork = false,
+                userInitiated = false,
+                preferLockFirst = true,
+            )
+        }
+
+        val now = System.currentTimeMillis()
+
+        if (now - lastApplyStartedAt < 350L) {
+            return false
+        }
+
+        if (!applying.compareAndSet(false, true)) {
+            return false
+        }
+
+        lastApplyStartedAt = now
+
+        return try {
+            if (
+                !prepareNextFromPredictiveCache(
+                    context,
+                    settings,
+                )
+            ) {
+                ensureNext(
+                    context,
+                    settings,
+                    allowNetwork = false,
+                )
+            }
+
+            val lockSrc =
+                when (settings.targetMode) {
+                    WallpaperTargetMode.BOTH_SAME ->
+                        WallpaperFiles.nextHome
+                            .takeIf(File::exists)
+                            ?: WallpaperFiles.nextLock
+
+                    WallpaperTargetMode.BOTH_DIFFERENT,
+                    WallpaperTargetMode.LOCK ->
+                        WallpaperFiles.nextLock
+
+                    else ->
+                        WallpaperFiles.nextLock
+                }
+
+            if (!lockSrc.exists()) {
+                return false
+            }
+
+            val wm =
+                WallpaperManager.getInstance(context)
+
+            val master =
+                blurMasterEnabled(context)
+
+            val changed =
+                applyFile(
+                    context = context,
+                    settings = settings,
+                    wm = wm,
+                    src = lockSrc,
+                    flag = WallpaperManager.FLAG_LOCK,
+                    doBlur =
+                        master &&
+                            settings.lockBlurEnabled,
+                    radius =
+                        settings.lockBlurRadius,
+                    current =
+                        WallpaperFiles.currentLock,
+                )
+
+            if (!changed) {
+                return false
+            }
+
+            RuntimeStatus.setLong(
+                context,
+                "last_change",
+                System.currentTimeMillis(),
+            )
+
+            if (settings.targetMode == WallpaperTargetMode.LOCK) {
+                recordSeenForCurrent(
+                    WallpaperTargetMode.LOCK
+                )
+
+                WallpaperFiles.nextLock.delete()
+                File(
+                    WallpaperFiles.nextLock.absolutePath +
+                        ".meta"
+                ).delete()
+
+                EngineExecutors.io {
+                    runCatching {
+                        WallpaperLibrary.captureCurrent(
+                            WallpaperTargetMode.LOCK
+                        )
+                    }
+
+                    runCatching {
+                        primeCache(
+                            context,
+                            SettingsStore(context).load(),
+                        )
+                    }
+                }
+            } else {
+                setDeferredHome(
+                    context,
+                    true,
+                )
+            }
+
+            RuntimeStatus.set(
+                context,
+                "screen_off_fast",
+                "lock committed",
+            )
+
+            true
+        } finally {
+            applying.set(false)
+        }
+    }
+
+    fun completeDeferredHome(
+        context: Context,
+    ): Boolean {
+        if (!hasDeferredHome(context)) {
+            return false
+        }
+
+        val settings =
+            SettingsStore(context).load()
+
+        if (
+            settings.targetMode != WallpaperTargetMode.BOTH_SAME &&
+            settings.targetMode != WallpaperTargetMode.BOTH_DIFFERENT
+        ) {
+            setDeferredHome(context, false)
+            return false
+        }
+
+        val src =
+            WallpaperFiles.nextHome
+
+        if (!src.exists()) {
+            setDeferredHome(context, false)
+            return false
+        }
+
+        if (!applying.compareAndSet(false, true)) {
+            return false
+        }
+
+        return try {
+            val wm =
+                WallpaperManager.getInstance(context)
+
+            val master =
+                blurMasterEnabled(context)
+
+            val changed =
+                applyFile(
+                    context = context,
+                    settings = settings,
+                    wm = wm,
+                    src = src,
+                    flag = WallpaperManager.FLAG_SYSTEM,
+                    doBlur =
+                        master &&
+                            settings.homeBlurEnabled,
+                    radius =
+                        settings.homeBlurRadius,
+                    current =
+                        WallpaperFiles.currentHome,
+                )
+
+            if (changed) {
+                setDeferredHome(context, false)
+
+                recordSeenForCurrent(
+                    settings.targetMode
+                )
+
+                WallpaperFiles.nextHome.delete()
+                File(
+                    WallpaperFiles.nextHome.absolutePath +
+                        ".meta"
+                ).delete()
+
+                WallpaperFiles.nextLock.delete()
+                File(
+                    WallpaperFiles.nextLock.absolutePath +
+                        ".meta"
+                ).delete()
+
+                EngineExecutors.io {
+                    runCatching {
+                        WallpaperLibrary.captureCurrent(
+                            settings.targetMode
+                        )
+                    }
+
+                    runCatching {
+                        primeCache(
+                            context,
+                            SettingsStore(context).load(),
+                        )
+                    }
+                }
+
+                RuntimeStatus.set(
+                    context,
+                    "screen_off_fast",
+                    "home deferred complete",
+                )
+            }
+
+            changed
+        } finally {
+            applying.set(false)
+        }
+    }
+
     fun nextWall(
         context: Context,
         allowNetwork: Boolean = true,
