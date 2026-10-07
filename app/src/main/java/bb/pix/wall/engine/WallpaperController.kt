@@ -2761,18 +2761,27 @@ fun invalidateQueue() =
         }
     }
 
-    private fun primeLiteHotCache(
+    private fun primeLiteReadyCache(
         context: Context,
         settings: AppSettings,
     ) {
-        val target = 4
+        val hotTarget = 4
+        val warmTarget = 8
+        val totalTarget = hotTarget + warmTarget
+
+        fun imageCount(dir: File): Int =
+            dir.listFiles()
+                .orEmpty()
+                .count {
+                    it.isFile &&
+                        it.extension.lowercase() in
+                        setOf("jpg", "jpeg", "png", "webp", "avif")
+                }
 
         fun candidateId(file: File): String? =
             runCatching {
                 val meta =
-                    File(
-                        file.absolutePath + ".meta"
-                    )
+                    File(file.absolutePath + ".meta")
 
                 if (!meta.exists()) {
                     return@runCatching null
@@ -2799,14 +2808,16 @@ fun invalidateQueue() =
                 .mapNotNull(::candidateId)
                 .toMutableSet()
 
-        val currentCount =
-            cacheImageFiles().size
+        fun totalReady(): Int =
+            imageCount(WallpaperFiles.hotCache) +
+                imageCount(WallpaperFiles.warmCache)
 
-        if (currentCount >= target) {
+        if (totalReady() >= totalTarget) {
             RuntimeStatus.set(
                 context,
                 "cache_progress",
-                "Lite hot cache • $currentCount/$target",
+                "Lite ready • hot=${imageCount(WallpaperFiles.hotCache)}" +
+                    " • warm=${imageCount(WallpaperFiles.warmCache)}",
             )
             return
         }
@@ -2822,7 +2833,7 @@ fun invalidateQueue() =
 
         for (candidate in candidates) {
             if (
-                cacheImageFiles().size >= target ||
+                totalReady() >= totalTarget ||
                 candidate.id in existingIds ||
                 WallpaperLibrary.isBlocked(candidate.id)
             ) {
@@ -2832,27 +2843,33 @@ fun invalidateQueue() =
             val staging =
                 File(
                     WallpaperFiles.backup,
-                    ".lite_hot_${System.nanoTime()}.part",
+                    ".lite_ready_${System.nanoTime()}.part",
                 )
 
             try {
-                fetchTo(
-                    candidate,
-                    staging,
-                )
-
+                fetchTo(candidate, staging)
                 validateImage(staging)
 
                 val ext =
                     detectImageExtension(staging)
 
+                val hotCount =
+                    imageCount(WallpaperFiles.hotCache)
+
+                val targetDir =
+                    if (hotCount < hotTarget) {
+                        WallpaperFiles.hotCache
+                    } else {
+                        WallpaperFiles.warmCache
+                    }
+
                 val dest =
                     File(
-                        WallpaperFiles.hotCache,
+                        targetDir,
                         "lite_${System.currentTimeMillis()}_$added.$ext",
                     )
 
-                dest.parentFile?.mkdirs()
+                targetDir.mkdirs()
 
                 if (!staging.renameTo(dest)) {
                     staging.copyTo(
@@ -2874,13 +2891,12 @@ fun invalidateQueue() =
                 RuntimeStatus.set(
                     context,
                     "cache_progress",
-                    "Lite hot cache • ${cacheImageFiles().size}/$target",
+                    "Lite ready • hot=${imageCount(WallpaperFiles.hotCache)}/$hotTarget" +
+                        " • warm=${imageCount(WallpaperFiles.warmCache)}/$warmTarget",
                 )
             } catch (t: Throwable) {
                 staging.delete()
-                File(
-                    staging.absolutePath + ".meta"
-                ).delete()
+                File(staging.absolutePath + ".meta").delete()
 
                 log(
                     "LITE CACHE skip ${candidate.id}: ${t.message}"
@@ -2891,7 +2907,9 @@ fun invalidateQueue() =
         RuntimeStatus.set(
             context,
             "cache_refill_result",
-            "Lite hot cache • ${cacheImageFiles().size}/$target • added=$added",
+            "Lite ready • hot=${imageCount(WallpaperFiles.hotCache)}/$hotTarget" +
+                " • warm=${imageCount(WallpaperFiles.warmCache)}/$warmTarget" +
+                " • added=$added",
         )
     }
 
@@ -2901,7 +2919,7 @@ fun invalidateQueue() =
         RuntimeStatus.set(
             context,
             "cache_progress",
-            "Lite • preparing next + hot cache",
+            "Lite • preparing next + ready cache",
         )
 
         runCatching {
@@ -2913,7 +2931,7 @@ fun invalidateQueue() =
         }
 
         runCatching {
-            primeLiteHotCache(
+            primeLiteReadyCache(
                 context,
                 settings,
             )
