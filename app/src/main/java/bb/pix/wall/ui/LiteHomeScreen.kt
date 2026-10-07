@@ -681,7 +681,7 @@ private fun LiteHeader(
                                 ),
                         ) {
                             Text(
-                                "(Lite)",
+                                "Lite",
                                 modifier =
                                     Modifier.padding(
                                         horizontal = 7.dp,
