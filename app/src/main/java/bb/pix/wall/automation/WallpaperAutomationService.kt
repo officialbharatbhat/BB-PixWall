@@ -202,10 +202,9 @@ class WallpaperAutomationService : Service() {
 
         EngineExecutors.io {
             runCatching {
-                WallpaperController.ensureNext(
+                WallpaperController.primeCache(
                     applicationContext,
                     settings,
-                    allowNetwork = true,
                 )
             }
         }
