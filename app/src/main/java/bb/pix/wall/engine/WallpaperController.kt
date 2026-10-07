@@ -928,11 +928,16 @@ fun invalidateQueue() =
 
                         if (!src.exists()) {
                             false
-                        } else {
+                        } else if (
+                            !master ||
+                            (
+                                !settings.homeBlurEnabled &&
+                                !settings.lockBlurEnabled
+                            )
+                        ) {
                             /*
-                             * One WallpaperManager transaction updates both
-                             * targets. This is faster and avoids two SystemUI
-                             * wallpaper refreshes for the same source.
+                             * Blur OFF: one exact original-stream commit
+                             * updates both targets. No resize/recompress.
                              */
                             val bothApplied =
                                 applyFile(
@@ -962,6 +967,39 @@ fun invalidateQueue() =
                             }
 
                             bothApplied
+                        } else {
+                            /*
+                             * Blur settings can differ per target, so keep
+                             * target-specific rendering when blur is active.
+                             */
+                            val lockChanged =
+                                applyPrepared(
+                                    src = src,
+                                    flag =
+                                        WallpaperManager.FLAG_LOCK,
+                                    blurEnabled =
+                                        settings.lockBlurEnabled,
+                                    radius =
+                                        settings.lockBlurRadius,
+                                    current =
+                                        WallpaperFiles.currentLock,
+                                )
+
+                            val homeChanged =
+                                applyPrepared(
+                                    src = src,
+                                    flag =
+                                        WallpaperManager.FLAG_SYSTEM,
+                                    blurEnabled =
+                                        settings.homeBlurEnabled,
+                                    radius =
+                                        settings.homeBlurRadius,
+                                    current =
+                                        WallpaperFiles.currentHome,
+                                )
+
+                            lockChanged ||
+                                homeChanged
                         }
                     }
 
