@@ -49,18 +49,29 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.ui.text.input.ImeAction
 import bb.pix.wall.BuildConfig
 import bb.pix.wall.R
 import bb.pix.wall.engine.RuntimeStatus
 import bb.pix.wall.engine.WallpaperFiles
+import bb.pix.wall.network.LanInfo
 import bb.pix.wall.settings.AppSettings
 import bb.pix.wall.settings.AppearanceMode
 import bb.pix.wall.settings.EngineMode
@@ -69,15 +80,20 @@ import bb.pix.wall.settings.WallpaperOrder
 import bb.pix.wall.settings.WallpaperTargetMode
 import bb.pix.wall.ui.theme.ThemeProfile
 import kotlin.math.roundToInt
+import kotlinx.coroutines.delay
 
 @Composable
 fun LiteHomeScreen(
     settings: AppSettings,
+    refreshKey: Int,
     onSettingsChange: (AppSettings) -> Unit,
     onRequestAdvanced: () -> Unit,
 ) {
     val context = LocalContext.current
-    val storageGranted = Environment.isExternalStorageManager()
+    val storageGranted =
+        remember(refreshKey) {
+            Environment.isExternalStorageManager()
+        }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -103,7 +119,8 @@ fun LiteHomeScreen(
             ) {
                 LiteSourceField(
                     label = "Google Photos",
-                    helper = "Primary source",
+                    sourceKey = "photos",
+                    noun = "photos",
                     value = settings.photosAlbumUrl,
                     onValueChange = {
                         onSettingsChange(
@@ -116,7 +133,8 @@ fun LiteHomeScreen(
 
                 LiteSourceField(
                     label = "Google Drive",
-                    helper = "Mirror / fallback",
+                    sourceKey = "drive",
+                    noun = "files",
                     value = settings.driveFolderUrl,
                     onValueChange = {
                         onSettingsChange(
@@ -526,9 +544,43 @@ fun LiteHomeScreen(
                     )
                 },
             ) {
+                val ip =
+                    remember(refreshKey, settings.lanEnabled) {
+                        LanInfo.localIpv4()
+                    }
+
+                var portDraft by
+                    remember(settings.lanPort) {
+                        mutableStateOf(
+                            settings.lanPort.toString()
+                        )
+                    }
+
+                fun commitPort() {
+                    val port =
+                        portDraft.toIntOrNull()
+                            ?.coerceIn(1024, 65535)
+                            ?: settings.lanPort
+
+                    portDraft =
+                        port.toString()
+
+                    if (port != settings.lanPort) {
+                        onSettingsChange(
+                            settings.copy(
+                                lanPort = port
+                            )
+                        )
+                    }
+                }
+
                 Text(
                     if (settings.lanEnabled) {
-                        "Remote service enabled • port ${settings.lanPort}"
+                        if (ip == "Unavailable") {
+                            "IP unavailable • port ${settings.lanPort}"
+                        } else {
+                            "http://$ip:${settings.lanPort}"
+                        }
                     } else {
                         "Remote service off"
                     },
@@ -538,6 +590,39 @@ fun LiteHomeScreen(
                     color =
                         MaterialTheme.colorScheme
                             .onSurfaceVariant,
+                )
+
+                OutlinedTextField(
+                    value = portDraft,
+                    onValueChange = { raw ->
+                        portDraft =
+                            raw.filter(Char::isDigit)
+                                .take(5)
+                    },
+                    label = {
+                        Text("Port")
+                    },
+                    singleLine = true,
+                    keyboardOptions =
+                        KeyboardOptions(
+                            keyboardType =
+                                KeyboardType.Number,
+                            imeAction =
+                                ImeAction.Done,
+                        ),
+                    keyboardActions =
+                        KeyboardActions(
+                            onDone = {
+                                commitPort()
+                            }
+                        ),
+                    modifier =
+                        Modifier
+                            .onFocusChanged {
+                                if (!it.isFocused) {
+                                    commitPort()
+                                }
+                            },
                 )
             }
 
@@ -819,14 +904,15 @@ private fun LiteChoice(
                 maxLines = 1,
             )
         },
-        modifier = modifier,
+        modifier = Modifier,
     )
 }
 
 @Composable
 private fun LiteSourceField(
     label: String,
-    helper: String,
+    sourceKey: String,
+    noun: String,
     value: String,
     onValueChange: (String) -> Unit,
 ) {
@@ -839,10 +925,105 @@ private fun LiteSourceField(
             Text(label)
         },
         supportingText = {
-            Text(helper)
+            LiteSourceHealth(
+                sourceKey = sourceKey,
+                noun = noun,
+            )
         },
         singleLine = true,
     )
+}
+
+@Composable
+private fun LiteSourceHealth(
+    sourceKey: String,
+    noun: String,
+) {
+    val context =
+        LocalContext.current
+
+    var pulse by
+        remember {
+            mutableIntStateOf(0)
+        }
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(2_000L)
+            pulse++
+        }
+    }
+
+    val health =
+        RuntimeStatus.get(
+            context,
+            "source_$sourceKey",
+            "Waiting",
+        )
+
+    val count =
+        RuntimeStatus.get(
+            context,
+            "${sourceKey}_last_count",
+            "",
+        )
+
+    val latency =
+        RuntimeStatus.getLong(
+            context,
+            "${sourceKey}_last_latency_ms",
+            0L,
+        )
+
+    val speed =
+        when {
+            latency <= 0L -> ""
+            latency < 1_500L -> "Fast"
+            latency < 4_500L -> "Normal"
+            else -> "Slow"
+        }
+
+    Text(
+        buildString {
+            append(health)
+
+            if (count.isNotBlank()) {
+                append(" • ")
+                append(count)
+                append(' ')
+                append(noun)
+            }
+
+            if (latency > 0L) {
+                append(" • ")
+                append(
+                    if (latency < 1_000L) {
+                        "${latency}ms"
+                    } else {
+                        String.format(
+                            java.util.Locale.US,
+                            "%.1fs",
+                            latency / 1000.0,
+                        )
+                    }
+                )
+
+                if (speed.isNotBlank()) {
+                    append(" • ")
+                    append(speed)
+                }
+            }
+        },
+        style =
+            MaterialTheme.typography
+                .labelSmall,
+        color =
+            MaterialTheme.colorScheme
+                .onSurfaceVariant,
+    )
+
+    @Suppress("UNUSED_VARIABLE")
+    val keepPulseObserved = pulse
 }
 
 @Composable
