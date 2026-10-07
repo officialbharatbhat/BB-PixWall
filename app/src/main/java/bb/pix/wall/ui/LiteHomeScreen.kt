@@ -51,9 +51,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import bb.pix.wall.BuildConfig
+import bb.pix.wall.R
 import bb.pix.wall.engine.RuntimeStatus
 import bb.pix.wall.engine.WallpaperFiles
 import bb.pix.wall.settings.AppSettings
@@ -609,13 +611,7 @@ fun LiteHomeScreen(
                 }
             }
 
-            DeveloperIdentityCard(
-                context = context,
-                theme = ThemeProfile.MATERIAL_PRO,
-                youtubeUrl = "https://www.youtube.com/@sloverbofficial",
-                instagramUrl = "https://www.instagram.com/officialbharatbhat",
-                telegramUrl = "https://t.me/BharatBhat",
-            )
+            LiteDeveloperIdentityCard()
 
             Spacer(Modifier.height(8.dp))
         }
@@ -907,3 +903,131 @@ private fun LiteBlurControl(
         valueRange = 1f..100f,
     )
 }
+
+@Composable
+private fun LiteDeveloperIdentityCard() {
+    val context = LocalContext.current
+
+    fun open(uri: String) {
+        runCatching {
+            context.startActivity(
+                Intent(
+                    Intent.ACTION_VIEW,
+                    Uri.parse(uri),
+                )
+            )
+        }
+    }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text(
+                "Developer",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+
+            Text(
+                "Bharat Bhat",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+            )
+
+            OutlinedButton(
+                onClick = {
+                    runCatching {
+                        context.startActivity(
+                            Intent(
+                                Intent.ACTION_SENDTO,
+                                Uri.parse("mailto:bkbhatinfo@gmail.com"),
+                            )
+                        )
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                androidx.compose.foundation.Image(
+                    painter = painterResource(R.drawable.ic_brand_gmail),
+                    contentDescription = null,
+                    modifier = Modifier.size(20.dp),
+                )
+                Spacer(Modifier.size(8.dp))
+                Text("bkbhatinfo@gmail.com")
+            }
+
+            OutlinedButton(
+                onClick = {
+                    open("https://github.com/officialbharatbhat")
+                },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Icon(
+                    painter = painterResource(R.drawable.ic_brand_github),
+                    contentDescription = null,
+                    modifier = Modifier.size(20.dp),
+                )
+                Spacer(Modifier.size(8.dp))
+                Text("@officialbharatbhat")
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                OutlinedButton(
+                    onClick = {
+                        open("https://www.youtube.com/@sloverbofficial")
+                    },
+                    modifier = Modifier.weight(1f),
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
+                ) {
+                    Icon(
+                        Icons.Outlined.PlayCircle,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Spacer(Modifier.size(5.dp))
+                    Text("YouTube", maxLines = 1)
+                }
+
+                OutlinedButton(
+                    onClick = {
+                        open("https://www.instagram.com/officialbharatbhat")
+                    },
+                    modifier = Modifier.weight(1f),
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
+                ) {
+                    Icon(
+                        Icons.Outlined.PhotoCamera,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Spacer(Modifier.size(5.dp))
+                    Text("Instagram", maxLines = 1)
+                }
+
+                OutlinedButton(
+                    onClick = {
+                        open("https://t.me/BharatBhat")
+                    },
+                    modifier = Modifier.weight(1f),
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
+                ) {
+                    Icon(
+                        Icons.Outlined.Send,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Spacer(Modifier.size(5.dp))
+                    Text("Telegram", maxLines = 1)
+                }
+            }
+        }
+    }
+}
+
