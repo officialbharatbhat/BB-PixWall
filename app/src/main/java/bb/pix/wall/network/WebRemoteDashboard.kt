@@ -768,6 +768,8 @@ const settingIds=[
 
 let dirty=false;
 let loading=false;
+let liveStamp='';
+let livePolling=false;
 
 function text(id,v){
   const e=document.getElementById(id);
@@ -825,6 +827,38 @@ function refreshImages(){
   document.getElementById('imgCurrentLock').src='/img/current-lock?t='+t;
   document.getElementById('imgNextHome').src='/img/next-home?t='+t;
   document.getElementById('imgNextLock').src='/img/next-lock?t='+t;
+}
+
+async function pollLive(){
+  if(livePolling||document.hidden)return;
+  livePolling=true;
+  try{
+    const r=await fetch('/api/live-stamp',{
+      cache:'no-store'
+    });
+
+    if(!r.ok)return;
+
+    const x=await r.json();
+    const stamp=String(x.stamp||'');
+
+    if(!liveStamp){
+      liveStamp=stamp;
+      return;
+    }
+
+    if(stamp!==liveStamp){
+      liveStamp=stamp;
+
+      refreshImages();
+      load(false);
+      loadHistory();
+    }
+  }catch(_){
+    // LAN can briefly disappear during Wi-Fi transitions.
+  }finally{
+    livePolling=false;
+  }
 }
 
 async function postForm(path,obj){
@@ -1166,9 +1200,17 @@ load(true);
 loadLogs();
 loadHistory();
 refreshImages();
+pollLive();
 
-setInterval(()=>load(false),2500);
-setInterval(loadHistory,15000);
+setInterval(pollLive,500);
+setInterval(()=>load(false),10000);
+setInterval(loadHistory,30000);
+
+document.addEventListener('visibilitychange',()=>{
+  if(!document.hidden){
+    pollLive();
+  }
+});
 </script>
 
 </body>
