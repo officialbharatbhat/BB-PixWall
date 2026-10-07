@@ -364,20 +364,15 @@ pre{
 <div class="shell">
 
 <header>
-  <h1>BB-PixWall Lite</h1>
+  <h1>BB-PixWall <span style="color:var(--accent);font-size:.62em">Lite</span></h1>
   <div class="spacer"></div>
   <span class="chip" id="modeChip">Standard</span>
   <span class="chip good" id="lanChip">LAN</span>
 </header>
 
 <div class="hero">
-  <div class="mood-title" id="heroMood">
-    Waiting for Mood Engine
-  </div>
-  <div class="muted" id="heroMoodSummary">
-    Environment profile will appear here.
-  </div>
-
+  <div class="mood-title">BB-PixWall Lite Remote</div>
+  <div class="muted">Google Photos primary • Drive mirror • Local optional</div>
   <div class="hero-grid" style="margin-top:14px">
     <div class="metric">
       <small>Active source</small>
@@ -388,12 +383,12 @@ pre{
       <strong id="offlineReady">0</strong>
     </div>
     <div class="metric">
-      <small>Cache</small>
-      <strong id="cacheMetric">0</strong>
+      <small>Last pipeline</small>
+      <strong id="lastPipelineHero">Original stream</strong>
     </div>
     <div class="metric">
-      <small>Resource policy</small>
-      <strong id="resourcePolicy">-</strong>
+      <small>Last trigger</small>
+      <strong id="lastTriggerHero">-</strong>
     </div>
   </div>
 </div>
@@ -472,21 +467,7 @@ pre{
     <label class="title">Google Drive public mirror</label>
     <input id="driveFolderUrl" type="text">
   </div>
-
-  <div class="field">
-    <label class="title">Source priority</label>
-    <select id="sourcePriorityMode">
-      ${
-            options(
-                SourcePriorityMode.entries.map {
-                    it.name to it.label
-                }
-            )
-        }
-    </select>
-  </div>
-
-  <div class="actions">
+<div class="actions">
     <button class="secondary" onclick="act('/api/test-sources')">
       Test sources
     </button>
@@ -502,582 +483,31 @@ pre{
     <select id="wallpaperOrder">
       ${
             options(
-                WallpaperOrder.entries.map {
+                listOf(
+                    WallpaperOrder.A_Z,
+                    WallpaperOrder.SIZE_LOW_HIGH,
+                    WallpaperOrder.SIZE_HIGH_LOW,
+                    WallpaperOrder.RANDOM_SHUFFLE,
+                    WallpaperOrder.SURPRISE,
+                ).map {
                     it.name to it.label
                 }
             )
         }
     </select>
   </div>
-
-  <label class="toggle">
-    <div>
-      <b>Decision Engine</b>
-      <div class="help">Smart ranking for Random Shuffle / Surprise.</div>
-    </div>
-    <input id="decisionEngineEnabled" type="checkbox">
-  </label>
 </div>
 </details>
 
-<details>
-<summary>Network & cache</summary>
-<div class="section">
-  <div class="two">
-    <label class="toggle"><div><b>Data Saver</b></div><input id="dataSaverEnabled" type="checkbox"></label>
-    <label class="toggle"><div><b>Wi-Fi only</b></div><input id="wifiOnly" type="checkbox"></label>
-    <label class="toggle"><div><b>Allow mobile data</b></div><input id="mobileDataAllowed" type="checkbox"></label>
-    <label class="toggle"><div><b>Lean storage</b></div><input id="leanStorageMode" type="checkbox"></label>
-    <label class="toggle"><div><b>Smart Home/Lock pairing</b></div><input id="smartPairingEnabled" type="checkbox"></label>
-    <label class="toggle"><div><b>Adaptive Resource Protection</b></div><input id="adaptiveResourceProtectionEnabled" type="checkbox"></label>
-  </div>
 
-  <div class="two">
-    <div class="field">
-      <label class="title">Prefetch target</label>
-      <input id="cacheTarget" type="number" min="4" max="36">
-    </div>
-    <div class="field">
-      <label class="title">Cache cap MB</label>
-      <input id="cacheMaxMb" type="number" min="128" max="2048" step="64">
-    </div>
-    <div class="field">
-      <label class="title">Low storage reserve MB</label>
-      <input id="lowStorageReserveMb" type="number" min="256" max="8192">
-    </div>
-  </div>
 
-  <div class="three">
-    <div class="metric"><small>Cache pools</small><strong id="cacheBreakdown">-</strong></div>
-    <div class="metric"><small>Cycle</small><strong id="cycleProgress">-</strong></div>
-    <div class="metric"><small>Blocked purge</small><strong id="blockedCachePurge">0</strong></div>
-  </div>
 
-  <div class="actions" style="margin-top:12px">
-    <button class="secondary" onclick="act('/api/prepare')">Prepare / Cache</button>
-    <button class="secondary" onclick="act('/api/purge-blocked')">Purge blocked</button>
-    <button class="danger" onclick="act('/api/cache-clear')">Clear Cache</button>
-  </div>
-</div>
-</details>
 
-<details open>
-<summary>Mood Engine</summary>
-<div class="section">
 
-  <label class="toggle">
-    <div><b>Adaptive Mood Wallpapers</b></div>
-    <input id="moodEngineEnabled" type="checkbox">
-  </label>
 
-  <div class="subcard">
-    <div class="help">Current Mood</div>
-    <div class="mood-title" id="moodProfileLabel">Waiting</div>
-    <div class="muted" id="moodProfileSummary">Waiting</div>
-    <p class="status" id="adaptiveMoodContext">Waiting</p>
 
-    <div class="two">
-      <div class="metric"><small>Last influence</small><strong id="moodLastFactors">-</strong></div>
-      <div class="metric"><small>Auto-react</small><strong id="moodAutoReactStatus">-</strong></div>
-    </div>
-  </div>
 
-  <label class="toggle">
-    <div>
-      <b>Auto-react to environment</b>
-      <div class="help">Cached wallpaper only, cooldown protected.</div>
-    </div>
-    <input id="moodAutoReactEnabled" type="checkbox">
-  </label>
 
-  <div class="field">
-    <label class="title">Auto-react cooldown</label>
-    <input id="moodAutoReactCooldownMinutes" type="range" min="15" max="180" step="15">
-    <div class="help"><span id="moodAutoReactCooldownMinutesVal">60</span> min</div>
-  </div>
-
-  <label class="toggle">
-    <div><b>Ambient Light</b></div>
-    <input id="moodAmbientLightEnabled" type="checkbox">
-  </label>
-
-  <div class="two">
-    <div class="field">
-      <label class="title">Dark room ≤ lux</label>
-      <input id="moodDarkLuxThreshold" type="number" min="1" max="200">
-    </div>
-    <div class="field">
-      <label class="title">Bright environment ≥ lux</label>
-      <input id="moodBrightLuxThreshold" type="number" min="100" max="10000">
-    </div>
-  </div>
-
-  <div class="three">
-    <div class="metric"><small>Lux</small><strong id="ambientLux">-</strong></div>
-    <div class="metric"><small>Day phase</small><strong id="dayPhase">-</strong></div>
-    <div class="metric"><small>Thermal</small><strong id="thermalStatus">-</strong></div>
-  </div>
-
-  <div class="two">
-    <label class="toggle"><div><b>Time Mood</b></div><input id="moodTimeEnabled" type="checkbox"></label>
-    <label class="toggle"><div><b>Dark Mode Sync</b></div><input id="moodDarkModeEnabled" type="checkbox"></label>
-    <label class="toggle"><div><b>Battery Context</b></div><input id="moodBatteryContextEnabled" type="checkbox"></label>
-    <label class="toggle"><div><b>Thermal Protection</b></div><input id="moodThermalProtectionEnabled" type="checkbox"></label>
-  </div>
-
-  <div class="field">
-    <label class="title">Mood strength</label>
-    <input id="moodStrength" type="range" min="0" max="100" step="5">
-    <div class="help"><span id="moodStrengthVal">60</span>%</div>
-  </div>
-
-  <div class="subcard">
-    <h3>Weather Mood</h3>
-
-    <label class="toggle"><div><b>Weather Mood</b></div><input id="moodWeatherEnabled" type="checkbox"></label>
-    <label class="toggle">
-      <div>
-        <b>Use Device Location</b>
-        <div class="help">Approximate location is enough.</div>
-      </div>
-      <input id="moodUseDeviceLocation" type="checkbox">
-    </label>
-
-    <div class="two">
-      <div class="metric"><small>Permission</small><strong id="locationPermission">-</strong></div>
-      <div class="metric"><small>Current location</small><strong id="locationStatus">-</strong></div>
-    </div>
-
-    <div class="field">
-      <label class="title">Manual fallback city</label>
-      <input id="moodWeatherCity" type="text" placeholder="Miraj, Maharashtra">
-    </div>
-
-    <p class="status" id="weatherStatus">Waiting</p>
-
-    <div class="actions">
-      <button class="secondary" onclick="act('/api/weather-refresh')">
-        Refresh location & weather
-      </button>
-    </div>
-
-    <div class="field">
-      <label class="title">Weather influence</label>
-      <input id="moodWeatherInfluence" type="range" min="0" max="100" step="5">
-      <div class="help"><span id="moodWeatherInfluenceVal">60</span>%</div>
-    </div>
-
-    <label class="toggle"><div><b>Outdoor Temperature</b></div><input id="moodOutdoorTemperatureEnabled" type="checkbox"></label>
-
-    <div class="two">
-      <div class="field">
-        <label class="title">Cold ≤ °C</label>
-        <input id="moodColdTemperatureC" type="number" min="-10" max="30">
-      </div>
-      <div class="field">
-        <label class="title">Hot ≥ °C</label>
-        <input id="moodHotTemperatureC" type="number" min="20" max="50">
-      </div>
-    </div>
-  </div>
-
-</div>
-</details>
-
-<details>
-<summary>Background reliability</summary>
-<div class="section">
-  <label class="toggle"><div><b>Background guard</b></div><input id="backgroundGuardEnabled" type="checkbox"></label>
-  <label class="toggle"><div><b>Charging only</b></div><input id="chargingOnly" type="checkbox"></label>
-  <label class="toggle"><div><b>Pause Battery Saver</b></div><input id="pauseBatterySaver" type="checkbox"></label>
-  <label class="toggle"><div><b>Pause low battery</b></div><input id="pauseLowBattery" type="checkbox"></label>
-
-  <div class="field">
-    <label class="title">Low battery threshold</label>
-    <input id="lowBatteryThreshold" type="number" min="5" max="50">
-  </div>
-
-  <label class="toggle"><div><b>Quiet hours</b></div><input id="quietHoursEnabled" type="checkbox"></label>
-
-  <div class="two">
-    <div class="field"><label class="title">Start hour</label><input id="quietStartHour" type="number" min="0" max="23"></div>
-    <div class="field"><label class="title">End hour</label><input id="quietEndHour" type="number" min="0" max="23"></div>
-  </div>
-</div>
-</details>
-
-<details open>
-<summary>Autonomous Intelligence Core</summary>
-<div class="section">
-
-  <div class="four">
-    <div class="metric">
-      <small>Engine grade</small>
-      <strong id="autonomousGrade">Waiting</strong>
-    </div>
-
-    <div class="metric">
-      <small>Watchdog</small>
-      <strong id="watchdogState">Waiting</strong>
-    </div>
-
-    <div class="metric">
-      <small>Storage</small>
-      <strong id="storagePressure">Waiting</strong>
-    </div>
-
-    <div class="metric">
-      <small>Adaptive cache</small>
-      <strong id="adaptiveCacheTargetV3">Waiting</strong>
-    </div>
-  </div>
-
-  <div class="subcard">
-    <h3>Self-Heal Engine</h3>
-    <div class="muted" id="autonomousHealth">Waiting</div>
-    <div class="status" id="selfHealLast">Waiting</div>
-
-    <div class="actions" style="margin-top:10px">
-      <button
-        class="secondary"
-        onclick="act('/api/autonomy-audit')"
-      >
-        Run autonomous audit
-      </button>
-    </div>
-  </div>
-
-  <div class="subcard">
-    <h3>Wallpaper DNA</h3>
-
-    <div class="three">
-      <div class="metric">
-        <small>DNA</small>
-        <strong id="wallpaperDna">Waiting</strong>
-      </div>
-
-      <div class="metric">
-        <small>Visual family</small>
-        <strong id="wallpaperFamily">Waiting</strong>
-      </div>
-
-      <div class="metric">
-        <small>Entropy</small>
-        <strong id="wallpaperEntropy">Waiting</strong>
-      </div>
-    </div>
-
-    <p class="muted">
-      Fatigue:
-      <span id="familyFatigue">Learning</span>
-    </p>
-
-    <p class="muted">
-      Pair director:
-      <span id="pairStory">Waiting</span>
-    </p>
-  </div>
-
-  <div class="subcard">
-    <h3>Learning Brain</h3>
-
-    <div class="three">
-      <div class="metric">
-        <small>Taste confidence</small>
-        <strong id="tasteConfidenceV2">Learning</strong>
-      </div>
-
-      <div class="metric">
-        <small>Learning mode</small>
-        <strong id="learningMode">Explore</strong>
-      </div>
-
-      <div class="metric">
-        <small>Diversity budget</small>
-        <strong id="diversityBudget">Waiting</strong>
-      </div>
-    </div>
-  </div>
-
-  <div class="subcard">
-    <h3>Context Resolver</h3>
-
-    <div class="three">
-      <div class="metric">
-        <small>Confidence</small>
-        <strong id="contextConfidence">Waiting</strong>
-      </div>
-
-      <div class="metric">
-        <small>Smoothed light</small>
-        <strong id="contextLuxSmoothed">Waiting</strong>
-      </div>
-
-      <div class="metric">
-        <small>Weather stability</small>
-        <strong id="contextWeatherStable">Waiting</strong>
-      </div>
-    </div>
-
-    <p class="muted" id="contextConflict">Waiting</p>
-  </div>
-
-  <div class="subcard">
-    <h3>Source Resilience</h3>
-
-    <div class="two">
-      <div class="metric">
-        <small>Google Photos trust</small>
-        <strong id="sourcePhotosTrust">Learning</strong>
-      </div>
-
-      <div class="metric">
-        <small>Google Drive trust</small>
-        <strong id="sourceDriveTrust">Learning</strong>
-      </div>
-    </div>
-
-    <p class="muted" id="sourceResilienceLast">Waiting</p>
-  </div>
-
-  <div class="subcard">
-    <h3>Decision Trace</h3>
-
-    <div class="two">
-      <div class="metric">
-        <small>Trace ID</small>
-        <strong id="decisionTraceId">-</strong>
-      </div>
-
-      <div class="metric">
-        <small>Confidence</small>
-        <strong id="decisionConfidenceV2">Waiting</strong>
-      </div>
-    </div>
-
-    <p>
-      <b>Why V2:</b>
-      <span id="decisionWhyV2">Waiting</span>
-    </p>
-
-    <p class="muted">
-      <b>Why not runner-up:</b>
-      <span id="decisionWhyNotRunner">Waiting</span>
-    </p>
-
-    <p class="muted">
-      <b>Score trace:</b>
-      <span id="decisionBreakdownV2">Waiting</span>
-    </p>
-
-    <p class="muted">
-      <b>Shadow ranking:</b>
-      <span id="shadowRank">Waiting</span>
-    </p>
-  </div>
-
-  <div class="subcard">
-    <h3>Recovery / Quality</h3>
-
-    <div class="muted">
-      Quality guard:
-      <span id="qualityGuardLast">No rejection</span>
-    </div>
-
-    <div class="muted">
-      Apply journal:
-      <span id="applyJournal">Idle</span>
-    </div>
-
-    <div class="muted">
-      Crash recovery:
-      <span id="crashRecovery">None</span>
-    </div>
-  </div>
-
-</div>
-</details>
-
-<details open>
-<summary>Premium Intelligence Control Center</summary>
-<div class="section">
-
-  <div class="two">
-    <div class="subcard">
-      <h3>Home Intelligence</h3>
-      <div class="metric">
-        <small>DNA</small>
-        <strong id="premiumHomeDna">Waiting</strong>
-      </div>
-      <p class="muted" id="premiumHomeVisual">Waiting</p>
-      <p>
-        Role <b id="premiumHomeRole">-</b>
-        • Quality <b id="premiumHomeQuality">-</b>
-        • AMOLED <b id="premiumHomeAmoled">-</b>
-      </p>
-      <p>
-        Readability <b id="premiumHomeReadability">-</b>
-        • Crop <b id="premiumHomeCrop">-</b>
-        • Entropy <b id="premiumHomeEntropy">-</b>
-      </p>
-      <div class="muted" id="premiumHomePalette">Waiting</div>
-      <div class="palette-swatches" id="premiumHomeSwatches"></div>
-    </div>
-
-    <div class="subcard">
-      <h3>Lock Intelligence</h3>
-      <div class="metric">
-        <small>DNA</small>
-        <strong id="premiumLockDna">Waiting</strong>
-      </div>
-      <p class="muted" id="premiumLockVisual">Waiting</p>
-      <p>
-        Role <b id="premiumLockRole">-</b>
-        • Quality <b id="premiumLockQuality">-</b>
-        • AMOLED <b id="premiumLockAmoled">-</b>
-      </p>
-      <p>
-        Readability <b id="premiumLockReadability">-</b>
-        • Crop <b id="premiumLockCrop">-</b>
-        • Entropy <b id="premiumLockEntropy">-</b>
-      </p>
-      <div class="muted" id="premiumLockPalette">Waiting</div>
-      <div class="palette-swatches" id="premiumLockSwatches"></div>
-    </div>
-  </div>
-
-  <div class="subcard">
-    <h3>Home / Lock Pair Director</h3>
-    <p id="premiumPairSummary">Waiting</p>
-    <div class="four">
-      <div class="metric">
-        <small>Harmony</small>
-        <strong id="premiumPairHarmony">-</strong>
-      </div>
-      <div class="metric">
-        <small>Brightness</small>
-        <strong id="premiumPairBrightness">-</strong>
-      </div>
-      <div class="metric">
-        <small>Palette</small>
-        <strong id="premiumPairPalette">-</strong>
-      </div>
-      <div class="metric">
-        <small>Style</small>
-        <strong id="premiumPairStyle">-</strong>
-      </div>
-    </div>
-  </div>
-
-  <div class="subcard">
-    <h3>Cache Intelligence</h3>
-    <div class="four">
-      <div class="metric">
-        <small>Pools</small>
-        <strong id="premiumCacheMap">Waiting</strong>
-      </div>
-      <div class="metric">
-        <small>Size</small>
-        <strong id="premiumCacheSize">-</strong>
-      </div>
-      <div class="metric">
-        <small>Readiness</small>
-        <strong id="premiumCacheReadiness">-</strong>
-      </div>
-      <div class="metric">
-        <small>Health</small>
-        <strong id="premiumCacheHealth">-</strong>
-      </div>
-    </div>
-  </div>
-
-  <div class="subcard">
-    <h3>Source Telemetry</h3>
-    <div class="two">
-      <div class="metric">
-        <small>Google Photos</small>
-        <strong id="premiumSourcePhotos">Learning</strong>
-      </div>
-      <div class="metric">
-        <small>Google Drive</small>
-        <strong id="premiumSourceDrive">Learning</strong>
-      </div>
-    </div>
-
-    <div class="actions" style="margin-top:10px">
-      <button class="secondary" onclick="act('/api/reset-source-photos')">
-        Reset Photos telemetry
-      </button>
-      <button class="secondary" onclick="act('/api/reset-source-drive')">
-        Reset Drive telemetry
-      </button>
-    </div>
-  </div>
-
-  <div class="subcard">
-    <h3>Runtime Telemetry</h3>
-    <div class="four">
-      <div class="metric">
-        <small>Watchdog age</small>
-        <strong id="premiumWatchdogAge">-</strong>
-      </div>
-      <div class="metric">
-        <small>Last change</small>
-        <strong id="premiumLastChangeAge">-</strong>
-      </div>
-      <div class="metric">
-        <small>Apply timing</small>
-        <strong id="premiumApplyTiming">-</strong>
-      </div>
-      <div class="metric">
-        <small>Decision</small>
-        <strong id="premiumDecision">-</strong>
-      </div>
-    </div>
-    <p class="muted" id="premiumLearning">Waiting</p>
-    <p class="muted" id="premiumContext">Waiting</p>
-  </div>
-
-  <div class="subcard">
-    <h3>Library / Recovery</h3>
-    <p id="premiumLibrary">Waiting</p>
-    <p class="muted" id="premiumRecovery">Waiting</p>
-    <p class="muted">
-      Export:
-      <span id="premiumExportPath">-</span>
-    </p>
-  </div>
-
-  <div class="subcard">
-    <h3>Intelligence Timeline</h3>
-    <div class="timeline" id="premiumEventTimeline">
-      No events yet
-    </div>
-  </div>
-
-  <div class="actions">
-    <button class="secondary" onclick="act('/api/premium-refresh')">
-      Refresh intelligence
-    </button>
-    <button class="secondary" onclick="act('/api/reanalyze-current')">
-      Reanalyze current
-    </button>
-    <button class="secondary" onclick="act('/api/rebuild-next')">
-      Rebuild Next
-    </button>
-    <button class="secondary" onclick="act('/api/cache-integrity')">
-      Cache integrity
-    </button>
-    <button class="secondary" onclick="act('/api/premium-self-heal')">
-      Full Self-Heal
-    </button>
-    <button class="secondary" onclick="act('/api/export-intelligence')">
-      Export report
-    </button>
-  </div>
-
-</div>
-</details>
 
 <details>
 <summary>Wallpaper automation</summary>
@@ -1129,78 +559,7 @@ pre{
 </div>
 </details>
 
-<details>
-<summary>Quality & aspect</summary>
-<div class="section">
-  <label class="toggle"><div><b>Smart Crop</b></div><input id="smartCropEnabled" type="checkbox"></label>
 
-  <div class="two">
-    <div class="field">
-      <label class="title">Aspect preference</label>
-      <select id="aspectPreference">
-        ${
-            options(
-                AspectPreference.entries.map {
-                    it.name to it.label
-                }
-            )
-        }
-      </select>
-    </div>
-
-    <div class="field">
-      <label class="title">Crop tolerance %</label>
-      <input id="smartCropTolerancePct" type="number" min=".2" max="5" step=".1">
-    </div>
-
-    <div class="field">
-      <label class="title">Duplicate distance</label>
-      <input id="perceptualDistance" type="number" min="0" max="24">
-    </div>
-  </div>
-
-  <div class="subcard">
-    <h3>Visual Intelligence V2</h3>
-
-    <div class="three">
-      <div class="metric">
-        <small>Visual profile</small>
-        <strong id="visualProfile">Waiting</strong>
-      </div>
-
-      <div class="metric">
-        <small>Dominant palette</small>
-        <strong id="visualPalette">Waiting</strong>
-      </div>
-
-      <div class="metric">
-        <small>Home / Lock pairing</small>
-        <strong id="visualPairing">Waiting</strong>
-      </div>
-    </div>
-
-    <p class="muted" id="visualDetail">
-      Waiting for analyzed wallpaper.
-    </p>
-
-    <p class="help">
-      Local-only analysis: quality, dominant palette,
-      brightness, saturation, contrast, warmth, AMOLED
-      suitability, lock-screen readability, crop safety,
-      edge/detail density, cinematic, vibrant, pastel,
-      monochrome and low-light classification.
-    </p>
-  </div>
-
-  <div class="subcard">
-    <div>Pipeline: <b id="lastPipeline">-</b></div>
-    <div>Aspect: <b id="lastAspect">-</b></div>
-    <div class="muted" style="margin-top:7px">
-      Why: <span id="selectionReason">-</span>
-    </div>
-  </div>
-</div>
-</details>
 
 <details>
 <summary>Blur</summary>
@@ -1584,6 +943,8 @@ function render(s){
   text('heroMood',s.moodProfileLabel||'Adaptive');
   text('heroMoodSummary',s.moodProfileSummary);
   text('activeSource',s.activeSource);
+  text('lastPipelineHero',s.lastPipeline||'Original stream');
+  text('lastTriggerHero',s.lastTrigger||'-');
   text('offlineReady',s.offlineReady);
   text('cacheMetric',s.cache+' • '+fmtBytes(s.cacheBytes));
   text('resourcePolicy',s.resourcePolicy);
