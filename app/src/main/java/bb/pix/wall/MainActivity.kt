@@ -213,7 +213,12 @@ class MainActivity : ComponentActivity() {
                 if (generation != sourceMutationGeneration) return@schedule
                 val latest = SettingsStore(applicationContext).load()
                 bb.pix.wall.engine.EngineExecutors.io {
-                    runCatching { WallpaperController.ensureNext(applicationContext, latest, allowNetwork = true) }
+                    runCatching {
+                        WallpaperController.primeCache(
+                            applicationContext,
+                            latest,
+                        )
+                    }
                     runOnUiThread(refresh)
                 }
             }, 900L, java.util.concurrent.TimeUnit.MILLISECONDS)
