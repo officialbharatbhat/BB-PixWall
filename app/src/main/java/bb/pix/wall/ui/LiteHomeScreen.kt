@@ -1,6 +1,7 @@
 package bb.pix.wall.ui
 
 import android.content.Intent
+import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Environment
 import android.provider.Settings
@@ -10,6 +11,7 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -24,8 +26,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CornerSize
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Cloud
@@ -63,10 +67,16 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.text.input.KeyboardType
@@ -87,6 +97,8 @@ import bb.pix.wall.settings.WallpaperTargetMode
 import bb.pix.wall.ui.theme.ThemeProfile
 import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 @Composable
 fun LiteHomeScreen(
@@ -117,6 +129,10 @@ fun LiteHomeScreen(
             LiteHeader(
                 settings = settings,
                 onRequestAdvanced = onRequestAdvanced,
+            )
+
+            LiteCurrentPreviewStrip(
+                refreshKey = refreshKey,
             )
 
             LiteSection(
@@ -834,57 +850,257 @@ private fun LiteHeader(
 private fun CinematicSubtitle() {
     val transition =
         rememberInfiniteTransition(
-            label = "lite_subtitle_slide"
+            label = "lite_subtitle_reflection"
         )
 
-    val offset by
+    val shineX by
         transition.animateFloat(
-            initialValue = -4f,
-            targetValue = 4f,
+            initialValue = -180f,
+            targetValue = 620f,
             animationSpec =
                 infiniteRepeatable(
                     animation =
                         tween(
-                            durationMillis = 1800,
+                            durationMillis = 2400,
                         ),
                     repeatMode =
-                        RepeatMode.Reverse,
+                        RepeatMode.Restart,
                 ),
-            label = "lite_subtitle_offset",
+            label = "lite_subtitle_shine",
         )
 
-    val alpha by
-        transition.animateFloat(
-            initialValue = .72f,
-            targetValue = 1f,
-            animationSpec =
-                infiniteRepeatable(
-                    animation =
-                        tween(
-                            durationMillis = 1800,
-                        ),
-                    repeatMode =
-                        RepeatMode.Reverse,
-                ),
-            label = "lite_subtitle_alpha",
+    val baseStyle =
+        MaterialTheme.typography
+            .labelLarge
+
+    Box {
+        Text(
+            text = "Automatic Wallpaper Changer",
+            style = baseStyle,
+            fontWeight = FontWeight.Bold,
+            color =
+                MaterialTheme.colorScheme
+                    .onSurfaceVariant,
         )
 
-    Text(
-        text = "Automatic Wallpaper Changer",
+        Text(
+            text = "Automatic Wallpaper Changer",
+            style =
+                baseStyle.copy(
+                    brush =
+                        Brush.linearGradient(
+                            colors =
+                                listOf(
+                                    Color.Transparent,
+                                    Color.White.copy(alpha = .16f),
+                                    Color.White.copy(alpha = .88f),
+                                    Color.White.copy(alpha = .16f),
+                                    Color.Transparent,
+                                ),
+                            start =
+                                Offset(
+                                    shineX - 58f,
+                                    0f,
+                                ),
+                            end =
+                                Offset(
+                                    shineX + 58f,
+                                    0f,
+                                ),
+                        )
+                ),
+            fontWeight = FontWeight.Bold,
+        )
+    }
+}
+
+@Composable
+private fun LiteCurrentPreviewStrip(
+    refreshKey: Int,
+) {
+    Row(
         modifier =
-            Modifier.graphicsLayer {
-                translationX = offset
-                this.alpha = alpha
-            },
-        style =
-            MaterialTheme.typography
-                .labelLarge,
-        fontWeight =
-            FontWeight.Bold,
-        color =
-            MaterialTheme.colorScheme
-                .onSurfaceVariant,
-    )
+            Modifier.fillMaxWidth(),
+        horizontalArrangement =
+            Arrangement.spacedBy(10.dp),
+    ) {
+        LiteCurrentPreview(
+            label = "Current Home",
+            file = WallpaperFiles.currentHome,
+            refreshKey = refreshKey,
+            modifier = Modifier.weight(1f),
+        )
+
+        LiteCurrentPreview(
+            label = "Current Lock",
+            file = WallpaperFiles.currentLock,
+            refreshKey = refreshKey,
+            modifier = Modifier.weight(1f),
+        )
+    }
+}
+
+@Composable
+private fun LiteCurrentPreview(
+    label: String,
+    file: java.io.File,
+    refreshKey: Int,
+    modifier: Modifier = Modifier,
+) {
+    var preview by
+        remember(
+            refreshKey,
+            file.absolutePath,
+            file.lastModified(),
+            file.length(),
+        ) {
+            mutableStateOf<android.graphics.Bitmap?>(null)
+        }
+
+    LaunchedEffect(
+        refreshKey,
+        file.absolutePath,
+        file.lastModified(),
+        file.length(),
+    ) {
+        preview =
+            withContext(Dispatchers.IO) {
+                if (!file.exists() || file.length() <= 0L) {
+                    return@withContext null
+                }
+
+                val bounds =
+                    BitmapFactory.Options().apply {
+                        inJustDecodeBounds = true
+                    }
+
+                BitmapFactory.decodeFile(
+                    file.absolutePath,
+                    bounds,
+                )
+
+                if (
+                    bounds.outWidth <= 0 ||
+                    bounds.outHeight <= 0
+                ) {
+                    return@withContext null
+                }
+
+                var sample = 1
+
+                while (
+                    bounds.outWidth / sample > 320 ||
+                    bounds.outHeight / sample > 420
+                ) {
+                    sample *= 2
+                }
+
+                runCatching {
+                    BitmapFactory.decodeFile(
+                        file.absolutePath,
+                        BitmapFactory.Options().apply {
+                            inSampleSize = sample
+                            inPreferredConfig =
+                                android.graphics.Bitmap.Config.RGB_565
+                        },
+                    )
+                }.getOrNull()
+            }
+    }
+
+    Card(
+        modifier = modifier,
+        colors =
+            CardDefaults.cardColors(
+                containerColor =
+                    MaterialTheme.colorScheme.surface,
+            ),
+    ) {
+        Row(
+            modifier =
+                Modifier.padding(8.dp),
+            verticalAlignment =
+                Alignment.CenterVertically,
+            horizontalArrangement =
+                Arrangement.spacedBy(9.dp),
+        ) {
+            Box(
+                modifier =
+                    Modifier
+                        .size(
+                            width = 58.dp,
+                            height = 72.dp,
+                        )
+                        .clip(
+                            RoundedCornerShape(10.dp)
+                        )
+                        .background(
+                            MaterialTheme.colorScheme
+                                .surfaceVariant
+                        ),
+                contentAlignment =
+                    Alignment.Center,
+            ) {
+                val bitmap = preview
+
+                if (bitmap != null) {
+                    Image(
+                        bitmap =
+                            bitmap.asImageBitmap(),
+                        contentDescription = label,
+                        modifier =
+                            Modifier.fillMaxSize(),
+                        contentScale =
+                            ContentScale.Crop,
+                    )
+                } else {
+                    Icon(
+                        imageVector =
+                            if (label.contains("Home")) {
+                                Icons.Outlined.Home
+                            } else {
+                                Icons.Outlined.Lock
+                            },
+                        contentDescription = null,
+                        modifier =
+                            Modifier.size(22.dp),
+                        tint =
+                            MaterialTheme.colorScheme
+                                .onSurfaceVariant,
+                    )
+                }
+            }
+
+            Column(
+                modifier =
+                    Modifier.weight(1f)
+            ) {
+                Text(
+                    text = label,
+                    style =
+                        MaterialTheme.typography
+                            .labelMedium,
+                    fontWeight =
+                        FontWeight.SemiBold,
+                )
+
+                Text(
+                    text =
+                        if (preview != null) {
+                            "Ready"
+                        } else {
+                            "Waiting"
+                        },
+                    style =
+                        MaterialTheme.typography
+                            .labelSmall,
+                    color =
+                        MaterialTheme.colorScheme
+                            .onSurfaceVariant,
+                )
+            }
+        }
+    }
 }
 
 @Composable
