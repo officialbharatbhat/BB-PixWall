@@ -3,6 +3,8 @@ package bb.pix.wall.network
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.content.Context
 import android.content.Intent
 import android.os.IBinder
@@ -16,6 +18,7 @@ import bb.pix.wall.settings.*
 import bb.pix.wall.ui.theme.ThemeProfile
 import java.io.BufferedReader
 import java.io.File
+import java.io.FileOutputStream
 import java.io.InputStreamReader
 import java.net.ServerSocket
 import java.net.Socket
@@ -467,6 +470,33 @@ class LanServerService : Service() {
                     )
                 }
 
+            "/api/live-stamp" -> {
+                val stamp =
+                    buildString {
+                        append(WallpaperFiles.currentHome.lastModified())
+                        append(':')
+                        append(WallpaperFiles.currentHome.length())
+                        append('|')
+                        append(WallpaperFiles.currentLock.lastModified())
+                        append(':')
+                        append(WallpaperFiles.currentLock.length())
+                        append('|')
+                        append(WallpaperFiles.nextHome.lastModified())
+                        append(':')
+                        append(WallpaperFiles.nextHome.length())
+                        append('|')
+                        append(WallpaperFiles.nextLock.lastModified())
+                        append(':')
+                        append(WallpaperFiles.nextLock.length())
+                    }
+
+                sendJson(
+                    s,
+                    200,
+                    "{\"stamp\":${quote(stamp)}}",
+                )
+            }
+
             "/api/history" ->
                 sendJson(
                     s,
@@ -551,32 +581,36 @@ class LanServerService : Service() {
                 val store = SettingsStore(this); store.save(store.load().copy(engineMode = EngineMode.STANDARD)); sendJson(s, 200, "{\"ok\":true}")
             } else sendJson(s, 403, "{\"error\":\"forbidden\"}")
             "/img/current-home" ->
-                sendFile(
+                sendThumbnail(
                     s,
                     WallpaperController.previewFile(
                         this,
                         WallpaperFiles.currentHome,
                         true,
-                    )
+                    ),
+                    "current_home",
                 )
             "/img/current-lock" ->
-                sendFile(
+                sendThumbnail(
                     s,
                     WallpaperController.previewFile(
                         this,
                         WallpaperFiles.currentLock,
                         false,
-                    )
+                    ),
+                    "current_lock",
                 )
             "/img/next-home" ->
-                sendFile(
+                sendThumbnail(
                     s,
                     WallpaperFiles.nextHome,
+                    "next_home",
                 )
             "/img/next-lock" ->
-                sendFile(
+                sendThumbnail(
                     s,
                     WallpaperFiles.nextLock,
+                    "next_lock",
                 )
             "/", "/index.html" -> sendText(s, 200, "text/html; charset=utf-8", dashboard(token))
             else -> sendText(s, 404, "text/plain; charset=utf-8", "Not found")
@@ -1290,6 +1324,150 @@ class LanServerService : Service() {
         val i = pair.indexOf('='); if (i < 0) null else decode(pair.substring(0, i)) to decode(pair.substring(i + 1))
     }.toMap()
     private fun decode(v: String) = URLDecoder.decode(v, "UTF-8")
+
+    private fun webThumbFile(
+        source: File,
+        key: String,
+    ): File? {
+        if (
+            !source.exists() ||
+            !source.isFile ||
+            source.length() <= 0L
+        ) {
+            return null
+        }
+
+        val dir =
+            File(
+                WallpaperFiles.backup,
+                ".web_thumbs",
+            ).apply {
+                mkdirs()
+            }
+
+        val signature =
+            "${source.absolutePath}:${source.length()}:${source.lastModified()}"
+
+        val hash =
+            java.security.MessageDigest
+                .getInstance("SHA-256")
+                .digest(
+                    signature.toByteArray(
+                        Charsets.UTF_8
+                    )
+                )
+                .take(8)
+                .joinToString("") {
+                    "%02x".format(it)
+                }
+
+        val out =
+            File(
+                dir,
+                "${key}_$hash.jpg",
+            )
+
+        if (
+            out.exists() &&
+            out.length() > 0L
+        ) {
+            return out
+        }
+
+        dir.listFiles()
+            .orEmpty()
+            .filter {
+                it.isFile &&
+                    it.name.startsWith(
+                        "${key}_"
+                    ) &&
+                    it != out
+            }
+            .forEach {
+                runCatching {
+                    it.delete()
+                }
+            }
+
+        val bounds =
+            BitmapFactory.Options().apply {
+                inJustDecodeBounds = true
+            }
+
+        BitmapFactory.decodeFile(
+            source.absolutePath,
+            bounds,
+        )
+
+        if (
+            bounds.outWidth <= 0 ||
+            bounds.outHeight <= 0
+        ) {
+            return null
+        }
+
+        var sample = 1
+
+        while (
+            bounds.outWidth / sample > 720 ||
+            bounds.outHeight / sample > 1280
+        ) {
+            sample *= 2
+        }
+
+        val bitmap =
+            BitmapFactory.decodeFile(
+                source.absolutePath,
+                BitmapFactory.Options().apply {
+                    inSampleSize =
+                        sample.coerceAtLeast(1)
+                    inPreferredConfig =
+                        Bitmap.Config.RGB_565
+                },
+            ) ?: return null
+
+        return try {
+            FileOutputStream(out).use {
+                output ->
+
+                if (
+                    !bitmap.compress(
+                        Bitmap.CompressFormat.JPEG,
+                        82,
+                        output,
+                    )
+                ) {
+                    return null
+                }
+            }
+
+            out
+        } catch (_: Throwable) {
+            out.delete()
+            null
+        } finally {
+            bitmap.recycle()
+        }
+    }
+
+    private fun sendThumbnail(
+        socket: Socket,
+        source: File,
+        key: String,
+    ) {
+        val thumb =
+            runCatching {
+                webThumbFile(
+                    source,
+                    key,
+                )
+            }.getOrNull()
+
+        sendFile(
+            socket,
+            thumb ?: source,
+        )
+    }
 
     private fun sendFile(socket: Socket, file: File) {
         if (!file.exists()) { sendText(socket, 404, "text/plain", "Not found"); return }
