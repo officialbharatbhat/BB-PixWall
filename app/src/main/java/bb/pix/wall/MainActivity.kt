@@ -7,7 +7,9 @@ import android.os.Looper
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -23,6 +25,7 @@ import bb.pix.wall.ui.theme.BBPixWallTheme
 import bb.pix.wall.ui.theme.ThemeProfile
 
 class MainActivity : ComponentActivity() {
+    private var resumeTick by mutableIntStateOf(0)
     private val blurDebounce = Handler(Looper.getMainLooper())
     private var blurGeneration = 0
     private var sourceMutationGeneration = 0
@@ -51,6 +54,10 @@ class MainActivity : ComponentActivity() {
                     )
                 }
 
+            LaunchedEffect(resumeTick) {
+                settings = store.load()
+            }
+
             BBPixWallTheme(
                 profile =
                     ThemeProfile.MATERIAL_PRO,
@@ -59,6 +66,7 @@ class MainActivity : ComponentActivity() {
             ) {
                 LiteHomeScreen(
                     settings = settings,
+                    refreshKey = resumeTick,
                     onSettingsChange = { requested ->
                         /*
                          * Lite deliberately hard-disables every heavy
@@ -244,6 +252,11 @@ class MainActivity : ComponentActivity() {
         if (forceRestart) stopService(intent)
         startForegroundService(intent)
     }
+    override fun onResume() {
+        super.onResume()
+        resumeTick++
+    }
+
     override fun onDestroy() {
         blurDebounce.removeCallbacksAndMessages(null)
         sourceMutationFuture?.cancel(false)
