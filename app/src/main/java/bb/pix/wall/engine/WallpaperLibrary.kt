@@ -20,7 +20,7 @@ import java.util.Properties
  */
 object WallpaperLibrary {
 
-    private const val HISTORY_LIMIT = 40
+    private const val HISTORY_LIMIT = 10
 
     data class HistoryEntry(
         val id: String,
@@ -117,6 +117,8 @@ object WallpaperLibrary {
 
     fun history(): List<HistoryEntry> {
         WallpaperFiles.ensure()
+        // Enforce the new on-disk limit even for installs upgrading from 40 entries.
+        trimHistory()
 
         return WallpaperFiles.history
             .listFiles()
