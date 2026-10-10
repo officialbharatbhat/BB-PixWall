@@ -18,11 +18,10 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      - uses: android-actions/setup-android@v3
       - name: Install Android 37
         run: |
-          yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager "platforms;android-37" "build-tools;37.0.0" "platform-tools"
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-37" "build-tools;37.0.0" "platform-tools"
       - uses: gradle/actions/setup-gradle@v4
       - name: Compile Kotlin and resources
         env:
