@@ -3477,6 +3477,13 @@ fun invalidateQueue() =
             "Lite • preparing next + ready cache",
         )
 
+        // Never block applying already-prepared originals; only cloud refill is deferred.
+        val refillDeferred = LiteResourcePolicy.deferCloudRefill(context)
+        if (refillDeferred != null) {
+            RuntimeStatus.set(context, "cache_refill_result", "Deferred: $refillDeferred")
+            runCatching { ensureNext(context, settings, allowNetwork = false) }
+            return
+        }
         runCatching {
             ensureNext(
                 context,
