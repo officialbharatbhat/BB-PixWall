@@ -5,29 +5,30 @@ import android.content.Context
 import android.net.Uri
 import java.io.File
 
-/**
- * Privacy pause for wallpaper rotation. Original picked streams are copied byte-for-byte.
- * Preferences live in private app storage; image files are outside normal history eviction.
- */
+/** Original-byte safe wallpaper vault. Never included in ordinary cache/history pruning. */
 object SafeWall {
-    private const val PREF = "bb_safe_wall"
-    private fun prefs(context: Context) = context.getSharedPreferences(PREF, Context.MODE_PRIVATE)
-    private fun home(context: Context) = File(context.filesDir, "safe-home.original")
-    private fun lock(context: Context) = File(context.filesDir, "safe-lock.original")
-    private fun savedHome(context: Context) = File(context.filesDir, "safe-restored-home.original")
-    private fun savedLock(context: Context) = File(context.filesDir, "safe-restored-lock.original")
+    private const val PREFS = "bb_safe_wall"
+    private val gate = Any()
+    private fun pref(c: Context) = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    private fun file(c: Context, name: String) = File(c.filesDir, name)
+    private fun safeHome(c: Context) = file(c, "safe-home.original")
+    private fun safeLock(c: Context) = file(c, "safe-lock.original")
+    private fun restoreHome(c: Context) = file(c, "restore-home.original")
+    private fun restoreLock(c: Context) = file(c, "restore-lock.original")
 
-    fun active(context: Context): Boolean = prefs(context).getBoolean("active", false)
-    fun configured(context: Context): Boolean = home(context).isFile && lock(context).isFile
+    fun active(c: Context): Boolean = pref(c).getBoolean("active", false)
+    fun configured(c: Context): Boolean = safeHome(c).length() > 0 && safeLock(c).length() > 0
+    fun selected(c: Context, home: Boolean): Boolean =
+        (if (home) safeHome(c) else safeLock(c)).length() > 0
 
-    fun importImage(context: Context, uri: Uri, forHome: Boolean): Boolean {
-        if (active(context)) return false
-        val target = if (forHome) home(context) else lock(context)
-        val temp = File(context.filesDir, target.name + ".part")
-        return runCatching {
-            context.contentResolver.openInputStream(uri)?.use { source ->
-                temp.outputStream().use { source.copyTo(it) }
-            } ?: error("Cannot open selected image")
+    fun importImage(c: Context, uri: Uri, forHome: Boolean): Boolean = synchronized(gate) {
+        if (active(c)) return@synchronized false
+        val target = if (forHome) safeHome(c) else safeLock(c)
+        val temp = file(c, target.name + ".part")
+        runCatching {
+            c.contentResolver.openInputStream(uri)?.use { source ->
+                temp.outputStream().use { output -> source.copyTo(output) }
+            } ?: error("Image unavailable")
             require(temp.length() > 0L)
             if (!temp.renameTo(target)) {
                 temp.copyTo(target, overwrite = true)
@@ -37,37 +38,57 @@ object SafeWall {
         }.getOrElse { temp.delete(); false }
     }
 
-    @Synchronized fun toggle(context: Context): Boolean {
-        val p = prefs(context)
-        val wm = WallpaperManager.getInstance(context)
-        if (active(context)) {
-            // Restore only when both backups are intact; never release freeze accidentally.
-            val oldHome = savedHome(context)
-            val oldLock = savedLock(context)
-            if (!oldHome.isFile || !oldLock.isFile) return false
-            val ok = runCatching {
-                oldLock.inputStream().use { wm.setStream(it, null, true, WallpaperManager.FLAG_LOCK) }
-                oldHome.inputStream().use { wm.setStream(it, null, true, WallpaperManager.FLAG_SYSTEM) }
-                p.edit().putBoolean("active", false).commit()
+    /** Toggle is serialized against itself; normal wallpaper triggers check the persistent gate. */
+    fun toggle(c: Context): Boolean = synchronized(gate) {
+        WallpaperFiles.ensure()
+        val p = pref(c)
+        val wm = WallpaperManager.getInstance(c)
+        if (active(c)) {
+            if (!restoreHome(c).isFile || !restoreLock(c).isFile) return@synchronized false
+            val restored = runCatching {
+                restoreLock(c).inputStream().use {
+                    wm.setStream(it, null, true, WallpaperManager.FLAG_LOCK)
+                }
+                restoreHome(c).inputStream().use {
+                    wm.setStream(it, null, true, WallpaperManager.FLAG_SYSTEM)
+                }
+                // Do not unfreeze unless both wallpaper transactions succeed.
+                check(p.edit().putBoolean("active", false).commit())
+                true
             }.getOrDefault(false)
-            if (ok) {
-                oldHome.delete()
-                oldLock.delete()
+            if (restored) {
+                restoreHome(c).delete()
+                restoreLock(c).delete()
             }
-            return ok
+            return@synchronized restored
         }
-        if (!configured(context)) return false
-        val currHome = WallpaperFiles.currentHome
-        val currLock = WallpaperFiles.currentLock
-        if (!currHome.isFile || !currLock.isFile) return false
-        return runCatching {
-            currHome.copyTo(savedHome(context), overwrite = true)
-            currLock.copyTo(savedLock(context), overwrite = true)
-            // Persist freeze BEFORE any wallpaper transaction to block concurrent triggers.
+
+        if (!configured(c)) return@synchronized false
+        val home = WallpaperFiles.currentHome
+        val lock = WallpaperFiles.currentLock
+        if (!home.isFile || !lock.isFile) return@synchronized false
+        return@synchronized runCatching {
+            home.copyTo(restoreHome(c), overwrite = true)
+            lock.copyTo(restoreLock(c), overwrite = true)
             check(p.edit().putBoolean("active", true).commit())
-            lock(context).inputStream().use { wm.setStream(it, null, true, WallpaperManager.FLAG_LOCK) }
-            home(context).inputStream().use { wm.setStream(it, null, true, WallpaperManager.FLAG_SYSTEM) }
+            safeLock(c).inputStream().use {
+                wm.setStream(it, null, true, WallpaperManager.FLAG_LOCK)
+            }
+            safeHome(c).inputStream().use {
+                wm.setStream(it, null, true, WallpaperManager.FLAG_SYSTEM)
+            }
             true
-        }.getOrElse { false } // If apply fails, stay frozen; toggle again restores previous.
+        }.getOrDefault(false) // Fail closed: if interrupted, safe mode remains active.
+    }
+
+    /** Boot recovery: reassert selected safe wallpapers if Safe Wall was active at shutdown. */
+    fun reassert(c: Context): Boolean = synchronized(gate) {
+        if (!active(c) || !configured(c)) return@synchronized false
+        runCatching {
+            val wm = WallpaperManager.getInstance(c)
+            safeLock(c).inputStream().use { wm.setStream(it, null, true, WallpaperManager.FLAG_LOCK) }
+            safeHome(c).inputStream().use { wm.setStream(it, null, true, WallpaperManager.FLAG_SYSTEM) }
+            true
+        }.getOrDefault(false)
     }
 }
