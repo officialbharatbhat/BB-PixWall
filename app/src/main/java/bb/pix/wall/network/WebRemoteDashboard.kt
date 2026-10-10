@@ -980,6 +980,8 @@ function render(s){
   text('lastPipelineHero',s.lastPipeline||'Original stream');
   text('lastTriggerHero',s.lastTrigger||'-');
   text('offlineReady',s.offlineReady);
+  text('safeWallChip',s.safeWallActive?'Safe Wall ON':'Safe Wall Off');
+  document.getElementById('safeWallChip').classList.toggle('good',!!s.safeWallActive);
   text('cacheMetric',s.cache+' • '+fmtBytes(s.cacheBytes));
   text('resourcePolicy',s.resourcePolicy);
 
