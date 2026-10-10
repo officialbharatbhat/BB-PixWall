@@ -18,6 +18,8 @@ import bb.pix.wall.engine.EngineExecutors
 import bb.pix.wall.engine.RuntimeStatus
 import bb.pix.wall.engine.WallpaperController
 import bb.pix.wall.engine.WallpaperFiles
+import bb.pix.wall.network.NetworkMonitor
+import bb.pix.wall.engine.SafeWall
 import bb.pix.wall.root.RootAccess
 import bb.pix.wall.settings.AppSettings
 import bb.pix.wall.settings.EngineMode
@@ -136,10 +138,24 @@ class WallpaperAutomationService : Service() {
             }
         }
 
+    private val networkRecovered: () -> Unit = {
+        if (!SafeWall.active(applicationContext) &&
+            bb.pix.wall.engine.LiteResourcePolicy.deferCloudRefill(applicationContext) == null) {
+            EngineExecutors.io {
+                runCatching {
+                    val cfg = SettingsStore(applicationContext).load()
+                    if (cfg.autoChange) WallpaperController.primeCache(applicationContext, cfg)
+                }
+            }
+        }
+    }
+
     override fun onCreate() {
         super.onCreate()
 
         createChannel()
+        NetworkMonitor.register(applicationContext)
+        NetworkMonitor.add(networkRecovered)
 
         startForeground(
             101,
@@ -495,6 +511,7 @@ class WallpaperAutomationService : Service() {
     }
 
     override fun onDestroy() {
+        NetworkMonitor.remove(networkRecovered)
         handler.removeCallbacksAndMessages(
             null
         )
