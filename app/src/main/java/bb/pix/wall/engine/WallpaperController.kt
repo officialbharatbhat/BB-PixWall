@@ -2285,7 +2285,7 @@ fun invalidateQueue() =
         doBlur: Boolean,
         radius: Int,
     ) {
-        if (!src.exists()) return
+        if (SafeWall.active(context) || !src.exists()) return
         if (!doBlur || radius <= 0) {
             val aspect = inspectAspect(src, settings.smartCropTolerancePct)
             if (settings.smartCropEnabled && aspect.valid && !aspect.matchesNineByTwenty) {
@@ -2792,7 +2792,7 @@ fun invalidateQueue() =
         radius: Int,
         current: File,
     ): Boolean {
-        if (!src.exists()) return false
+        if (SafeWall.active(context) || !src.exists()) return false
 
         return try {
             if (!doBlur || radius <= 0) {
