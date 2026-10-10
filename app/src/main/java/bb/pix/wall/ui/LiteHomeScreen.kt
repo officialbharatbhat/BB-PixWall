@@ -122,10 +122,20 @@ fun LiteHomeScreen(
     var safeSelectionVersion by remember { mutableIntStateOf(0) }
     var safeActive by remember(refreshKey, safeSelectionVersion) { mutableStateOf(SafeWall.active(context)) }
     val pickSafeHome = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        if (uri != null && SafeWall.importImage(context, uri, true)) safeSelectionVersion++
+        if (uri != null) bb.pix.wall.engine.EngineExecutors.io {
+            val ok = SafeWall.importImage(context.applicationContext, uri, true)
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                if (ok) safeSelectionVersion++
+            }
+        }
     }
     val pickSafeLock = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        if (uri != null && SafeWall.importImage(context, uri, false)) safeSelectionVersion++
+        if (uri != null) bb.pix.wall.engine.EngineExecutors.io {
+            val ok = SafeWall.importImage(context.applicationContext, uri, false)
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                if (ok) safeSelectionVersion++
+            }
+        }
     }
     @Suppress("UNUSED_VARIABLE") val selectionState = safeSelectionVersion
 
