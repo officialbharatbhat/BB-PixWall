@@ -84,7 +84,7 @@ class WallpaperAutomationService : Service() {
                         this@WallpaperAutomationService
                     ).load()
 
-                if (!settings.autoChange) {
+                if (!settings.autoChange || bb.pix.wall.engine.SafeWall.active(this@WallpaperAutomationService)) {
                     return
                 }
 
@@ -120,7 +120,7 @@ class WallpaperAutomationService : Service() {
                     ).load()
 
                 if (
-                    settings.autoChange &&
+                    settings.autoChange && !bb.pix.wall.engine.SafeWall.active(this@WallpaperAutomationService) &&
                     settings.triggerMode ==
                         TriggerMode.INTERVAL
                 ) {
@@ -304,6 +304,7 @@ class WallpaperAutomationService : Service() {
         settings: AppSettings,
         reason: String,
     ) {
+        if (bb.pix.wall.engine.SafeWall.active(this)) return
         val now =
             System.currentTimeMillis()
 
