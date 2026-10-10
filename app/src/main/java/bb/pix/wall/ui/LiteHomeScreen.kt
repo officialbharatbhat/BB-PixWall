@@ -117,6 +117,7 @@ fun LiteHomeScreen(
         }
 
     var safeSelectionVersion by remember { mutableIntStateOf(0) }
+    var safeActive by remember(refreshKey, safeSelectionVersion) { mutableStateOf(SafeWall.active(context)) }
     val pickSafeHome = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null && SafeWall.importImage(context, uri, true)) safeSelectionVersion++
     }
@@ -152,7 +153,7 @@ fun LiteHomeScreen(
                 subtitle = "Choose two original wallpapers • privacy pause",
             ) {
                 Text(
-                    if (SafeWall.active(context)) "Safe Wall ACTIVE • wallpaper rotation paused"
+                    if (safeActive) "Safe Wall ACTIVE • wallpaper rotation paused"
                     else if (SafeWall.configured(context)) "Both safe wallpapers ready"
                     else "Select Safe Home and Safe Lock wallpapers before using the QS tile.",
                     style = MaterialTheme.typography.bodyMedium,
@@ -160,21 +161,24 @@ fun LiteHomeScreen(
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedButton(
                         onClick = { pickSafeHome.launch("image/*") },
-                        enabled = !SafeWall.active(context),
+                        enabled = !safeActive,
                         modifier = Modifier.weight(1f),
                     ) { Text("Choose Home") }
                     OutlinedButton(
                         onClick = { pickSafeLock.launch("image/*") },
-                        enabled = !SafeWall.active(context),
+                        enabled = !safeActive,
                         modifier = Modifier.weight(1f),
                     ) { Text("Choose Lock") }
                 }
                 OutlinedButton(onClick = {
                     bb.pix.wall.engine.EngineExecutors.io {
                         SafeWall.toggle(context.applicationContext)
+                        android.os.Handler(android.os.Looper.getMainLooper()).post {
+                            safeActive = SafeWall.active(context)
+                        }
                     }
                 }) {
-                    Text(if (SafeWall.active(context)) "Restore normal wallpaper" else "Activate Safe Wall")
+                    Text(if (safeActive) "Restore normal wallpaper" else "Activate Safe Wall")
                 }
                 Text(
                     "Safe originals stay outside history/cache cleanup. Use Safe Wall tile for quick toggle.",
