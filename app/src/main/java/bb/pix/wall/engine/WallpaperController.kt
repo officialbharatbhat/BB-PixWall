@@ -1779,6 +1779,7 @@ fun invalidateQueue() =
         java.util.concurrent.atomic.AtomicLong(0L)
 
     fun toggleBlur(context: Context): Boolean {
+        if (SafeWall.active(context)) return false
         val settings = SettingsStore(context).load()
 
         if (
@@ -1894,6 +1895,7 @@ fun invalidateQueue() =
         context: Context,
         enabled: Boolean = true,
     ) {
+        if (SafeWall.active(context)) return
         context.getSharedPreferences(
             "bb_pixwall_runtime",
             Context.MODE_PRIVATE,
@@ -1971,6 +1973,7 @@ fun invalidateQueue() =
         enabled: Boolean,
         generation: Long,
     ) {
+        if (SafeWall.active(context)) return
         val wm =
             WallpaperManager.getInstance(
                 context
