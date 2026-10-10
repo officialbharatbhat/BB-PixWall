@@ -183,6 +183,20 @@ fun LiteHomeScreen(
                 }) {
                     Text(if (safeActive) "Restore normal wallpaper" else "Activate Safe Wall")
                 }
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    LiteCurrentPreview(
+                        label = "Safe Home",
+                        file = SafeWall.selectedFile(context, true),
+                        refreshKey = refreshKey + safeSelectionVersion,
+                        modifier = Modifier.weight(1f),
+                    )
+                    LiteCurrentPreview(
+                        label = "Safe Lock",
+                        file = SafeWall.selectedFile(context, false),
+                        refreshKey = refreshKey + safeSelectionVersion,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
                 Text(
                     "Safe originals stay outside history/cache cleanup. Use Safe Wall tile for quick toggle.",
                     style = MaterialTheme.typography.bodySmall,
