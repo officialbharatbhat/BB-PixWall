@@ -60,6 +60,16 @@ object SafeWall {
             if (restored) {
                 restoreHome(c).delete()
                 restoreLock(c).delete()
+                if (WallpaperController.effectiveBlurEnabled(c)) {
+                    WallpaperController.setBlurMasterAndReapply(c, true)
+                }
+                // Refill in the background after the privacy pause is lifted.
+                EngineExecutors.io {
+                    val settings = bb.pix.wall.settings.SettingsStore(c).load()
+                    if (settings.autoChange) {
+                        runCatching { WallpaperController.primeCache(c, settings) }
+                    }
+                }
             }
             return@synchronized restored
         }
