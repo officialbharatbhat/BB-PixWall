@@ -7,6 +7,7 @@ class BlurWallTileService : BaseTileService() {
     override fun onStartListening() { super.onStartListening(); refresh() }
     override fun onClick() {
         super.onClick()
+        if (bb.pix.wall.engine.SafeWall.active(this)) { toast("Safe Wall is active"); return }
         setBusy("Rendering…")
 
         /*
