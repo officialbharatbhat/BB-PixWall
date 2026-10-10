@@ -1,6 +1,9 @@
 package bb.pix.wall.ui
 
 import android.content.Intent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import bb.pix.wall.engine.SafeWall
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Environment
@@ -113,6 +116,15 @@ fun LiteHomeScreen(
             Environment.isExternalStorageManager()
         }
 
+    var safeSelectionVersion by remember { mutableIntStateOf(0) }
+    val pickSafeHome = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null && SafeWall.importImage(context, uri, true)) safeSelectionVersion++
+    }
+    val pickSafeLock = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null && SafeWall.importImage(context, uri, false)) safeSelectionVersion++
+    }
+    @Suppress("UNUSED_VARIABLE") val selectionState = safeSelectionVersion
+
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
     ) { padding ->
@@ -134,6 +146,42 @@ fun LiteHomeScreen(
             LiteCurrentPreviewStrip(
                 refreshKey = refreshKey,
             )
+
+            LiteSection(
+                title = "Safe Wall",
+                subtitle = "Choose two original wallpapers • privacy pause",
+            ) {
+                Text(
+                    if (SafeWall.active(context)) "Safe Wall ACTIVE • wallpaper rotation paused"
+                    else if (SafeWall.configured(context)) "Both safe wallpapers ready"
+                    else "Select Safe Home and Safe Lock wallpapers before using the QS tile.",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(
+                        onClick = { pickSafeHome.launch("image/*") },
+                        enabled = !SafeWall.active(context),
+                        modifier = Modifier.weight(1f),
+                    ) { Text("Choose Home") }
+                    OutlinedButton(
+                        onClick = { pickSafeLock.launch("image/*") },
+                        enabled = !SafeWall.active(context),
+                        modifier = Modifier.weight(1f),
+                    ) { Text("Choose Lock") }
+                }
+                OutlinedButton(onClick = {
+                    bb.pix.wall.engine.EngineExecutors.io {
+                        SafeWall.toggle(context.applicationContext)
+                    }
+                }) {
+                    Text(if (SafeWall.active(context)) "Restore normal wallpaper" else "Activate Safe Wall")
+                }
+                Text(
+                    "Safe originals stay outside history/cache cleanup. Use Safe Wall tile for quick toggle.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+
 
             LiteSection(
                 title = "Sources",
