@@ -280,7 +280,7 @@ class LanServerService : Service() {
             return
         }
         if (bb.pix.wall.engine.SafeWall.active(this) &&
-            path in setOf("/api/next", "/api/previous", "/api/blur", "/api/history-restore", "/api/refresh-next")) {
+            path in setOf("/api/next", "/api/previous", "/api/blur", "/api/history-restore", "/api/refresh-next", "/api/surprise", "/api/rebuild-next", "/api/library-action")) {
             sendJson(s, 423, "{\"error\":\"safe_wall_active\"}")
             return
         }
@@ -959,6 +959,8 @@ class LanServerService : Service() {
             append("\"driveFolderUrl\":${quote(x.driveFolderUrl)},")
             append("\"sourcePriorityMode\":${quote(x.sourcePriorityMode.name)},")
 
+            append("\"safeWallActive\":${bb.pix.wall.engine.SafeWall.active(this@LanServerService)},")
+            append("\"safeWallConfigured\":${bb.pix.wall.engine.SafeWall.configured(this@LanServerService)},")
             append("\"autoChange\":${x.autoChange},")
             append("\"triggerMode\":${quote(x.triggerMode.name)},")
             append("\"intervalMinutes\":${x.intervalMinutes},")
