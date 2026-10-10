@@ -1,4 +1,4 @@
-# BB-PixWall Lite v1.0.0
+# BB-PixWall Lite v1.1.0
 
 BB-PixWall Lite is the lightweight edition of BB-PixWall, focused on fast automatic wallpaper changes with original-quality wallpaper application.
 
@@ -17,6 +17,16 @@ BB-PixWall Lite is the lightweight edition of BB-PixWall, focused on fast automa
 - Quick Settings tiles for Next, Save, Blur, and BB-Remote
 - Standard and Advanced/root modes
 - Light, Dark, System, and Pure Black appearance modes
+
+## What's new in 1.1.0
+- History capped at 10 entries with automatic pruning
+- Safe Wall: choose independent original Home/Lock wallpapers, activate via Quick Settings
+- Previous Wallpaper Quick Settings tile
+- Event-driven cache refill when connectivity returns
+- Defer cloud refill when battery saver or thermal pressure is high; prepared originals remain available
+- BB-Remote Safe Wall status, protected wallpaper actions and streamlined current/next previews
+- Manual official GitHub Lite release update checker
+- Selected Safe Home/Lock previews in the dashboard
 
 ## Lite design
 BB-PixWall Lite intentionally removes the heavier adaptive/AI wallpaper engines from the Full edition. The runtime path is kept focused on:
@@ -40,7 +50,7 @@ BB-Remote is LAN-only. The controlling browser/device must be on the same local 
 `bb.pixwall.lite`
 
 ## Version
-`1.0.0`
+`1.1.0`
 
 ## Developer
 **Bharat Bhat**
