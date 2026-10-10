@@ -279,6 +279,11 @@ class LanServerService : Service() {
 
             return
         }
+        if (bb.pix.wall.engine.SafeWall.active(this) &&
+            path in setOf("/api/next", "/api/previous", "/api/blur", "/api/history-restore", "/api/refresh-next")) {
+            sendJson(s, 423, "{\"error\":\"safe_wall_active\"}")
+            return
+        }
         when (path) {
             "/health" -> sendJson(s, 200, "{\"ok\":true,\"port\":$boundPort,\"ip\":${quote(LanInfo.localIpv4())},\"state\":${quote(bb.pix.wall.engine.RuntimeStatus.get(this, "lan_state"))}}")
             "/api/next" -> sendJson(s, if (mutationAllowed) 200 else 403, if (mutationAllowed) "{\"ok\":${WallpaperController.nextWall(this, userInitiated = true)}}" else "{\"error\":\"forbidden\"}")
