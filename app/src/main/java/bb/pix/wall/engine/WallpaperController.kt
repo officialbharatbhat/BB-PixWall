@@ -818,6 +818,7 @@ fun invalidateQueue() =
     fun screenOffFastWall(
         context: Context,
     ): Boolean {
+        if (SafeWall.active(context)) return false
         val settings =
             SettingsStore(context).load()
 
@@ -1101,6 +1102,7 @@ fun invalidateQueue() =
         userInitiated: Boolean = false,
         preferLockFirst: Boolean = false,
     ): Boolean {
+        if (SafeWall.active(context)) return false
         val now = System.currentTimeMillis()
         if (now - lastApplyStartedAt < 900L) return false
         if (!applying.compareAndSet(false, true)) return false
@@ -1478,6 +1480,7 @@ fun invalidateQueue() =
         entry: WallpaperLibrary.HistoryEntry,
     ): Boolean =
         synchronized(lock) {
+            if (SafeWall.active(context)) return@synchronized false
             requireStorage()
 
             val settings =
@@ -1605,6 +1608,7 @@ fun invalidateQueue() =
         context: Context,
     ): Boolean =
         synchronized(lock) {
+            if (SafeWall.active(context)) return@synchronized false
             WallpaperFiles.ensure()
 
             val settings =
