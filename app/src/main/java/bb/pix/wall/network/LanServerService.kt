@@ -1197,7 +1197,7 @@ class LanServerService : Service() {
         bb.pix.wall.engine
             .WallpaperLibrary
             .history()
-            .take(40)
+            .take(10)
             .joinToString(
                 prefix = "[",
                 postfix = "]",
