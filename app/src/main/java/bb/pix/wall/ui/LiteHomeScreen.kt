@@ -4,6 +4,7 @@ import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import bb.pix.wall.engine.SafeWall
+import bb.pix.wall.engine.LiteUpdateChecker
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Environment
@@ -116,6 +117,8 @@ fun LiteHomeScreen(
             Environment.isExternalStorageManager()
         }
 
+    var updateStatus by remember { mutableStateOf("Check for new Lite releases manually") }
+    var updateUrl by remember { mutableStateOf("") }
     var safeSelectionVersion by remember { mutableIntStateOf(0) }
     var safeActive by remember(refreshKey, safeSelectionVersion) { mutableStateOf(SafeWall.active(context)) }
     val pickSafeHome = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
@@ -773,6 +776,30 @@ fun LiteHomeScreen(
                 }
             }
 
+            LiteSection(
+                title = "Updates",
+                subtitle = "Official Lite releases • GitHub",
+            ) {
+                Text("Installed Lite v${BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.bodyMedium)
+                Text(updateStatus, style = MaterialTheme.typography.bodySmall)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = {
+                        updateStatus = "Checking GitHub…"
+                        bb.pix.wall.engine.EngineExecutors.io {
+                            val result = LiteUpdateChecker.check(context.applicationContext)
+                            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                                updateStatus = result.message
+                                updateUrl = if (result.available) result.page else ""
+                            }
+                        }
+                    }) { Text("Check updates") }
+                    if (updateUrl.startsWith("https://github.com/")) {
+                        OutlinedButton(onClick = {
+                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(updateUrl)))
+                        }) { Text("Open release") }
+                    }
+                }
+            }
             LiteDeveloperIdentityCard()
 
             Spacer(Modifier.height(8.dp))
