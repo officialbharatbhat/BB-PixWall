@@ -18,6 +18,7 @@ object SafeWall {
 
     fun active(c: Context): Boolean = pref(c).getBoolean("active", false)
     fun configured(c: Context): Boolean = safeHome(c).length() > 0 && safeLock(c).length() > 0
+    fun selectedFile(c: Context, home: Boolean): File = if (home) safeHome(c) else safeLock(c)
     fun selected(c: Context, home: Boolean): Boolean =
         (if (home) safeHome(c) else safeLock(c)).length() > 0
 
