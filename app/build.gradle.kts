@@ -3,18 +3,23 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+val releaseStoreFile = providers.gradleProperty("BBPIX_STORE_FILE").orNull
+val releaseStorePassword = providers.gradleProperty("BBPIX_STORE_PASSWORD").orNull
+val releaseKeyAlias = providers.gradleProperty("BBPIX_KEY_ALIAS").orNull
+val releaseKeyPassword = providers.gradleProperty("BBPIX_KEY_PASSWORD").orNull
+val hasReleaseSigning = listOf(
+    releaseStoreFile, releaseStorePassword, releaseKeyAlias, releaseKeyPassword
+).all { !it.isNullOrBlank() }
+
 android {
     signingConfigs {
-        create("release") {
-            storeFile = file(
-                providers.gradleProperty("BBPIX_STORE_FILE").get()
-            )
-            storePassword =
-                providers.gradleProperty("BBPIX_STORE_PASSWORD").get()
-            keyAlias =
-                providers.gradleProperty("BBPIX_KEY_ALIAS").get()
-            keyPassword =
-                providers.gradleProperty("BBPIX_KEY_PASSWORD").get()
+        if (hasReleaseSigning) {
+            create("release") {
+                storeFile = file(requireNotNull(releaseStoreFile))
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
         }
     }
 
@@ -36,7 +41,9 @@ android {
 
     buildTypes {
         release {
-            signingConfig = signingConfigs.getByName("release")
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(
