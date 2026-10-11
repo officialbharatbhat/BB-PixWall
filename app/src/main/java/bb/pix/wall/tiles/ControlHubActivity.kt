@@ -55,7 +55,7 @@ import bb.pix.wall.ui.theme.ThemeProfile
 class ControlHubActivity : ComponentActivity() {
     private var busy by mutableStateOf(false)
     private var status by mutableStateOf("Tap an action")
-    private var refreshVersion by mutableIntStateOf(0)
+    private var hubState by mutableStateOf(HubState(false, false, false, false))
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -63,6 +63,7 @@ class ControlHubActivity : ComponentActivity() {
             (resources.displayMetrics.widthPixels * 0.92f).toInt(),
             WindowManager.LayoutParams.WRAP_CONTENT,
         )
+        refreshState()
         setContent {
             BBPixWallTheme(profile = ThemeProfile.MATERIAL_PRO, appearanceMode = SettingsStore(this@ControlHubActivity).load().appearanceMode) {
                 Surface(
@@ -82,16 +83,7 @@ class ControlHubActivity : ComponentActivity() {
                         }
                         Text(status, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
 
-                        // Refresh the snapshot after actions and when returning to the dialog.
-                        val snapshot = refreshVersion.let {
-                            val s = SettingsStore(this@ControlHubActivity).load()
-                            HubState(
-                                safe = SafeWall.active(this@ControlHubActivity),
-                                blur = WallpaperController.effectiveBlurEnabled(this@ControlHubActivity),
-                                remote = s.lanEnabled,
-                                previous = WallpaperController.previousAvailable(),
-                            )
-                        }
+                        val snapshot = hubState
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             HubAction("Next Wallpaper", Icons.Outlined.ArrowForward, null, !busy, Modifier.weight(1f)) { execute("next") }
                             HubAction("Previous Wallpaper", Icons.Outlined.ArrowBack, null, !busy && snapshot.previous, Modifier.weight(1f)) { execute("previous") }
@@ -112,10 +104,21 @@ class ControlHubActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        refreshVersion++
+        refreshState()
     }
 
     private data class HubState(val safe: Boolean, val blur: Boolean, val remote: Boolean, val previous: Boolean)
+
+    private fun refreshState() {
+        val settings = SettingsStore(this).load()
+        hubState = HubState(
+            safe = SafeWall.active(this),
+            blur = WallpaperController.effectiveBlurEnabled(this),
+            remote = settings.lanEnabled,
+            previous = WallpaperController.previousAvailable(),
+        )
+    }
+
 
     @Composable
     private fun HubAction(
