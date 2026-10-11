@@ -2869,9 +2869,17 @@ fun invalidateQueue() =
             }
 
             /*
-             * Keep an exact original copy for Save/Blur reapply.
-             * No autonomous/history/previous-wall work on Lite.
+             * Preserve the previously applied original before replacing it.
+             * Only capture after WallpaperManager accepted the new stream.
              */
+            val previous = when (flag) {
+                WallpaperManager.FLAG_SYSTEM -> WallpaperFiles.previousHome
+                WallpaperManager.FLAG_LOCK -> WallpaperFiles.previousLock
+                else -> null
+            }
+            if (previous != null && current.isFile) {
+                snapshotPrevious(current, previous)
+            }
             current.parentFile?.mkdirs()
             src.copyTo(
                 current,
