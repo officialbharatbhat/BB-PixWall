@@ -53,6 +53,9 @@ object WebRemoteDashboard {
   --danger:#ff7b86;
   --r:21px;
 }
+@font-face{font-family:'BBImported';src:url('/assets/custom-font');font-display:swap}
+html.bb-custom-font,html.bb-custom-font body,html.bb-custom-font button,html.bb-custom-font input,html.bb-custom-font select,html.bb-custom-font textarea{font-family:'BBImported',system-ui,sans-serif!important}
+html{font-size:calc(16px * var(--bb-font-scale,1))}
 *{box-sizing:border-box}
 html{scroll-behavior:smooth}
 body{
@@ -456,6 +459,14 @@ pre{
     <div class="metric"><small>Photos</small><strong id="photosHealth">-</strong></div>
     <div class="metric"><small>Drive</small><strong id="driveHealth">-</strong></div>
     <div class="metric"><small>Local</small><strong id="localHealth">-</strong></div>
+  </div>
+  <div class="three">
+    <div class="metric"><small>Photos success</small><strong id="photosReliability">N/A</strong></div>
+    <div class="metric"><small>Drive success</small><strong id="driveReliability">N/A</strong></div>
+    <div class="metric"><small>Local success</small><strong id="localReliability">N/A</strong></div>
+  </div>
+  <div class="metric"><small>Current source decision</small><strong id="priorityDecision">Waiting</strong></div>
+  <div class="three">
   </div>
 
   <div class="field">
@@ -993,6 +1004,10 @@ function render(s){
   text('photosHealth',s.photosHealth);
   text('driveHealth',s.driveHealth);
   text('localHealth',s.localHealth);
+  text('photosReliability',s.photosReliability||'N/A');
+  text('driveReliability',s.driveReliability||'N/A');
+  text('localReliability',s.localReliability||'N/A');
+  text('priorityDecision',s.priorityDecision||'Waiting');
 
   text('cacheBreakdown',s.cacheBreakdown);
   text('cycleProgress',s.cycleProgress);
@@ -1198,15 +1213,20 @@ document.addEventListener('input',e=>{
   }
 });
 
+fetch('/api/font-preferences',{cache:'no-store'}).then(r=>r.json()).then(p=>{
+  document.documentElement.classList.toggle('bb-custom-font',!!p.selected);
+  document.documentElement.style.setProperty('--bb-font-scale',String(Number(p.size)||1));
+  document.body.style.zoom=String(Number(p.size)||1);
+}).catch(()=>{});
 load(true);
 loadLogs();
 loadHistory();
 refreshImages();
 pollLive();
 
-setInterval(pollLive,500);
-setInterval(()=>load(false),10000);
-setInterval(loadHistory,30000);
+// Poll only while visible; avoid hammering the Android LAN service.\nsetInterval(pollLive,1500);
+setInterval(()=>{if(!document.hidden)load(false)},12000);
+setInterval(()=>{if(!document.hidden)loadHistory()},30000);
 
 document.addEventListener('visibilitychange',()=>{
   if(!document.hidden){

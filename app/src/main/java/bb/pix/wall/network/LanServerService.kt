@@ -617,6 +617,14 @@ class LanServerService : Service() {
                     WallpaperFiles.nextLock,
                     "next_lock",
                 )
+            "/assets/custom-font" -> {
+                val font = bb.pix.wall.settings.DeveloperFont.file(this)
+                if (bb.pix.wall.settings.DeveloperFont.isSelected(this) && font.isFile && font.length() in 1..(12L * 1024 * 1024)) {
+                    sendBytes(s, 200, "font/ttf", font.readBytes())
+                } else sendText(s, 404, "text/plain", "No custom font")
+            }
+                        "/api/font-preferences" -> sendJson(s, 200,
+                """{"selected":${bb.pix.wall.settings.DeveloperFont.isSelected(this)},"size":${bb.pix.wall.settings.DeveloperFont.size(this)}}""")
             "/", "/index.html" -> sendText(s, 200, "text/html; charset=utf-8", dashboard(token))
             else -> sendText(s, 404, "text/plain; charset=utf-8", "Not found")
         }
@@ -1033,6 +1041,14 @@ class LanServerService : Service() {
             append("\"photosHealth\":${quote(RuntimeStatus.get(this@LanServerService, "source_photos", "Unknown"))},")
             append("\"driveHealth\":${quote(RuntimeStatus.get(this@LanServerService, "source_drive", "Unknown"))},")
             append("\"localHealth\":${quote(RuntimeStatus.get(this@LanServerService, "source_local", "Unknown"))},")
+            for (source in listOf("photos", "drive", "local")) {
+                val attempts = RuntimeStatus.getInt(this@LanServerService, "${source}_attempts")
+                val successful = RuntimeStatus.getInt(this@LanServerService, "${source}_successes")
+                append("\"${source}Reliability\":${quote(if (attempts == 0) "N/A" else "${successful * 100 / attempts}% (${successful}/${attempts})")},")
+            }
+            append("\"priorityDecision\":${quote(RuntimeStatus.get(this@LanServerService, "source_priority_decision", "Awaiting sources"))},")
+            append("\"wallpaperLockActive\":${bb.pix.wall.engine.WallpaperLock.active(this@LanServerService)},")
+            append("\"transactionRecovery\":${quote(RuntimeStatus.get(this@LanServerService, "transaction_recovery", "No recovery needed"))},")
 
             append("\"lastPipeline\":${quote(RuntimeStatus.get(this@LanServerService, "last_pipeline", "Waiting"))},")
             append("\"lastAspect\":${quote(RuntimeStatus.get(this@LanServerService, "last_aspect", "Unknown"))},")

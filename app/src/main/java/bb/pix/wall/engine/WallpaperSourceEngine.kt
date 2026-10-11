@@ -22,6 +22,8 @@ object WallpaperSourceEngine {
     private data class CachedIndex(val at: Long, val items: List<Candidate>)
     private val indexCache = java.util.concurrent.ConcurrentHashMap<String, CachedIndex>()
     private const val INDEX_TTL_MS = 10 * 60 * 1000L
+    private val photosIndexGate = Any()
+    private val driveIndexGate = Any()
 
     fun invalidateCloudIndex() { indexCache.clear() }
 
@@ -128,7 +130,11 @@ object WallpaperSourceEngine {
 
             if (localFallbackActive) {
                 all += local
+                RuntimeStatus.set(context, "fallback_reason", if (local.isNotEmpty()) "Cloud unavailable; local selected" else "No source candidates available")
             }
+            RuntimeStatus.increment(context, "local_attempts")
+            if (local.isNotEmpty()) RuntimeStatus.increment(context, "local_successes")
+            else RuntimeStatus.increment(context, "local_failures")
 
             RuntimeStatus.source(
                 context,
@@ -152,6 +158,21 @@ object WallpaperSourceEngine {
             )
         }
 
+        // A fetched index is not proof of application, but is a useful source hint
+        // until WallpaperController records the actual committed candidate.
+        if (photosOk || driveOk || all.isNotEmpty()) {
+            RuntimeStatus.set(context, "last_available_source", when {
+                photosOk -> "Google Photos"
+                driveOk -> "Google Drive"
+                else -> "Local"
+            })
+        }
+        RuntimeStatus.set(context, "source_priority_decision", when {
+            photosOk -> "Photos primary"
+            driveOk -> "Drive fallback (Photos unavailable)"
+            all.any { it.source.contains("local", ignoreCase = true) } -> "Local fallback (cloud unavailable)"
+            else -> "No source available"
+        })
         val seed = stableSeed(context)
 
         val grouped = all.distinctBy { it.id }
@@ -181,6 +202,8 @@ object WallpaperSourceEngine {
         items: List<Candidate>,
         fallback: Boolean = false,
     ) {
+        RuntimeStatus.increment(context, "${source}_attempts")
+        RuntimeStatus.increment(context, "${source}_successes")
         val count = items.size
         val previousCount = RuntimeStatus.get(
             context,
@@ -269,6 +292,8 @@ object WallpaperSourceEngine {
     }
 
     private fun sourceFailure(context: Context, source: String, error: Throwable, ms: Long) {
+        RuntimeStatus.increment(context, "${source}_attempts")
+        RuntimeStatus.increment(context, "${source}_failures")
         val streak = RuntimeStatus.increment(context, "${source}_fail_streak")
         RuntimeStatus.setLong(context, "${source}_last_latency_ms", ms)
         RuntimeStatus.setLong(context, "${source}_last_fail", System.currentTimeMillis())
@@ -300,35 +325,29 @@ object WallpaperSourceEngine {
     }
 
 
-    private fun googlePhotos(sharedUrl: String, dataSaver: Boolean): List<Candidate> {
-        val key = "photos|$dataSaver|${sharedUrl.trim()}"
-        val now = System.currentTimeMillis()
-        indexCache[key]
-            ?.takeIf {
-                now - it.at < INDEX_TTL_MS
+    private fun googlePhotos(sharedUrl: String, dataSaver: Boolean): List<Candidate> =
+        synchronized(photosIndexGate) {
+            val key = "photos|$dataSaver|${sharedUrl.trim()}"
+            val now = System.currentTimeMillis()
+            indexCache[key]?.takeIf { now - it.at < INDEX_TTL_MS }?.let {
+                return@synchronized it.items
             }
-            ?.let {
-                return it.items
+            parseGooglePhotos(sharedUrl, dataSaver).also {
+                indexCache[key] = CachedIndex(System.currentTimeMillis(), it)
             }
-
-        return parseGooglePhotos(
-            sharedUrl,
-            dataSaver,
-        ).also {
-            indexCache[key] =
-                CachedIndex(
-                    now,
-                    it,
-                )
         }
-    }
 
-    private fun googleDriveFolder(folderUrl: String, dataSaver: Boolean): List<Candidate> {
-        val key = "drive|$dataSaver|${folderUrl.trim()}"
-        val now = System.currentTimeMillis()
-        indexCache[key]?.takeIf { now - it.at < INDEX_TTL_MS }?.let { return it.items }
-        return parseGoogleDriveFolder(folderUrl, dataSaver).also { indexCache[key] = CachedIndex(now, it) }
-    }
+    private fun googleDriveFolder(folderUrl: String, dataSaver: Boolean): List<Candidate> =
+        synchronized(driveIndexGate) {
+            val key = "drive|$dataSaver|${folderUrl.trim()}"
+            val now = System.currentTimeMillis()
+            indexCache[key]?.takeIf { now - it.at < INDEX_TTL_MS }?.let {
+                return@synchronized it.items
+            }
+            parseGoogleDriveFolder(folderUrl, dataSaver).also {
+                indexCache[key] = CachedIndex(System.currentTimeMillis(), it)
+            }
+        }
     private data class PhotosPageRequest(
         val albumKey: String,
         val authKey: String,

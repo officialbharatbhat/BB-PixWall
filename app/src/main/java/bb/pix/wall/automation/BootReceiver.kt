@@ -16,6 +16,9 @@ class BootReceiver : BroadcastReceiver() {
                 if (bb.pix.wall.engine.SafeWall.active(context)) {
                     runCatching { bb.pix.wall.engine.SafeWall.reassert(context) }
                 }
+                if (!bb.pix.wall.engine.SafeWall.active(context)) {
+                    runCatching { bb.pix.wall.engine.WallpaperTransaction.recover(context) }
+                }
                 val settings = SettingsStore(context).load()
                 if (settings.autoChange) runCatching { context.startForegroundService(Intent(context, WallpaperAutomationService::class.java)) }
                 if (settings.lanEnabled) runCatching { context.startForegroundService(Intent(context, LanServerService::class.java)) }

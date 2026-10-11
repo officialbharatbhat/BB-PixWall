@@ -822,7 +822,7 @@ fun invalidateQueue() =
     fun screenOffFastWall(
         context: Context,
     ): Boolean {
-        if (SafeWall.active(context)) return false
+        if (SafeWall.active(context) || WallpaperLock.active(context)) return false
         val settings =
             SettingsStore(context).load()
 
@@ -1110,7 +1110,7 @@ fun invalidateQueue() =
         userInitiated: Boolean = false,
         preferLockFirst: Boolean = false,
     ): Boolean {
-        if (SafeWall.active(context)) return false
+        if (SafeWall.active(context) || WallpaperLock.active(context)) return false
         val now = System.currentTimeMillis()
         if (now - lastApplyStartedAt < 900L) return false
         if (!applying.compareAndSet(false, true)) return false
@@ -1133,19 +1133,6 @@ fun invalidateQueue() =
             //
             // Manual Next must not hit cloud while ready cached
             // wallpapers are sitting unused on disk.
-            if (
-                !prepareNextFromPredictiveCache(
-                    context,
-                    settings,
-                )
-            ) {
-                ensureNext(
-                    context,
-                    settings,
-                    allowNetwork = false,
-                )
-            }
-
             fun targetPrepared(): Boolean =
                 when (settings.targetMode) {
                     WallpaperTargetMode.HOME ->
@@ -1163,8 +1150,13 @@ fun invalidateQueue() =
                             WallpaperFiles.nextLock.exists()
                 }
 
-            var preparedForTarget =
-                targetPrepared()
+            var preparedForTarget = targetPrepared()
+            if (!preparedForTarget) {
+                if (!prepareNextFromPredictiveCache(context, settings)) {
+                    ensureNext(context, settings, allowNetwork = false)
+                }
+                preparedForTarget = targetPrepared()
+            }
 
             /*
              * Manual/QS Next must behave as one press = one change.
@@ -1244,10 +1236,14 @@ fun invalidateQueue() =
             }
 
             synchronized(lock) {
+                if (!WallpaperTransaction.recover(context)) return@synchronized false
+                if (!WallpaperTransaction.begin(context)) return@synchronized false
 
                 val wm = WallpaperManager.getInstance(context)
             val blurMaster = blurMasterEnabled(context)
             var changed = false
+            var homeApplied = false
+            var lockApplied = false
             fun applyNext(
                 src: File,
                 flag: Int,
@@ -1305,6 +1301,10 @@ fun invalidateQueue() =
                     finished - started,
                 )
 
+                if (result) {
+                    if (flag == WallpaperManager.FLAG_SYSTEM) homeApplied = true
+                    if (flag == WallpaperManager.FLAG_LOCK) lockApplied = true
+                }
                 return result
             }
             when (settings.targetMode) {
@@ -1424,6 +1424,16 @@ fun invalidateQueue() =
                     }
                 }
             }
+            val completePair = when (settings.targetMode) {
+                WallpaperTargetMode.HOME -> homeApplied
+                WallpaperTargetMode.LOCK -> lockApplied
+                WallpaperTargetMode.BOTH_SAME, WallpaperTargetMode.BOTH_DIFFERENT -> homeApplied && lockApplied
+            }
+            if (changed && !completePair) {
+                WallpaperTransaction.recover(context)
+                RuntimeStatus.failure(context, "Partial Home/Lock commit rolled back")
+                changed = false
+            }
             if (changed) {
                 recordSeenForCurrent(settings.targetMode)
                 WallpaperFiles.nextHome.delete()
@@ -1471,9 +1481,16 @@ fun invalidateQueue() =
                 RuntimeStatus.failure(context, "Offline queue empty")
                 log("NEXT skipped: offline queue empty")
             }
+            if (changed) {
+                WallpaperTransaction.complete(context)
+            } else {
+                // Restore last-good originals on a failed application.
+                WallpaperTransaction.recover(context)
+            }
             changed
             }
         } catch (t: Throwable) {
+            runCatching { WallpaperTransaction.recover(context) }
 
             RuntimeStatus.failure(context, t.message ?: t.javaClass.simpleName)
             log("NEXT failed: ${t.message}")
@@ -1488,7 +1505,7 @@ fun invalidateQueue() =
         entry: WallpaperLibrary.HistoryEntry,
     ): Boolean =
         synchronized(lock) {
-            if (SafeWall.active(context)) return@synchronized false
+            if (SafeWall.active(context) || WallpaperLock.active(context)) return@synchronized false
             requireStorage()
 
             val settings =
@@ -1616,7 +1633,7 @@ fun invalidateQueue() =
         context: Context,
     ): Boolean =
         synchronized(lock) {
-            if (SafeWall.active(context)) return@synchronized false
+            if (SafeWall.active(context) || WallpaperLock.active(context)) return@synchronized false
             WallpaperFiles.ensure()
 
             val settings =
@@ -2293,7 +2310,7 @@ fun invalidateQueue() =
         doBlur: Boolean,
         radius: Int,
     ) {
-        if (SafeWall.active(context) || !src.exists()) return
+        if (SafeWall.active(context) || WallpaperLock.active(context) || !src.exists()) return
         if (!doBlur || radius <= 0) {
             val aspect = inspectAspect(src, settings.smartCropTolerancePct)
             if (settings.smartCropEnabled && aspect.valid && !aspect.matchesNineByTwenty) {
@@ -2800,7 +2817,7 @@ fun invalidateQueue() =
         radius: Int,
         current: File,
     ): Boolean {
-        if (SafeWall.active(context) || !src.exists()) return false
+        if (SafeWall.active(context) || WallpaperLock.active(context) || !src.exists()) return false
 
         return try {
             if (!doBlur || radius <= 0) {
@@ -2895,6 +2912,9 @@ fun invalidateQueue() =
                 current,
             )
 
+            // Source must describe the wallpaper actually committed, not just
+            // the last cloud index fetch.
+            RuntimeStatus.activeSource(context, sourceFor(current.absolutePath))
             true
         } catch (t: Throwable) {
             log(
@@ -3421,7 +3441,7 @@ fun invalidateQueue() =
                 )
 
             try {
-                fetchTo(candidate, staging)
+                fetchTo(context, candidate, staging)
                 validateImage(staging)
 
                 val ext =
@@ -3458,6 +3478,8 @@ fun invalidateQueue() =
                     candidate.source,
                     candidate.id,
                 )
+                HubFetchCounters.record(context, candidate.source)
+
 
                 existingIds += candidate.id
                 added++
@@ -3959,7 +3981,7 @@ fun invalidateQueue() =
             var finalFile: File? = null
 
             try {
-                fetchTo(candidate, staging)
+                fetchTo(context, candidate, staging)
 
                 /*
                  * Source mode may have changed while this network
@@ -4150,6 +4172,8 @@ fun invalidateQueue() =
                                 candidate.source,
                                 candidate.id,
                             )
+                HubFetchCounters.record(context, candidate.source)
+
 
                             true
                         }
@@ -5312,6 +5336,7 @@ fun invalidateQueue() =
 
             try {
                 fetchTo(
+                    context,
                     candidate,
                     dest,
                 )
@@ -5336,6 +5361,8 @@ fun invalidateQueue() =
                     candidate.source,
                     candidate.id,
                 )
+                HubFetchCounters.record(context, candidate.source)
+
 
                 RuntimeStatus.activeSource(
                     context,
@@ -5439,7 +5466,7 @@ fun invalidateQueue() =
         return digest.digest().joinToString("") { "%02x".format(it) }
     }
 
-    private fun fetchToOnce(candidate: WallpaperSourceEngine.Candidate, dest: File) {
+    private fun fetchToOnce(context: Context, candidate: WallpaperSourceEngine.Candidate, dest: File) {
         dest.parentFile?.mkdirs()
         candidate.file?.let {
             it.copyTo(dest, overwrite = true)
@@ -5465,7 +5492,17 @@ fun invalidateQueue() =
             val type = connection.contentType.orEmpty().lowercase()
             if (type.contains("text/html") || type.contains("application/json") || type.contains("text/plain")) error("Server returned $type instead of image")
             val append = previous > 0L && code == HttpURLConnection.HTTP_PARTIAL
-            connection.inputStream.use { input -> FileOutputStream(tmp, append).use { output -> input.copyTo(output) } }
+            connection.inputStream.use { input ->
+                FileOutputStream(tmp, append).use { output ->
+                    val buf = ByteArray(32 * 1024)
+                    while (true) {
+                        val size = input.read(buf)
+                        if (size < 0) break
+                        output.write(buf, 0, size)
+                        HubFetchCounters.recordWallpaperTransfer(context, size.toLong())
+                    }
+                }
+            }
             require(tmp.length() > 8_192) { "Downloaded file too small" }
             validateImage(tmp)
             tmp.copyTo(dest, overwrite = true)
@@ -5475,10 +5512,10 @@ fun invalidateQueue() =
         }
     }
 
-    private fun fetchTo(candidate: WallpaperSourceEngine.Candidate, dest: File) {
+    private fun fetchTo(context: Context, candidate: WallpaperSourceEngine.Candidate, dest: File) {
         var last: Throwable? = null
         repeat(3) { n ->
-            try { fetchToOnce(candidate, dest); return }
+            try { fetchToOnce(context, candidate, dest); return }
             catch (t: Throwable) { last = t; dest.delete(); if (n < 2) Thread.sleep(400L * (1L shl n)) }
         }
         throw last ?: IllegalStateException("Download failed")
