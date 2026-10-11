@@ -22,7 +22,7 @@ class ControlHubTileService : TileService() {
         super.onClick()
         val now = SystemClock.elapsedRealtime()
         synchronized(ControlHubTileService::class.java) {
-            if (now - lastLaunch < 900L || ControlHubActivity.isVisible) return
+            if (now - lastLaunch < 650L) return
             lastLaunch = now
         }
         val launch = Intent(this, ControlHubActivity::class.java).apply {
