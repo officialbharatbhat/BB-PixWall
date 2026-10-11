@@ -3,6 +3,9 @@ package bb.pix.wall.tiles
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.content.res.Configuration
+import android.view.WindowInsetsController
+import bb.pix.wall.settings.AppearanceMode
 import android.view.WindowManager
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -56,6 +59,7 @@ import bb.pix.wall.ui.theme.ThemeProfile
 
 /** On-demand dialog: no timer, observer service, or background state polling. */
 class ControlHubActivity : ComponentActivity() {
+    private var appearanceMode by mutableStateOf(AppearanceMode.SYSTEM)
     private var busy by mutableStateOf(false)
     private var status by mutableStateOf("Tap an action")
     private var hubState by mutableStateOf(HubState(false, false, false, false, false))
@@ -68,7 +72,7 @@ class ControlHubActivity : ComponentActivity() {
         )
         refreshState()
         setContent {
-            BBPixWallTheme(profile = ThemeProfile.MATERIAL_PRO, appearanceMode = SettingsStore(this@ControlHubActivity).load().appearanceMode) {
+            BBPixWallTheme(profile = ThemeProfile.MATERIAL_PRO, appearanceMode = appearanceMode) {
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(24.dp),
@@ -118,6 +122,18 @@ class ControlHubActivity : ComponentActivity() {
 
     private fun refreshState() {
         val settings = SettingsStore(this).load()
+        appearanceMode = settings.appearanceMode
+        val systemDark = (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
+        val lightBars = when (settings.appearanceMode) {
+            AppearanceMode.LIGHT -> true
+            AppearanceMode.DARK, AppearanceMode.PITCH_BLACK -> false
+            AppearanceMode.SYSTEM, AppearanceMode.SYSTEM_MONET -> !systemDark
+        }
+        window.insetsController?.let { controller ->
+            val mask = WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or
+                WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
+            controller.setSystemBarsAppearance(if (lightBars) mask else 0, mask)
+        }
         hubState = HubState(
             safe = SafeWall.active(this),
             blur = WallpaperController.effectiveBlurEnabled(this),
