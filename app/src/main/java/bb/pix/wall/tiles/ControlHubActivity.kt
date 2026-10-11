@@ -99,12 +99,12 @@ class ControlHubActivity : ComponentActivity() {
                             }
                         }
                         Text(status, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Row(horizontalArrangement = Arrangement.spacedBy(5.dp), modifier = Modifier.fillMaxWidth()) {
+                        Row(horizontalArrangement = Arrangement.SpaceEvenly, modifier = Modifier.fillMaxWidth()) {
                             listOf("Home", "Lock", "Next H", "Next L").forEachIndexed { index, label ->
                                 val bmp = previewItems.getOrNull(index)?.bitmap
-                                Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+                                Column(modifier = Modifier.width(52.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                                     Box(
-                                        modifier = Modifier.fillMaxWidth().aspectRatio(9f / 20f).clip(RoundedCornerShape(8.dp)),
+                                        modifier = Modifier.width(48.dp).aspectRatio(9f / 20f).clip(RoundedCornerShape(8.dp)),
                                         contentAlignment = Alignment.Center,
                                     ) {
                                         if (bmp != null && !bmp.isRecycled) {
