@@ -166,64 +166,6 @@ fun LiteHomeScreen(
                 refreshKey = refreshKey,
             )
 
-            // On-demand Command Center: no periodic scan, timer, or persistent observer.
-            var commandReport by remember { mutableStateOf("Tap Inspect to load current queue and source health.") }
-            val commandScope = rememberCoroutineScope()
-            LiteSection(
-                title = "Wallpaper Command Center",
-                subtitle = "On-demand diagnostics • no background scanning",
-            ) {
-                Text(
-                    "Rotation: " + (if (WallpaperLock.active(context)) "LOCKED" else if (SafeWall.active(context)) "Safe Wall active" else if (settings.autoChange) "Automatic" else "Manual"),
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-                Text(
-                    "Preload: Home " + (if (WallpaperFiles.nextHome.isFile) "Ready" else "Waiting") +
-                        " • Lock " + (if (WallpaperFiles.nextLock.isFile) "Ready" else "Waiting"),
-                    style = MaterialTheme.typography.bodySmall,
-                )
-                OutlinedButton(onClick = {
-                    commandScope.launch {
-                        commandReport = "Inspecting originals…"
-                        val report = withContext(Dispatchers.IO) {
-                            val homes = WallpaperDna.inspect(WallpaperFiles.currentHome)
-                            val locks = WallpaperDna.inspect(WallpaperFiles.currentLock)
-                            fun dna(label: String, item: WallpaperDna.Report?): String =
-                                if (item == null) "$label: Not available"
-                                else "$label: ${item.width}×${item.height} • ${item.bytes / 1024} KB • ${item.format} • SHA-256 ${item.sha256.take(16)}…"
-                            val sources = listOf("photos", "drive", "local").joinToString("\n") { source ->
-                                val attempts = RuntimeStatus.getInt(context, "${source}_attempts")
-                                val successes = RuntimeStatus.getInt(context, "${source}_successes")
-                                val rate = if (attempts == 0) "N/A" else "${successes * 100 / attempts}%"
-                                "$source: $rate success (${successes}/${attempts}) • " +
-                                    RuntimeStatus.get(context, "source_$source", "Unknown")
-                            }
-                            dna("Home", homes) + "\n" + dna("Lock", locks) +
-                                "\nActive source: " + RuntimeStatus.get(context, "active_source", "").ifBlank { RuntimeStatus.get(context, "last_available_source", "Not recorded yet") } +
-                                "\nFallback: " + RuntimeStatus.get(context, "fallback_reason", "None") +
-                                "\n" + sources
-                        }
-                        commandReport = report
-                    }
-                }) { Text("Inspect wallpaper DNA & sources") }
-                OutlinedButton(onClick = {
-                    commandScope.launch {
-                        commandReport = "Checking wallpaper integrity…"
-                        val result = withContext(Dispatchers.IO) {
-                            val before = WallpaperHealthCheck.check()
-                            val repaired = WallpaperHealthCheck.repairInvalidPrepared()
-                            Triple(before, repaired, WallpaperHealthCheck.check())
-                        }
-                        commandReport =
-                            "Files inspected: ${result.first.checked} • healthy: ${result.first.healthy}" +
-                            "\nInvalid: " + (result.first.invalid.joinToString().ifBlank { "None" }) +
-                            "\nCorrupt pending queue removed: ${result.second}" +
-                            "\nAfter repair: ${result.third.healthy} healthy files"
-                    }
-                }) { Text("Wallpaper Health Check") }
-                Text(commandReport, style = MaterialTheme.typography.bodySmall)
-            }
-
             LiteSection(
                 title = "Safe Wall",
                 subtitle = "Choose two original wallpapers • privacy pause",
@@ -887,6 +829,64 @@ fun LiteHomeScreen(
                     }
                 }
             }
+            // On-demand Command Center: no periodic scan, timer, or persistent observer.
+            var commandReport by remember { mutableStateOf("Tap Inspect to load current queue and source health.") }
+            val commandScope = rememberCoroutineScope()
+            LiteSection(
+                title = "Wallpaper Command Center",
+                subtitle = "On-demand diagnostics • no background scanning",
+            ) {
+                Text(
+                    "Rotation: " + (if (WallpaperLock.active(context)) "LOCKED" else if (SafeWall.active(context)) "Safe Wall active" else if (settings.autoChange) "Automatic" else "Manual"),
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Text(
+                    "Preload: Home " + (if (WallpaperFiles.nextHome.isFile) "Ready" else "Waiting") +
+                        " • Lock " + (if (WallpaperFiles.nextLock.isFile) "Ready" else "Waiting"),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                OutlinedButton(onClick = {
+                    commandScope.launch {
+                        commandReport = "Inspecting originals…"
+                        val report = withContext(Dispatchers.IO) {
+                            val homes = WallpaperDna.inspect(WallpaperFiles.currentHome)
+                            val locks = WallpaperDna.inspect(WallpaperFiles.currentLock)
+                            fun dna(label: String, item: WallpaperDna.Report?): String =
+                                if (item == null) "$label: Not available"
+                                else "$label: ${item.width}×${item.height} • ${item.bytes / 1024} KB • ${item.format} • SHA-256 ${item.sha256.take(16)}…"
+                            val sources = listOf("photos", "drive", "local").joinToString("\n") { source ->
+                                val attempts = RuntimeStatus.getInt(context, "${source}_attempts")
+                                val successes = RuntimeStatus.getInt(context, "${source}_successes")
+                                val rate = if (attempts == 0) "N/A" else "${successes * 100 / attempts}%"
+                                "$source: $rate success (${successes}/${attempts}) • " +
+                                    RuntimeStatus.get(context, "source_$source", "Unknown")
+                            }
+                            dna("Home", homes) + "\n" + dna("Lock", locks) +
+                                "\nActive source: " + RuntimeStatus.get(context, "active_source", "").ifBlank { RuntimeStatus.get(context, "last_available_source", "Not recorded yet") } +
+                                "\nFallback: " + RuntimeStatus.get(context, "fallback_reason", "None") +
+                                "\n" + sources
+                        }
+                        commandReport = report
+                    }
+                }) { Text("Inspect wallpaper DNA & sources") }
+                OutlinedButton(onClick = {
+                    commandScope.launch {
+                        commandReport = "Checking wallpaper integrity…"
+                        val result = withContext(Dispatchers.IO) {
+                            val before = WallpaperHealthCheck.check()
+                            val repaired = WallpaperHealthCheck.repairInvalidPrepared()
+                            Triple(before, repaired, WallpaperHealthCheck.check())
+                        }
+                        commandReport =
+                            "Files inspected: ${result.first.checked} • healthy: ${result.first.healthy}" +
+                            "\nInvalid: " + (result.first.invalid.joinToString().ifBlank { "None" }) +
+                            "\nCorrupt pending queue removed: ${result.second}" +
+                            "\nAfter repair: ${result.third.healthy} healthy files"
+                    }
+                }) { Text("Wallpaper Health Check") }
+                Text(commandReport, style = MaterialTheme.typography.bodySmall)
+            }
+
             LiteDeveloperIdentityCard()
 
             Spacer(Modifier.height(8.dp))
