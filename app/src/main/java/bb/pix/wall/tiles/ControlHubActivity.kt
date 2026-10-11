@@ -12,8 +12,11 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.Image
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -101,11 +104,11 @@ class ControlHubActivity : ComponentActivity() {
                                 val bmp = previewItems.getOrNull(index)?.bitmap
                                 Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
                                     Box(
-                                        modifier = Modifier.fillMaxWidth().height(58.dp),
+                                        modifier = Modifier.fillMaxWidth().aspectRatio(9f / 20f).clip(RoundedCornerShape(8.dp)),
                                         contentAlignment = Alignment.Center,
                                     ) {
                                         if (bmp != null && !bmp.isRecycled) {
-                                            Image(bitmap = bmp.asImageBitmap(), contentDescription = label, modifier = Modifier.fillMaxWidth().height(58.dp), contentScale = ContentScale.Crop)
+                                            Image(bitmap = bmp.asImageBitmap(), contentDescription = label, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
                                         } else {
                                             Text("—", style = MaterialTheme.typography.bodySmall)
                                         }
