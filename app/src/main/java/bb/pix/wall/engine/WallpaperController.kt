@@ -3441,7 +3441,7 @@ fun invalidateQueue() =
                 )
 
             try {
-                fetchTo(candidate, staging)
+                fetchTo(context, candidate, staging)
                 validateImage(staging)
 
                 val ext =
@@ -3981,7 +3981,7 @@ fun invalidateQueue() =
             var finalFile: File? = null
 
             try {
-                fetchTo(candidate, staging)
+                fetchTo(context, candidate, staging)
 
                 /*
                  * Source mode may have changed while this network
@@ -5336,6 +5336,7 @@ fun invalidateQueue() =
 
             try {
                 fetchTo(
+                    context,
                     candidate,
                     dest,
                 )
@@ -5465,7 +5466,7 @@ fun invalidateQueue() =
         return digest.digest().joinToString("") { "%02x".format(it) }
     }
 
-    private fun fetchToOnce(candidate: WallpaperSourceEngine.Candidate, dest: File) {
+    private fun fetchToOnce(context: Context, candidate: WallpaperSourceEngine.Candidate, dest: File) {
         dest.parentFile?.mkdirs()
         candidate.file?.let {
             it.copyTo(dest, overwrite = true)
@@ -5491,7 +5492,17 @@ fun invalidateQueue() =
             val type = connection.contentType.orEmpty().lowercase()
             if (type.contains("text/html") || type.contains("application/json") || type.contains("text/plain")) error("Server returned $type instead of image")
             val append = previous > 0L && code == HttpURLConnection.HTTP_PARTIAL
-            connection.inputStream.use { input -> FileOutputStream(tmp, append).use { output -> input.copyTo(output) } }
+            connection.inputStream.use { input ->
+                FileOutputStream(tmp, append).use { output ->
+                    val buf = ByteArray(32 * 1024)
+                    while (true) {
+                        val size = input.read(buf)
+                        if (size < 0) break
+                        output.write(buf, 0, size)
+                        HubFetchCounters.recordWallpaperTransfer(context, size.toLong())
+                    }
+                }
+            }
             require(tmp.length() > 8_192) { "Downloaded file too small" }
             validateImage(tmp)
             tmp.copyTo(dest, overwrite = true)
@@ -5501,10 +5512,10 @@ fun invalidateQueue() =
         }
     }
 
-    private fun fetchTo(candidate: WallpaperSourceEngine.Candidate, dest: File) {
+    private fun fetchTo(context: Context, candidate: WallpaperSourceEngine.Candidate, dest: File) {
         var last: Throwable? = null
         repeat(3) { n ->
-            try { fetchToOnce(candidate, dest); return }
+            try { fetchToOnce(context, candidate, dest); return }
             catch (t: Throwable) { last = t; dest.delete(); if (n < 2) Thread.sleep(400L * (1L shl n)) }
         }
         throw last ?: IllegalStateException("Download failed")
