@@ -11,6 +11,14 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.Image
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import android.graphics.Bitmap
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -62,6 +70,9 @@ import bb.pix.wall.ui.theme.ThemeProfile
 /** On-demand dialog: no timer, observer service, or background state polling. */
 class ControlHubActivity : ComponentActivity() {
     private var appearanceMode by mutableStateOf(AppearanceMode.SYSTEM)
+    private var previewItems by mutableStateOf<List<HubDiagnostics.Preview>>(emptyList())
+    private var bottomInfo by mutableStateOf("Loading usage…")
+    private var diagnosticsVersion = 0
     private var busy by mutableStateOf(false)
     private var status by mutableStateOf("Tap an action")
     private var hubState by mutableStateOf(HubState(false, false, false, false, false))
@@ -73,6 +84,7 @@ class ControlHubActivity : ComponentActivity() {
             WindowManager.LayoutParams.WRAP_CONTENT,
         )
         refreshState()
+        loadDiagnostics()
         setContent {
             BBPixWallTheme(profile = ThemeProfile.MATERIAL_PRO, appearanceMode = appearanceMode) {
                 Surface(
@@ -93,6 +105,24 @@ class ControlHubActivity : ComponentActivity() {
                             }
                         }
                         Text(status, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Row(horizontalArrangement = Arrangement.spacedBy(5.dp), modifier = Modifier.fillMaxWidth()) {
+                            listOf("Home", "Lock", "Next H", "Next L").forEachIndexed { index, label ->
+                                val bmp = previewItems.getOrNull(index)?.bitmap
+                                Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Box(
+                                        modifier = Modifier.fillMaxWidth().height(58.dp),
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        if (bmp != null && !bmp.isRecycled) {
+                                            Image(bitmap = bmp.asImageBitmap(), contentDescription = label, modifier = Modifier.fillMaxWidth().height(58.dp), contentScale = ContentScale.Crop)
+                                        } else {
+                                            Text("—", style = MaterialTheme.typography.bodySmall)
+                                        }
+                                    }
+                                    Text(label, style = MaterialTheme.typography.labelSmall, maxLines = 1)
+                                }
+                            }
+                        }
 
                         val snapshot = hubState
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -111,6 +141,7 @@ class ControlHubActivity : ComponentActivity() {
                             HubAction("Wallpaper Blur", Icons.Outlined.BlurOn, snapshot.blur, !busy && !snapshot.locked && !snapshot.safe, Modifier.weight(1f)) { execute("blur") }
                             HubAction("BB-Remote", Icons.Outlined.Wifi, snapshot.remote, !busy, Modifier.weight(1f)) { openRemote() }
                         }
+                        Text(bottomInfo, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             }
@@ -120,6 +151,21 @@ class ControlHubActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         refreshState()
+        loadDiagnostics()
+    }
+
+    private fun loadDiagnostics() {
+        val request = ++diagnosticsVersion
+        val app = applicationContext
+        EngineExecutors.io {
+            val result = runCatching { HubDiagnostics.collect(app) }.getOrNull()
+            if (result != null) runOnUiThread {
+                if (!isFinishing && !isDestroyed && diagnosticsVersion == request) {
+                    previewItems = result.images
+                    bottomInfo = result.footer
+                }
+            }
+        }
     }
 
     private data class HubState(val safe: Boolean, val blur: Boolean, val remote: Boolean, val previous: Boolean, val locked: Boolean)
@@ -202,6 +248,7 @@ class ControlHubActivity : ComponentActivity() {
                 busy = false
                 status = result
                 refreshState()
+                loadDiagnostics()
                 Toast.makeText(app, result, Toast.LENGTH_SHORT).show()
                 // Keep state visible so the user can verify the change.
             }
