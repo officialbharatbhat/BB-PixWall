@@ -822,7 +822,7 @@ fun invalidateQueue() =
     fun screenOffFastWall(
         context: Context,
     ): Boolean {
-        if (SafeWall.active(context)) return false
+        if (SafeWall.active(context) || WallpaperLock.active(context)) return false
         val settings =
             SettingsStore(context).load()
 
