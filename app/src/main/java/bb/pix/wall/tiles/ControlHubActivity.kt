@@ -3,8 +3,6 @@ package bb.pix.wall.tiles
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
-import android.content.res.Configuration
-import android.view.WindowInsetsController
 import bb.pix.wall.settings.AppearanceMode
 import android.view.WindowManager
 import android.widget.Toast
@@ -129,17 +127,6 @@ class ControlHubActivity : ComponentActivity() {
     private fun refreshState() {
         val settings = SettingsStore(this).load()
         appearanceMode = settings.appearanceMode
-        val systemDark = (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
-        val lightBars = when (settings.appearanceMode) {
-            AppearanceMode.LIGHT -> true
-            AppearanceMode.DARK, AppearanceMode.PITCH_BLACK -> false
-            AppearanceMode.SYSTEM, AppearanceMode.SYSTEM_MONET -> !systemDark
-        }
-        window.insetsController?.let { controller ->
-            val mask = WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or
-                WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
-            controller.setSystemBarsAppearance(if (lightBars) mask else 0, mask)
-        }
         hubState = HubState(
             safe = SafeWall.active(this),
             blur = WallpaperController.effectiveBlurEnabled(this),
