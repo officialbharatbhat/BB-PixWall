@@ -168,8 +168,9 @@ class ControlHubActivity : ComponentActivity() {
 
     private fun execute(action: String) {
         if (busy) return
-        if (SafeWall.active(this) && action != "safe" && action != "save") {
-            status = "Safe Wall active; this action is blocked"
+        if ((SafeWall.active(this) && action != "safe" && action != "save") ||
+            (WallpaperLock.active(this) && action != "lock" && action != "save")) {
+            status = "Wallpaper protection active; action blocked"
             return
         }
         busy = true
