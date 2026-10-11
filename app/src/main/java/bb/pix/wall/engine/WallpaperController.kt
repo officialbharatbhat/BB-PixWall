@@ -1250,6 +1250,8 @@ fun invalidateQueue() =
                 val wm = WallpaperManager.getInstance(context)
             val blurMaster = blurMasterEnabled(context)
             var changed = false
+            var homeApplied = false
+            var lockApplied = false
             fun applyNext(
                 src: File,
                 flag: Int,
@@ -1307,6 +1309,10 @@ fun invalidateQueue() =
                     finished - started,
                 )
 
+                if (result) {
+                    if (flag == WallpaperManager.FLAG_SYSTEM) homeApplied = true
+                    if (flag == WallpaperManager.FLAG_LOCK) lockApplied = true
+                }
                 return result
             }
             when (settings.targetMode) {
@@ -1425,6 +1431,16 @@ fun invalidateQueue() =
                                 lockChanged
                     }
                 }
+            }
+            val completePair = when (settings.targetMode) {
+                WallpaperTargetMode.HOME -> homeApplied
+                WallpaperTargetMode.LOCK -> lockApplied
+                WallpaperTargetMode.BOTH_SAME, WallpaperTargetMode.BOTH_DIFFERENT -> homeApplied && lockApplied
+            }
+            if (changed && !completePair) {
+                WallpaperTransaction.recover(context)
+                RuntimeStatus.failure(context, "Partial Home/Lock commit rolled back")
+                changed = false
             }
             if (changed) {
                 recordSeenForCurrent(settings.targetMode)
