@@ -30,7 +30,8 @@ object WallpaperTransaction {
                 if (source.isFile && source.length() > 0L) source.copyTo(destination, overwrite = true)
             }
             // Commit marker only after both copies complete.
-            check(pending(context).writeText("pending"))
+            pending(context).writeText("pending")
+            check(pending(context).isFile && pending(context).length() > 0L)
             true
         }.getOrDefault(false)
     }
