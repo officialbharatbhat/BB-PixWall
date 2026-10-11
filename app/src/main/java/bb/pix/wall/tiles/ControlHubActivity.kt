@@ -3,6 +3,7 @@ package bb.pix.wall.tiles
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.view.WindowManager
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -12,6 +13,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -44,17 +46,21 @@ class ControlHubActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        window.setLayout(
+            (resources.displayMetrics.widthPixels * 0.91f).toInt(),
+            WindowManager.LayoutParams.WRAP_CONTENT,
+        )
         setContent {
             BBPixWallTheme(profile = ThemeProfile.MATERIAL_PRO, appearanceMode = AppearanceMode.SYSTEM) {
-                Surface(modifier = Modifier.fillMaxSize()) {
+                Surface(modifier = Modifier.fillMaxWidth().wrapContentHeight(), shape = RoundedCornerShape(22.dp), tonalElevation = 5.dp) {
                     Column(
-                        modifier = Modifier.fillMaxSize().padding(20.dp),
-                        verticalArrangement = Arrangement.Center,
+                        modifier = Modifier.fillMaxWidth().padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
                     ) {
-                        Text("BB-PixWall Controls", style = MaterialTheme.typography.headlineSmall)
+                        Text("BB Controls", style = MaterialTheme.typography.titleLarge)
                         Spacer(Modifier.height(8.dp))
                         Text(status, style = MaterialTheme.typography.bodyMedium)
-                        Spacer(Modifier.height(20.dp))
+                        Spacer(Modifier.height(8.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                             Button(enabled = !busy, onClick = { execute("next") }, modifier = Modifier.weight(1f)) { Text("Next") }
                             OutlinedButton(enabled = !busy, onClick = { execute("previous") }, modifier = Modifier.weight(1f)) { Text("Previous") }
@@ -71,7 +77,7 @@ class ControlHubActivity : ComponentActivity() {
                             OutlinedButton(enabled = !busy, onClick = { execute("blur") }, modifier = Modifier.weight(1f)) { Text("Blur") }
                             OutlinedButton(enabled = !busy, onClick = { openRemote() }, modifier = Modifier.weight(1f)) { Text("Remote") }
                         }
-                        Spacer(Modifier.height(16.dp))
+                        Spacer(Modifier.height(4.dp))
                         OutlinedButton(onClick = { finish() }, modifier = Modifier.align(Alignment.End)) { Text("Close") }
                     }
                 }
