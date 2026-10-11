@@ -199,7 +199,7 @@ fun LiteHomeScreen(
                                     RuntimeStatus.get(context, "source_$source", "Unknown")
                             }
                             dna("Home", homes) + "\n" + dna("Lock", locks) +
-                                "\nActive source: " + RuntimeStatus.get(context, "active_source", "Unknown") +
+                                "\nActive source: " + RuntimeStatus.get(context, "active_source", "").ifBlank { RuntimeStatus.get(context, "last_available_source", "Not recorded yet") } +
                                 "\nFallback: " + RuntimeStatus.get(context, "fallback_reason", "None") +
                                 "\n" + sources
                         }
