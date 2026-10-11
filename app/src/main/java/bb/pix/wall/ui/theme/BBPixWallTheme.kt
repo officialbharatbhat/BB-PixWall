@@ -527,7 +527,7 @@ private fun customTypography(context: android.content.Context, base: Typography)
     fun style(s: TextStyle): TextStyle = s.copy(
         fontFamily = family ?: s.fontFamily,
         fontSize = s.fontSize * scale,
-        lineHeight = if (s.lineHeight.isSpecified) s.lineHeight * scale else s.lineHeight,
+        lineHeight = if (s.lineHeight != androidx.compose.ui.unit.TextUnit.Unspecified) s.lineHeight * scale else s.lineHeight,
     )
     return base.copy(
         displayLarge = style(base.displayLarge), displayMedium = style(base.displayMedium), displaySmall = style(base.displaySmall),
