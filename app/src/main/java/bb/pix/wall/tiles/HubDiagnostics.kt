@@ -7,6 +7,7 @@ import android.os.Debug
 import android.net.TrafficStats
 import bb.pix.wall.engine.RuntimeStatus
 import bb.pix.wall.engine.WallpaperFiles
+import bb.pix.wall.engine.WallpaperController
 import java.io.File
 import kotlin.math.roundToInt
 import bb.pix.wall.engine.HubFetchCounters
@@ -34,8 +35,8 @@ internal object HubDiagnostics {
 
     fun collect(context: Context): Snapshot {
         val previews = listOf(
-            preview("Home", WallpaperFiles.currentHome),
-            preview("Lock", WallpaperFiles.currentLock),
+            preview("Home", WallpaperController.previewFile(context, WallpaperFiles.currentHome, true)),
+            preview("Lock", WallpaperController.previewFile(context, WallpaperFiles.currentLock, false)),
             preview("Next H", WallpaperFiles.nextHome),
             preview("Next L", WallpaperFiles.nextLock),
         )
