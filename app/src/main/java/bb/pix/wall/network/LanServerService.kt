@@ -617,6 +617,14 @@ class LanServerService : Service() {
                     WallpaperFiles.nextLock,
                     "next_lock",
                 )
+            "/assets/custom-font" -> {
+                val font = bb.pix.wall.settings.DeveloperFont.file(this)
+                if (bb.pix.wall.settings.DeveloperFont.isSelected(this) && font.isFile && font.length() in 1..(12L * 1024 * 1024)) {
+                    sendBytes(s, 200, "font/ttf", font.readBytes())
+                } else sendText(s, 404, "text/plain", "No custom font")
+            }
+            "/api/font-preferences" -> sendJson(s, 200,
+                "{\"selected\":${bb.pix.wall.settings.DeveloperFont.isSelected(this)},\"size\":${bb.pix.wall.settings.DeveloperFont.size(this)}}")
             "/", "/index.html" -> sendText(s, 200, "text/html; charset=utf-8", dashboard(token))
             else -> sendText(s, 404, "text/plain; charset=utf-8", "Not found")
         }
