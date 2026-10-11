@@ -23,6 +23,9 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -92,7 +95,7 @@ class ControlHubActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.setLayout(
-            (resources.displayMetrics.widthPixels * 0.92f).toInt(),
+            (resources.displayMetrics.widthPixels * 0.97f).toInt(),
             WindowManager.LayoutParams.WRAP_CONTENT,
         )
         refreshState()
@@ -106,11 +109,11 @@ class ControlHubActivity : ComponentActivity() {
                     shadowElevation = 0.dp,
                 ) {
                     Column(
-                        modifier = Modifier.fillMaxWidth().padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                        modifier = Modifier.fillMaxWidth().heightIn(max = (resources.displayMetrics.heightPixels / resources.displayMetrics.density * 0.88f).dp).verticalScroll(rememberScrollState()).padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(7.dp),
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("BB-PixWall Hub", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+                            Text("BB-PixWall Hub", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
                             OutlinedButton(onClick = { finish() }, contentPadding = androidx.compose.foundation.layout.PaddingValues(8.dp)) {
                                 Icon(Icons.Outlined.Close, contentDescription = "Close")
                             }
@@ -119,9 +122,9 @@ class ControlHubActivity : ComponentActivity() {
                         Row(horizontalArrangement = Arrangement.SpaceEvenly, modifier = Modifier.fillMaxWidth()) {
                             listOf("Home", "Lock", "Next H", "Next L").forEachIndexed { index, label ->
                                 val bmp = previewItems.getOrNull(index)?.bitmap
-                                Column(modifier = Modifier.width(52.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                                Column(modifier = Modifier.width(47.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                                     Box(
-                                        modifier = Modifier.width(48.dp).aspectRatio(9f / 20f).clip(RoundedCornerShape(8.dp)),
+                                        modifier = Modifier.width(44.dp).aspectRatio(9f / 20f).clip(RoundedCornerShape(8.dp)),
                                         contentAlignment = Alignment.Center,
                                     ) {
                                         if (bmp != null && !bmp.isRecycled) {
@@ -223,12 +226,12 @@ class ControlHubActivity : ComponentActivity() {
             colors = CardDefaults.cardColors(containerColor = color, contentColor = ink),
         ) {
             Column(
-                modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp, horizontal = 8.dp),
+                modifier = Modifier.fillMaxWidth().padding(vertical = 7.dp, horizontal = 6.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(3.dp),
             ) {
-                Icon(symbol, contentDescription = null)
-                Text(label, style = MaterialTheme.typography.labelMedium, maxLines = 2)
+                Icon(symbol, contentDescription = null, modifier = Modifier.height(19.dp))
+                Text(label, style = MaterialTheme.typography.labelSmall, maxLines = 2)
                 Text(
                     when (active) {
                         true -> "ON"
@@ -269,6 +272,12 @@ class ControlHubActivity : ComponentActivity() {
                 status = result
                 refreshState()
                 loadDiagnostics()
+                if (action == "next" || action == "previous" || action == "undo" || action == "blur") {
+                    statsHandler.postDelayed({ if (!isFinishing && !isDestroyed) loadDiagnostics() }, 1800L)
+                    if (action == "next") {
+                        statsHandler.postDelayed({ if (!isFinishing && !isDestroyed) loadDiagnostics() }, 4500L)
+                    }
+                }
                 Toast.makeText(app, result, Toast.LENGTH_SHORT).show()
                 // Keep state visible so the user can verify the change.
             }
