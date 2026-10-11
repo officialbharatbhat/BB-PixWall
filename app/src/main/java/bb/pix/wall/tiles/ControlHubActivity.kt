@@ -33,6 +33,7 @@ import bb.pix.wall.engine.WallpaperController
 import bb.pix.wall.network.LanInfo
 import bb.pix.wall.network.LanServerService
 import bb.pix.wall.settings.SettingsStore
+import bb.pix.wall.settings.AppearanceMode
 import bb.pix.wall.ui.theme.BBPixWallTheme
 import bb.pix.wall.ui.theme.ThemeProfile
 
@@ -44,7 +45,7 @@ class ControlHubActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            BBPixWallTheme(profile = ThemeProfile.MATERIAL_PRO) {
+            BBPixWallTheme(profile = ThemeProfile.MATERIAL_PRO, appearanceMode = AppearanceMode.SYSTEM) {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     Column(
                         modifier = Modifier.fillMaxSize().padding(20.dp),
