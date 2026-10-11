@@ -23,6 +23,9 @@ import androidx.compose.material.icons.outlined.BookmarkBorder
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Security
 import androidx.compose.material.icons.outlined.ArrowForward
+import androidx.compose.material.icons.outlined.Lock
+import androidx.compose.material.icons.outlined.Undo
+import bb.pix.wall.engine.WallpaperLock
 import androidx.compose.material.icons.outlined.Wifi
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -55,7 +58,7 @@ import bb.pix.wall.ui.theme.ThemeProfile
 class ControlHubActivity : ComponentActivity() {
     private var busy by mutableStateOf(false)
     private var status by mutableStateOf("Tap an action")
-    private var hubState by mutableStateOf(HubState(false, false, false, false))
+    private var hubState by mutableStateOf(HubState(false, false, false, false, false))
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -89,6 +92,10 @@ class ControlHubActivity : ComponentActivity() {
                             HubAction("Previous Wallpaper", Icons.Outlined.ArrowBack, null, !busy && snapshot.previous, Modifier.weight(1f)) { execute("previous") }
                         }
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            HubAction("Undo Wallpaper", Icons.Outlined.Undo, null, !busy && snapshot.previous && !snapshot.locked && !snapshot.safe, Modifier.weight(1f)) { execute("undo") }
+                            HubAction("Wallpaper Lock", Icons.Outlined.Lock, snapshot.locked, !busy && !snapshot.safe, Modifier.weight(1f)) { execute("lock") }
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             HubAction("Safe Wall", Icons.Outlined.Security, snapshot.safe, !busy, Modifier.weight(1f)) { execute("safe") }
                             HubAction("Save Wallpaper", Icons.Outlined.BookmarkBorder, null, !busy, Modifier.weight(1f)) { execute("save") }
                         }
@@ -107,7 +114,7 @@ class ControlHubActivity : ComponentActivity() {
         refreshState()
     }
 
-    private data class HubState(val safe: Boolean, val blur: Boolean, val remote: Boolean, val previous: Boolean)
+    private data class HubState(val safe: Boolean, val blur: Boolean, val remote: Boolean, val previous: Boolean, val locked: Boolean)
 
     private fun refreshState() {
         val settings = SettingsStore(this).load()
@@ -116,6 +123,7 @@ class ControlHubActivity : ComponentActivity() {
             blur = WallpaperController.effectiveBlurEnabled(this),
             remote = settings.lanEnabled,
             previous = WallpaperController.previousAvailable(),
+            locked = WallpaperLock.active(this),
         )
     }
 
@@ -171,7 +179,9 @@ class ControlHubActivity : ComponentActivity() {
             val result = runCatching {
                 when (action) {
                     "next" -> if (WallpaperController.nextWall(app, allowNetwork = true, userInitiated = true)) "Wallpaper changed" else "No wallpaper available"
-                    "previous" -> if (WallpaperController.previousWall(app)) "Previous restored" else "Previous unavailable"
+                    "previous" -> if (!WallpaperLock.active(app) && WallpaperController.previousWall(app)) "Previous restored" else "Previous unavailable or locked"
+                    "undo" -> if (!WallpaperLock.active(app) && WallpaperController.previousWall(app)) "Wallpaper undone" else "Undo unavailable or locked"
+                    "lock" -> if (WallpaperLock.toggle(app)) "Wallpaper locked" else "Wallpaper unlocked"
                     "safe" -> if (SafeWall.toggle(app)) (if (SafeWall.active(app)) "Safe Wall ON" else "Safe Wall OFF") else "Select Safe Home and Lock images first"
                     "save" -> "Saved ${WallpaperController.saveCurrent(app).size} wallpaper(s)"
                     "blur" -> if (WallpaperController.toggleBlur(app)) "Blur enabled" else "Blur disabled"
