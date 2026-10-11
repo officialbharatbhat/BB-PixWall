@@ -5,6 +5,8 @@ import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.content.res.Configuration
+import bb.pix.wall.engine.WallpaperFiles
 import bb.pix.wall.settings.AppearanceMode
 import android.view.WindowManager
 import android.widget.Toast
@@ -69,10 +71,27 @@ import bb.pix.wall.ui.theme.ThemeProfile
 
 /** On-demand dialog: no timer, observer service, or background state polling. */
 class ControlHubActivity : ComponentActivity() {
+    companion object { @Volatile var isVisible: Boolean = false; private set }
     private var appearanceMode by mutableStateOf(AppearanceMode.SYSTEM)
     private var previewItems by mutableStateOf<List<HubDiagnostics.Preview>>(emptyList())
     private var bottomInfo by mutableStateOf("Loading usage…")
     private var diagnosticsVersion = 0
+    private var previewSignature = ""
+    private var previewRunning = false
+    private fun queueSignature(): String =
+        listOf(WallpaperFiles.currentHome, WallpaperFiles.currentLock, WallpaperFiles.nextHome, WallpaperFiles.nextLock)
+            .joinToString("|") { "${it.length()}:${it.lastModified()}" }
+    private val previewWatcher = object : Runnable {
+        override fun run() {
+            if (!statsActive || isFinishing || isDestroyed) return
+            val signature = queueSignature()
+            if (signature != previewSignature && !previewRunning) {
+                previewSignature = signature
+                loadDiagnostics()
+            }
+            statsHandler.postDelayed(this, 900L)
+        }
+    }
     private val statsHandler = Handler(Looper.getMainLooper())
     private var statsActive = false
     private val statsRefresh = object : Runnable {
@@ -164,26 +183,40 @@ class ControlHubActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        isVisible = true
         refreshState()
         loadDiagnostics()
+        previewSignature = queueSignature()
         statsActive = true
+        statsHandler.removeCallbacks(previewWatcher)
+        statsHandler.postDelayed(previewWatcher, 900L)
         statsHandler.removeCallbacks(statsRefresh)
         statsHandler.postDelayed(statsRefresh, 3000L)
     }
 
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        refreshState()
+    }
+
     override fun onPause() {
+        isVisible = false
         statsActive = false
+        statsHandler.removeCallbacks(previewWatcher)
         statsHandler.removeCallbacks(statsRefresh)
         super.onPause()
     }
 
     private fun loadDiagnostics() {
+        if (previewRunning) return
+        previewRunning = true
         val request = ++diagnosticsVersion
         val app = applicationContext
         EngineExecutors.io {
             val result = runCatching { HubDiagnostics.collect(app) }.getOrNull()
-            if (result != null) runOnUiThread {
-                if (!isFinishing && !isDestroyed && diagnosticsVersion == request) {
+            runOnUiThread {
+                previewRunning = false
+                if (result != null && !isFinishing && !isDestroyed && diagnosticsVersion == request) {
                     previewItems = result.images
                     bottomInfo = result.footer
                 }
@@ -254,7 +287,7 @@ class ControlHubActivity : ComponentActivity() {
         busy = true
         status = "Working…"
         val app = applicationContext
-        EngineExecutors.serial {
+        EngineExecutors.io {
             val result = runCatching {
                 when (action) {
                     "next" -> if (WallpaperController.nextWall(app, allowNetwork = true, userInitiated = true)) "Wallpaper changed" else "No wallpaper available"
@@ -273,12 +306,10 @@ class ControlHubActivity : ComponentActivity() {
                 refreshState()
                 loadDiagnostics()
                 if (action == "next" || action == "previous" || action == "undo" || action == "blur") {
-                    statsHandler.postDelayed({ if (!isFinishing && !isDestroyed) loadDiagnostics() }, 1800L)
-                    if (action == "next") {
-                        statsHandler.postDelayed({ if (!isFinishing && !isDestroyed) loadDiagnostics() }, 4500L)
-                    }
+                    statsHandler.postDelayed({ if (!isFinishing && !isDestroyed) loadDiagnostics() }, 700L)
+
                 }
-                Toast.makeText(app, result, Toast.LENGTH_SHORT).show()
+                // Dialog remains foreground. Status is presented inline without a transient toast.
                 // Keep state visible so the user can verify the change.
             }
         }
