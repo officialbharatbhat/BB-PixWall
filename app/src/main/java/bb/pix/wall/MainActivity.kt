@@ -103,14 +103,15 @@ class MainActivity : ComponentActivity() {
                     },
                     onRequestAdvanced = {
                         Thread {
-                            val result =
-                                RootAccess.requestAndTune(
-                                    applicationContext
-                                )
+                            val rootGranted =
+                                RootAccess.probe(
+                                    applicationContext,
+                                    force = true,
+                                ).granted
 
-                            if (result.granted) {
+                            if (rootGranted) {
                                 val updated =
-                                    settings.copy(
+                                    store.load().copy(
                                         engineMode =
                                             EngineMode.ADVANCED,
                                         decisionEngineEnabled =
@@ -130,6 +131,8 @@ class MainActivity : ComponentActivity() {
                                 runOnUiThread {
                                     settings = updated
                                 }
+                                // Background tuning must not delay the visible mode switch.
+                                RootAccess.requestAndTune(applicationContext)
                             }
                         }.start()
                     },
