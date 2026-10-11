@@ -3,14 +3,12 @@ package bb.pix.wall.tiles
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import android.net.TrafficStats
 import android.os.Debug
-import android.os.Process
-import android.os.SystemClock
 import bb.pix.wall.engine.RuntimeStatus
 import bb.pix.wall.engine.WallpaperFiles
 import java.io.File
 import kotlin.math.roundToInt
+import bb.pix.wall.engine.HubFetchCounters
 
 /** On-demand only; no live polling, full-size bitmap decode, or persistent service. */
 internal object HubDiagnostics {
@@ -24,10 +22,10 @@ internal object HubDiagnostics {
             BitmapFactory.decodeFile(file.absolutePath, bounds)
             if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return Preview(label, null)
             var sample = 1
-            while (bounds.outWidth / sample > 112 || bounds.outHeight / sample > 160) sample *= 2
+            while (bounds.outWidth / sample > 320 || bounds.outHeight / sample > 480) sample *= 2
             val options = BitmapFactory.Options().apply {
                 inSampleSize = sample
-                inPreferredConfig = Bitmap.Config.RGB_565
+                inPreferredConfig = Bitmap.Config.ARGB_8888
             }
             Preview(label, BitmapFactory.decodeFile(file.absolutePath, options))
         }.getOrElse { Preview(label, null) }
@@ -40,25 +38,29 @@ internal object HubDiagnostics {
             preview("Next H", WallpaperFiles.nextHome),
             preview("Next L", WallpaperFiles.nextLock),
         )
+        return Snapshot(previews, stats(context))
+    }
+
+    fun stats(context: Context): String {
         val photos = RuntimeStatus.getInt(context, "download_photos")
         val drive = RuntimeStatus.getInt(context, "download_drive")
         val local = RuntimeStatus.getInt(context, "download_local")
-        val uid = android.os.Process.myUid()
-        val rx = TrafficStats.getUidRxBytes(uid)
-        val tx = TrafficStats.getUidTxBytes(uid)
-        val net = if (rx == TrafficStats.UNSUPPORTED.toLong() || tx == TrafficStats.UNSUPPORTED.toLong()) {
-            "unavailable"
-        } else {
-            "%.1f MB".format(java.util.Locale.US, (rx + tx).toDouble() / 1048576.0)
-        }
-        val cpu0 = Process.getElapsedCpuTime()
-        val t0 = SystemClock.elapsedRealtime()
-        SystemClock.sleep(300L)
-        val elapsed = (SystemClock.elapsedRealtime() - t0).coerceAtLeast(1L)
-        val cpuPct = (100.0 * (Process.getElapsedCpuTime() - cpu0) / elapsed).coerceAtLeast(0.0)
-        val ramKb = Debug.getPss()
-        val stats = "Photos $photos  •  Drive $drive  •  Local $local prepared*" +
-            "\nNet $net (UID, since boot)  •  RAM ${ramKb / 1024} MB PSS  •  CPU ${cpuPct.roundToInt()}% (300ms)"
-        return Snapshot(previews, stats + "\n*Successfully acquired since this update; not historic album totals")
+        val bytes = HubFetchCounters.downloadedBytes(context)
+        val memoryMb = Debug.getPss().toDouble() / 1024.0
+        val cpuA = android.os.Process.getElapsedCpuTime()
+        val timeA = android.os.SystemClock.elapsedRealtime()
+        android.os.SystemClock.sleep(300L)
+        val elapsed = (android.os.SystemClock.elapsedRealtime() - timeA).coerceAtLeast(1L)
+        val cores = Runtime.getRuntime().availableProcessors().coerceAtLeast(1)
+        val cpu = (100.0 * (android.os.Process.getElapsedCpuTime() - cpuA) / (elapsed * cores))
+            .coerceIn(0.0, 100.0).roundToInt()
+        return "Photos: $photos images prepared" +
+            "\nDrive: $drive images prepared" +
+            "\nLocal: $local images prepared" +
+            "\nWallpaper downloads: " + "%.2f MB".format(java.util.Locale.US, bytes / 1048576.0) +
+            "\nRAM: " + "%.1f MB".format(java.util.Locale.US, memoryMb) + " (app PSS)" +
+            "\nCPU: $cpu% (all cores, sampled)" +
+            "\nCounters start with this feature update."
+
     }
 }
