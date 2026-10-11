@@ -960,6 +960,10 @@ fun invalidateQueue() =
                                 )
 
                             if (bothApplied) {
+                                snapshotPrevious(
+                                    WallpaperFiles.currentLock,
+                                    WallpaperFiles.previousLock,
+                                )
                                 src.copyTo(
                                     WallpaperFiles.currentLock,
                                     overwrite = true,
