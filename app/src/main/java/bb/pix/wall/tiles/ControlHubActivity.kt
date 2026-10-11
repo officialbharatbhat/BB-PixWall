@@ -113,6 +113,7 @@ class ControlHubActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        setFinishOnTouchOutside(false)
         window.setLayout(
             (resources.displayMetrics.widthPixels * 0.97f).toInt(),
             WindowManager.LayoutParams.WRAP_CONTENT,
@@ -307,6 +308,9 @@ class ControlHubActivity : ComponentActivity() {
                 loadDiagnostics()
                 if (action == "next" || action == "previous" || action == "undo" || action == "blur") {
                     statsHandler.postDelayed({ if (!isFinishing && !isDestroyed) loadDiagnostics() }, 700L)
+                    if (action == "blur") statsHandler.postDelayed({
+                        if (!isFinishing && !isDestroyed) loadDiagnostics()
+                    }, 2400L)
 
                 }
                 // Dialog remains foreground. Status is presented inline without a transient toast.
