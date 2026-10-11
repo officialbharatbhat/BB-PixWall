@@ -158,6 +158,15 @@ object WallpaperSourceEngine {
             )
         }
 
+        // A fetched index is not proof of application, but is a useful source hint
+        // until WallpaperController records the actual committed candidate.
+        if (photosOk || driveOk || all.isNotEmpty()) {
+            RuntimeStatus.set(context, "last_available_source", when {
+                photosOk -> "Google Photos"
+                driveOk -> "Google Drive"
+                else -> "Local"
+            })
+        }
         RuntimeStatus.set(context, "source_priority_decision", when {
             photosOk -> "Photos primary"
             driveOk -> "Drive fallback (Photos unavailable)"
