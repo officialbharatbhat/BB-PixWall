@@ -181,6 +181,8 @@ object WallpaperSourceEngine {
         items: List<Candidate>,
         fallback: Boolean = false,
     ) {
+        RuntimeStatus.increment(context, "${source}_attempts")
+        RuntimeStatus.increment(context, "${source}_successes")
         val count = items.size
         val previousCount = RuntimeStatus.get(
             context,
@@ -269,6 +271,8 @@ object WallpaperSourceEngine {
     }
 
     private fun sourceFailure(context: Context, source: String, error: Throwable, ms: Long) {
+        RuntimeStatus.increment(context, "${source}_attempts")
+        RuntimeStatus.increment(context, "${source}_failures")
         val streak = RuntimeStatus.increment(context, "${source}_fail_streak")
         RuntimeStatus.setLong(context, "${source}_last_latency_ms", ms)
         RuntimeStatus.setLong(context, "${source}_last_fail", System.currentTimeMillis())
