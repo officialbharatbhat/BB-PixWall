@@ -25,6 +25,10 @@ import java.util.concurrent.ConcurrentHashMap
 
 object WallpaperController {
     private val lock = Any()
+
+    /** Serialize Safe Wall transitions with normal wallpaper mutations. */
+    internal fun <T> withWallpaperMutationLock(action: () -> T): T =
+        synchronized(lock) { action() }
     private val generation = AtomicLong(0L)
     private val applying = AtomicBoolean(false)
     private val preparingNext = AtomicBoolean(false)
