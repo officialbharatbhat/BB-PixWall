@@ -1133,19 +1133,6 @@ fun invalidateQueue() =
             //
             // Manual Next must not hit cloud while ready cached
             // wallpapers are sitting unused on disk.
-            if (
-                !prepareNextFromPredictiveCache(
-                    context,
-                    settings,
-                )
-            ) {
-                ensureNext(
-                    context,
-                    settings,
-                    allowNetwork = false,
-                )
-            }
-
             fun targetPrepared(): Boolean =
                 when (settings.targetMode) {
                     WallpaperTargetMode.HOME ->
@@ -1163,8 +1150,13 @@ fun invalidateQueue() =
                             WallpaperFiles.nextLock.exists()
                 }
 
-            var preparedForTarget =
-                targetPrepared()
+            var preparedForTarget = targetPrepared()
+            if (!preparedForTarget) {
+                if (!prepareNextFromPredictiveCache(context, settings)) {
+                    ensureNext(context, settings, allowNetwork = false)
+                }
+                preparedForTarget = targetPrepared()
+            }
 
             /*
              * Manual/QS Next must behave as one press = one change.
