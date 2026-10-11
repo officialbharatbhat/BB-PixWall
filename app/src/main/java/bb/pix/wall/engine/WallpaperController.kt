@@ -1505,7 +1505,7 @@ fun invalidateQueue() =
         entry: WallpaperLibrary.HistoryEntry,
     ): Boolean =
         synchronized(lock) {
-            if (SafeWall.active(context)) return@synchronized false
+            if (SafeWall.active(context) || WallpaperLock.active(context)) return@synchronized false
             requireStorage()
 
             val settings =
@@ -1633,7 +1633,7 @@ fun invalidateQueue() =
         context: Context,
     ): Boolean =
         synchronized(lock) {
-            if (SafeWall.active(context)) return@synchronized false
+            if (SafeWall.active(context) || WallpaperLock.active(context)) return@synchronized false
             WallpaperFiles.ensure()
 
             val settings =
@@ -2310,7 +2310,7 @@ fun invalidateQueue() =
         doBlur: Boolean,
         radius: Int,
     ) {
-        if (SafeWall.active(context) || !src.exists()) return
+        if (SafeWall.active(context) || WallpaperLock.active(context) || !src.exists()) return
         if (!doBlur || radius <= 0) {
             val aspect = inspectAspect(src, settings.smartCropTolerancePct)
             if (settings.smartCropEnabled && aspect.valid && !aspect.matchesNineByTwenty) {
