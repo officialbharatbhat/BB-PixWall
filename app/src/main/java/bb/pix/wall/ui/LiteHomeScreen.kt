@@ -805,30 +805,6 @@ fun LiteHomeScreen(
                 }
             }
 
-            LiteSection(
-                title = "Updates",
-                subtitle = "Official Lite releases • GitHub",
-            ) {
-                Text("Installed Lite v${BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.bodyMedium)
-                Text(updateStatus, style = MaterialTheme.typography.bodySmall)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = {
-                        updateStatus = "Checking GitHub…"
-                        bb.pix.wall.engine.EngineExecutors.io {
-                            val result = LiteUpdateChecker.check(context.applicationContext)
-                            android.os.Handler(android.os.Looper.getMainLooper()).post {
-                                updateStatus = result.message
-                                updateUrl = if (result.available) result.page else ""
-                            }
-                        }
-                    }) { Text("Check updates") }
-                    if (updateUrl.startsWith("https://github.com/")) {
-                        OutlinedButton(onClick = {
-                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(updateUrl)))
-                        }) { Text("Open release") }
-                    }
-                }
-            }
             // On-demand Command Center: no periodic scan, timer, or persistent observer.
             var commandReport by remember { mutableStateOf("Tap Inspect to load current queue and source health.") }
             val commandScope = rememberCoroutineScope()
@@ -894,6 +870,30 @@ fun LiteHomeScreen(
                 OutlinedButton(onClick = {
                     context.startActivity(Intent(context, DeveloperModeActivity::class.java))
                 }) { Text("Open Developer Mode →") }
+            }
+            LiteSection(
+                title = "Updates",
+                subtitle = "Official Lite releases • GitHub",
+            ) {
+                Text("Installed Lite v${BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.bodyMedium)
+                Text(updateStatus, style = MaterialTheme.typography.bodySmall)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = {
+                        updateStatus = "Checking GitHub…"
+                        bb.pix.wall.engine.EngineExecutors.io {
+                            val result = LiteUpdateChecker.check(context.applicationContext)
+                            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                                updateStatus = result.message
+                                updateUrl = if (result.available) result.page else ""
+                            }
+                        }
+                    }) { Text("Check updates") }
+                    if (updateUrl.startsWith("https://github.com/")) {
+                        OutlinedButton(onClick = {
+                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(updateUrl)))
+                        }) { Text("Open release") }
+                    }
+                }
             }
             LiteDeveloperIdentityCard()
 
