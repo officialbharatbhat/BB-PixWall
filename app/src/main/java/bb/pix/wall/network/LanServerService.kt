@@ -1033,6 +1033,14 @@ class LanServerService : Service() {
             append("\"photosHealth\":${quote(RuntimeStatus.get(this@LanServerService, "source_photos", "Unknown"))},")
             append("\"driveHealth\":${quote(RuntimeStatus.get(this@LanServerService, "source_drive", "Unknown"))},")
             append("\"localHealth\":${quote(RuntimeStatus.get(this@LanServerService, "source_local", "Unknown"))},")
+            for (source in listOf("photos", "drive", "local")) {
+                val attempts = RuntimeStatus.getInt(this@LanServerService, "${source}_attempts")
+                val successful = RuntimeStatus.getInt(this@LanServerService, "${source}_successes")
+                append("\"${source}Reliability\":${quote(if (attempts == 0) "N/A" else "${successful * 100 / attempts}% (${successful}/${attempts})")},")
+            }
+            append("\"priorityDecision\":${quote(RuntimeStatus.get(this@LanServerService, "source_priority_decision", "Awaiting sources"))},")
+            append("\"wallpaperLockActive\":${bb.pix.wall.engine.WallpaperLock.active(this@LanServerService)},")
+            append("\"transactionRecovery\":${quote(RuntimeStatus.get(this@LanServerService, "transaction_recovery", "No recovery needed"))},")
 
             append("\"lastPipeline\":${quote(RuntimeStatus.get(this@LanServerService, "last_pipeline", "Waiting"))},")
             append("\"lastAspect\":${quote(RuntimeStatus.get(this@LanServerService, "last_aspect", "Unknown"))},")
