@@ -3,6 +3,8 @@ package bb.pix.wall.tiles
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import bb.pix.wall.settings.AppearanceMode
 import android.view.WindowManager
 import android.widget.Toast
@@ -68,6 +70,21 @@ class ControlHubActivity : ComponentActivity() {
     private var previewItems by mutableStateOf<List<HubDiagnostics.Preview>>(emptyList())
     private var bottomInfo by mutableStateOf("Loading usage…")
     private var diagnosticsVersion = 0
+    private val statsHandler = Handler(Looper.getMainLooper())
+    private var statsActive = false
+    private val statsRefresh = object : Runnable {
+        override fun run() {
+            if (!statsActive || isFinishing || isDestroyed) return
+            val app = applicationContext
+            EngineExecutors.io {
+                val latest = runCatching { HubDiagnostics.stats(app) }.getOrNull()
+                if (latest != null) runOnUiThread {
+                    if (statsActive && !isFinishing && !isDestroyed) bottomInfo = latest
+                }
+            }
+            statsHandler.postDelayed(this, 3000L)
+        }
+    }
     private var busy by mutableStateOf(false)
     private var status by mutableStateOf("Tap an action")
     private var hubState by mutableStateOf(HubState(false, false, false, false, false))
@@ -146,6 +163,15 @@ class ControlHubActivity : ComponentActivity() {
         super.onResume()
         refreshState()
         loadDiagnostics()
+        statsActive = true
+        statsHandler.removeCallbacks(statsRefresh)
+        statsHandler.postDelayed(statsRefresh, 3000L)
+    }
+
+    override fun onPause() {
+        statsActive = false
+        statsHandler.removeCallbacks(statsRefresh)
+        super.onPause()
     }
 
     private fun loadDiagnostics() {
