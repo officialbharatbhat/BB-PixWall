@@ -35,8 +35,16 @@ object DeveloperFont {
             val input = context.contentResolver.openInputStream(uri) ?: error("Cannot open font")
             input.use { source ->
                 temp.outputStream().use { target ->
-                    val bytes = source.copyTo(target, bufferSize = 16 * 1024)
-                    require(bytes in 1..LIMIT) { "Font must be below 12 MB" }
+                    var bytes = 0L
+                    val buffer = ByteArray(16 * 1024)
+                    while (true) {
+                        val count = source.read(buffer)
+                        if (count < 0) break
+                        bytes += count
+                        require(bytes <= LIMIT) { "Font must be below 12 MB" }
+                        target.write(buffer, 0, count)
+                    }
+                    require(bytes > 0) { "Empty font file" }
                 }
             }
             Typeface.createFromFile(temp) // Reject corrupt or unsupported font before changing setting.
