@@ -1253,9 +1253,9 @@ private fun LiteCurrentPreview(
                 Text(
                     text =
                         if (preview != null) {
-                            "Ready"
+                            "Applied"
                         } else {
-                            "Waiting"
+                            "Not set"
                         },
                     style =
                         MaterialTheme.typography
