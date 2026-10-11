@@ -58,6 +58,11 @@ object SafeWall {
                 check(p.edit().putBoolean("active", false).commit())
                 true
             }.getOrDefault(false)
+            if (!restored) {
+                // A partial restore must not leave normal wallpaper visible while
+                // the persistent Safe Wall gate still reports protection.
+                reassert(c)
+            }
             if (restored) {
                 restoreHome(c).delete()
                 restoreLock(c).delete()
