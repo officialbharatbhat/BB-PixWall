@@ -182,6 +182,14 @@ class ControlHubActivity : ComponentActivity() {
         }
     }
 
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        // Reuse this one dialog rather than creating an overlapping window.
+        refreshState()
+        loadDiagnostics()
+    }
+
     override fun onResume() {
         super.onResume()
         isVisible = true
@@ -213,7 +221,7 @@ class ControlHubActivity : ComponentActivity() {
         previewRunning = true
         val request = ++diagnosticsVersion
         val app = applicationContext
-        EngineExecutors.userActions {
+        EngineExecutors.io {
             val result = runCatching { HubDiagnostics.collect(app) }.getOrNull()
             runOnUiThread {
                 previewRunning = false
@@ -288,7 +296,7 @@ class ControlHubActivity : ComponentActivity() {
         busy = true
         status = "Working…"
         val app = applicationContext
-        EngineExecutors.io {
+        EngineExecutors.userActions {
             val result = runCatching {
                 when (action) {
                     "next" -> if (WallpaperController.nextWall(app, allowNetwork = true, userInitiated = true)) "Wallpaper changed" else "No wallpaper available"
@@ -331,7 +339,7 @@ class ControlHubActivity : ComponentActivity() {
         }
         val url = Uri.parse("http://$ip:${settings.lanPort}")
         runCatching { startActivity(Intent(Intent.ACTION_VIEW, url)) }
-            .onSuccess { finish() }
+            .onSuccess { status = "BB-Remote opened" }
             .onFailure { status = "No browser available" }
     }
 }
