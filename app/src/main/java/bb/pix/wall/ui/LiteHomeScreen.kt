@@ -887,6 +887,14 @@ fun LiteHomeScreen(
                 Text(commandReport, style = MaterialTheme.typography.bodySmall)
             }
 
+            LiteSection(
+                title = "Developer Mode",
+                subtitle = "Custom fonts and future developer tools",
+            ) {
+                OutlinedButton(onClick = {
+                    context.startActivity(Intent(context, DeveloperModeActivity::class.java))
+                }) { Text("Open Developer Mode →") }
+            }
             LiteDeveloperIdentityCard()
 
             Spacer(Modifier.height(8.dp))
