@@ -34,6 +34,8 @@ object EngineExecutors {
         }
     }
 
+    // Foreground Hub commands: not queued behind long-running cloud/cache IO.
+    val userActions = Executors.newSingleThreadExecutor(factory("bbpw-user"))
     val serial = Executors.newSingleThreadExecutor(factory("bbpw-serial"))
     val scheduler = ScheduledThreadPoolExecutor(1, factory("bbpw-sched")).apply {
         removeOnCancelPolicy = true
@@ -41,5 +43,6 @@ object EngineExecutors {
 
     fun io(block: () -> Unit) = io.execute(block)
     fun blur(block: () -> Unit) = blur.execute(block)
+    fun userActions(block: () -> Unit) = userActions.execute(block)
     fun serial(block: () -> Unit) = serial.execute(block)
 }
