@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.os.Debug
+import android.net.TrafficStats
 import bb.pix.wall.engine.RuntimeStatus
 import bb.pix.wall.engine.WallpaperFiles
 import java.io.File
@@ -46,6 +47,14 @@ internal object HubDiagnostics {
         val drive = RuntimeStatus.getInt(context, "download_drive")
         val local = RuntimeStatus.getInt(context, "download_local")
         val bytes = HubFetchCounters.downloadedBytes(context)
+        val uid = android.os.Process.myUid()
+        val received = TrafficStats.getUidRxBytes(uid)
+        val sent = TrafficStats.getUidTxBytes(uid)
+        val appTraffic = if (received == TrafficStats.UNSUPPORTED.toLong() || sent == TrafficStats.UNSUPPORTED.toLong() || received < 0L || sent < 0L) {
+            "Unavailable"
+        } else {
+            "%.2f MB (since reboot)".format(java.util.Locale.US, (received.toDouble() + sent.toDouble()) / 1048576.0)
+        }
         val memoryMb = Debug.getPss().toDouble() / 1024.0
         val cpuA = android.os.Process.getElapsedCpuTime()
         val timeA = android.os.SystemClock.elapsedRealtime()
@@ -58,6 +67,7 @@ internal object HubDiagnostics {
             "\nDrive: $drive images prepared" +
             "\nLocal: $local images prepared" +
             "\nWallpaper downloads: " + "%.2f MB".format(java.util.Locale.US, bytes / 1048576.0) +
+            "\nApp Traffic: " + appTraffic +
             "\nRAM: " + "%.1f MB".format(java.util.Locale.US, memoryMb) + " (app PSS)" +
             "\nCPU: $cpu% (all cores, sampled)" +
             "\nCounters start with this feature update."
