@@ -2,7 +2,6 @@ package bb.pix.wall.tiles
 
 import android.app.PendingIntent
 import android.content.Intent
-import android.os.SystemClock
 import android.service.quicksettings.Tile
 import android.service.quicksettings.TileService
 
@@ -20,11 +19,11 @@ class ControlHubTileService : TileService() {
     override fun onClick() {
         super.onClick()
         val launch = Intent(this, ControlHubActivity::class.java).apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
         }
         val pending = PendingIntent.getActivity(
             this,
-            (SystemClock.elapsedRealtime() and 0x7fffffff).toInt(),
+            0,
             launch,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
