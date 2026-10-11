@@ -1110,7 +1110,7 @@ fun invalidateQueue() =
         userInitiated: Boolean = false,
         preferLockFirst: Boolean = false,
     ): Boolean {
-        if (SafeWall.active(context)) return false
+        if (SafeWall.active(context) || WallpaperLock.active(context)) return false
         val now = System.currentTimeMillis()
         if (now - lastApplyStartedAt < 900L) return false
         if (!applying.compareAndSet(false, true)) return false
@@ -2800,7 +2800,7 @@ fun invalidateQueue() =
         radius: Int,
         current: File,
     ): Boolean {
-        if (SafeWall.active(context) || !src.exists()) return false
+        if (SafeWall.active(context) || WallpaperLock.active(context) || !src.exists()) return false
 
         return try {
             if (!doBlur || radius <= 0) {
