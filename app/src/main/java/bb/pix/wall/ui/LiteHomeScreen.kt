@@ -106,6 +106,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
 import androidx.compose.runtime.rememberCoroutineScope
 import bb.pix.wall.engine.WallpaperDna
+import bb.pix.wall.engine.WallpaperHealthCheck
 import bb.pix.wall.engine.WallpaperLock
 
 @Composable
@@ -205,6 +206,21 @@ fun LiteHomeScreen(
                         commandReport = report
                     }
                 }) { Text("Inspect wallpaper DNA & sources") }
+                OutlinedButton(onClick = {
+                    commandScope.launch {
+                        commandReport = "Checking wallpaper integrity…"
+                        val result = withContext(Dispatchers.IO) {
+                            val before = WallpaperHealthCheck.check()
+                            val repaired = WallpaperHealthCheck.repairInvalidPrepared()
+                            Triple(before, repaired, WallpaperHealthCheck.check())
+                        }
+                        commandReport =
+                            "Files inspected: ${result.first.checked} • healthy: ${result.first.healthy}" +
+                            "\nInvalid: " + (result.first.invalid.joinToString().ifBlank { "None" }) +
+                            "\nCorrupt pending queue removed: ${result.second}" +
+                            "\nAfter repair: ${result.third.healthy} healthy files"
+                    }
+                }) { Text("Wallpaper Health Check") }
                 Text(commandReport, style = MaterialTheme.typography.bodySmall)
             }
 
