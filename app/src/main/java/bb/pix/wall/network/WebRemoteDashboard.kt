@@ -1204,9 +1204,9 @@ loadHistory();
 refreshImages();
 pollLive();
 
-setInterval(pollLive,500);
-setInterval(()=>load(false),10000);
-setInterval(loadHistory,30000);
+// Poll only while visible; avoid hammering the Android LAN service.\nsetInterval(pollLive,1500);
+setInterval(()=>{if(!document.hidden)load(false)},12000);
+setInterval(()=>{if(!document.hidden)loadHistory()},30000);
 
 document.addEventListener('visibilitychange',()=>{
   if(!document.hidden){
