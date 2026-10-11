@@ -457,6 +457,14 @@ pre{
     <div class="metric"><small>Drive</small><strong id="driveHealth">-</strong></div>
     <div class="metric"><small>Local</small><strong id="localHealth">-</strong></div>
   </div>
+  <div class="three">
+    <div class="metric"><small>Photos success</small><strong id="photosReliability">N/A</strong></div>
+    <div class="metric"><small>Drive success</small><strong id="driveReliability">N/A</strong></div>
+    <div class="metric"><small>Local success</small><strong id="localReliability">N/A</strong></div>
+  </div>
+  <div class="metric"><small>Current source decision</small><strong id="priorityDecision">Waiting</strong></div>
+  <div class="three">
+  </div>
 
   <div class="field">
     <label class="title">Google Photos public album</label>
@@ -993,6 +1001,10 @@ function render(s){
   text('photosHealth',s.photosHealth);
   text('driveHealth',s.driveHealth);
   text('localHealth',s.localHealth);
+  text('photosReliability',s.photosReliability||'N/A');
+  text('driveReliability',s.driveReliability||'N/A');
+  text('localReliability',s.localReliability||'N/A');
+  text('priorityDecision',s.priorityDecision||'Waiting');
 
   text('cacheBreakdown',s.cacheBreakdown);
   text('cycleProgress',s.cycleProgress);
