@@ -3478,6 +3478,8 @@ fun invalidateQueue() =
                     candidate.source,
                     candidate.id,
                 )
+                HubFetchCounters.record(context, candidate.source)
+
 
                 existingIds += candidate.id
                 added++
@@ -4170,6 +4172,8 @@ fun invalidateQueue() =
                                 candidate.source,
                                 candidate.id,
                             )
+                HubFetchCounters.record(context, candidate.source)
+
 
                             true
                         }
@@ -5356,6 +5360,8 @@ fun invalidateQueue() =
                     candidate.source,
                     candidate.id,
                 )
+                HubFetchCounters.record(context, candidate.source)
+
 
                 RuntimeStatus.activeSource(
                     context,
