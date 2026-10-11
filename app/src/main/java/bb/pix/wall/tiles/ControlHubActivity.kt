@@ -181,7 +181,7 @@ class ControlHubActivity : ComponentActivity() {
             runOnUiThread {
                 busy = false
                 status = result
-                refreshVersion++
+                refreshState()
                 Toast.makeText(app, result, Toast.LENGTH_SHORT).show()
                 // Keep state visible so the user can verify the change.
             }
@@ -191,7 +191,7 @@ class ControlHubActivity : ComponentActivity() {
     private fun openRemote() {
         val old = SettingsStore(this).load()
         val settings = if (!old.lanEnabled) old.copy(lanEnabled = true).also { SettingsStore(this).save(it) } else old
-        refreshVersion++
+        refreshState()
         runCatching { startForegroundService(Intent(this, LanServerService::class.java)) }
         val ip = LanInfo.localIpv4()
         if (ip == "Unavailable") {
