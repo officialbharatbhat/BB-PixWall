@@ -2912,6 +2912,9 @@ fun invalidateQueue() =
                 current,
             )
 
+            // Source must describe the wallpaper actually committed, not just
+            // the last cloud index fetch.
+            RuntimeStatus.activeSource(context, sourceFor(current.absolutePath))
             true
         } catch (t: Throwable) {
             log(
