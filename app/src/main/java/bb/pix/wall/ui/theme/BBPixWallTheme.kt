@@ -15,6 +15,9 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import bb.pix.wall.settings.AppearanceMode
+import bb.pix.wall.settings.DeveloperFont
+import androidx.compose.material3.Typography
+import androidx.compose.ui.text.TextStyle
 
 @Immutable
 data class BBPixWallDesignTokens(
@@ -514,6 +517,27 @@ private fun typography(
     }
 }
 
+
+@Composable
+private fun customTypography(context: android.content.Context, base: Typography): Typography {
+    val version = bb.pix.wall.settings.DeveloperFont.name(context) + ":" + DeveloperFont.size(context)
+    val family = remember(version) { DeveloperFont.family(context) }
+    val scale = DeveloperFont.size(context)
+    if (family == null && scale == 1f) return base
+    fun style(s: TextStyle): TextStyle = s.copy(
+        fontFamily = family ?: s.fontFamily,
+        fontSize = s.fontSize * scale,
+        lineHeight = if (s.lineHeight.isSpecified) s.lineHeight * scale else s.lineHeight,
+    )
+    return base.copy(
+        displayLarge = style(base.displayLarge), displayMedium = style(base.displayMedium), displaySmall = style(base.displaySmall),
+        headlineLarge = style(base.headlineLarge), headlineMedium = style(base.headlineMedium), headlineSmall = style(base.headlineSmall),
+        titleLarge = style(base.titleLarge), titleMedium = style(base.titleMedium), titleSmall = style(base.titleSmall),
+        bodyLarge = style(base.bodyLarge), bodyMedium = style(base.bodyMedium), bodySmall = style(base.bodySmall),
+        labelLarge = style(base.labelLarge), labelMedium = style(base.labelMedium), labelSmall = style(base.labelSmall),
+    )
+}
+
 @Composable
 fun BBPixWallTheme(
     profile: ThemeProfile,
@@ -590,8 +614,7 @@ fun BBPixWallTheme(
     ) {
         MaterialTheme(
             colorScheme = colors,
-            typography =
-                typography(profile),
+            typography = customTypography(context, typography(profile)),
             shapes =
                 MaterialTheme.shapes.copy(
                     large =
