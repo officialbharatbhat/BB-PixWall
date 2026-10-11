@@ -40,7 +40,8 @@ object SafeWall {
     }
 
     /** Toggle is serialized against itself; normal wallpaper triggers check the persistent gate. */
-    fun toggle(c: Context): Boolean = synchronized(gate) {
+    fun toggle(c: Context): Boolean = WallpaperController.withWallpaperMutationLock {
+        synchronized(gate) {
         WallpaperFiles.ensure()
         val p = pref(c)
         val wm = WallpaperManager.getInstance(c)
@@ -90,6 +91,8 @@ object SafeWall {
             }
             true
         }.getOrDefault(false) // Fail closed: if interrupted, safe mode remains active.
+    }
+
     }
 
     /** Boot recovery: reassert selected safe wallpapers if Safe Wall was active at shutdown. */
