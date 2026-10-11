@@ -1244,6 +1244,8 @@ fun invalidateQueue() =
             }
 
             synchronized(lock) {
+                if (!WallpaperTransaction.recover(context)) return@synchronized false
+                if (!WallpaperTransaction.begin(context)) return@synchronized false
 
                 val wm = WallpaperManager.getInstance(context)
             val blurMaster = blurMasterEnabled(context)
@@ -1471,9 +1473,16 @@ fun invalidateQueue() =
                 RuntimeStatus.failure(context, "Offline queue empty")
                 log("NEXT skipped: offline queue empty")
             }
+            if (changed) {
+                WallpaperTransaction.complete(context)
+            } else {
+                // Restore last-good originals on a failed application.
+                WallpaperTransaction.recover(context)
+            }
             changed
             }
         } catch (t: Throwable) {
+            runCatching { WallpaperTransaction.recover(context) }
 
             RuntimeStatus.failure(context, t.message ?: t.javaClass.simpleName)
             log("NEXT failed: ${t.message}")
