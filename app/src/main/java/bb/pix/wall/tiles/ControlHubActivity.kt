@@ -212,7 +212,7 @@ class ControlHubActivity : ComponentActivity() {
         previewRunning = true
         val request = ++diagnosticsVersion
         val app = applicationContext
-        EngineExecutors.io {
+        EngineExecutors.userActions {
             val result = runCatching { HubDiagnostics.collect(app) }.getOrNull()
             runOnUiThread {
                 previewRunning = false
