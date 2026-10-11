@@ -88,19 +88,19 @@ class ControlHubActivity : ComponentActivity() {
 
                         val snapshot = hubState
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            HubAction("Next Wallpaper", Icons.Outlined.ArrowForward, null, !busy, Modifier.weight(1f)) { execute("next") }
-                            HubAction("Previous Wallpaper", Icons.Outlined.ArrowBack, null, !busy && snapshot.previous, Modifier.weight(1f)) { execute("previous") }
+                            HubAction("Next Wallpaper", Icons.Outlined.ArrowForward, null, !busy && !snapshot.locked && !snapshot.safe, Modifier.weight(1f)) { execute("next") }
+                            HubAction("Previous Wallpaper", Icons.Outlined.ArrowBack, null, !busy && snapshot.previous && !snapshot.locked && !snapshot.safe, Modifier.weight(1f)) { execute("previous") }
                         }
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             HubAction("Undo Wallpaper", Icons.Outlined.Undo, null, !busy && snapshot.previous && !snapshot.locked && !snapshot.safe, Modifier.weight(1f)) { execute("undo") }
                             HubAction("Wallpaper Lock", Icons.Outlined.Lock, snapshot.locked, !busy && !snapshot.safe, Modifier.weight(1f)) { execute("lock") }
                         }
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            HubAction("Safe Wall", Icons.Outlined.Security, snapshot.safe, !busy, Modifier.weight(1f)) { execute("safe") }
+                            HubAction("Safe Wall", Icons.Outlined.Security, snapshot.safe, !busy && (!snapshot.locked || snapshot.safe), Modifier.weight(1f)) { execute("safe") }
                             HubAction("Save Wallpaper", Icons.Outlined.BookmarkBorder, null, !busy, Modifier.weight(1f)) { execute("save") }
                         }
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            HubAction("Wallpaper Blur", Icons.Outlined.BlurOn, snapshot.blur, !busy, Modifier.weight(1f)) { execute("blur") }
+                            HubAction("Wallpaper Blur", Icons.Outlined.BlurOn, snapshot.blur, !busy && !snapshot.locked && !snapshot.safe, Modifier.weight(1f)) { execute("blur") }
                             HubAction("BB-Remote", Icons.Outlined.Wifi, snapshot.remote, !busy, Modifier.weight(1f)) { openRemote() }
                         }
                     }
