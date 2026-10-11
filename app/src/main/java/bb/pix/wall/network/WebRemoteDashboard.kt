@@ -53,6 +53,9 @@ object WebRemoteDashboard {
   --danger:#ff7b86;
   --r:21px;
 }
+@font-face{font-family:'BBImported';src:url('/assets/custom-font') format('truetype');font-display:swap}
+html.bb-custom-font,html.bb-custom-font body,html.bb-custom-font button,html.bb-custom-font input,html.bb-custom-font select,html.bb-custom-font textarea{font-family:'BBImported',system-ui,sans-serif!important}
+html{font-size:calc(16px * var(--bb-font-scale,1))}
 *{box-sizing:border-box}
 html{scroll-behavior:smooth}
 body{
@@ -1210,6 +1213,10 @@ document.addEventListener('input',e=>{
   }
 });
 
+fetch('/api/font-preferences',{cache:'no-store'}).then(r=>r.json()).then(p=>{
+  document.documentElement.classList.toggle('bb-custom-font',!!p.selected);
+  document.documentElement.style.setProperty('--bb-font-scale',String(Number(p.size)||1));
+}).catch(()=>{});
 load(true);
 loadLogs();
 loadHistory();
