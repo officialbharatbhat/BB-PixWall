@@ -23,7 +23,7 @@
         android:supportsRtl="true"
         android:usesCleartextTraffic="true"
         android:theme="@style/Theme.BBPixWall">
-<activity android:name=".tiles.ControlHubActivity" android:exported="false" android:theme="@style/Theme.BBPixWall.ControlPopup" android:excludeFromRecents="true" />
+<activity android:name=".tiles.ControlHubActivity" android:exported="false" android:configChanges="uiMode|colorMode" android:theme="@style/Theme.BBPixWall.ControlPopup" android:excludeFromRecents="true" />
         <activity android:name=".MainActivity" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
