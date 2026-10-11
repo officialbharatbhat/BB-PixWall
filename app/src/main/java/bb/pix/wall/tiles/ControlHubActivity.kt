@@ -22,7 +22,7 @@ import androidx.compose.material.icons.outlined.BlurOn
 import androidx.compose.material.icons.outlined.BookmarkBorder
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Security
-import androidx.compose.material.icons.outlined.SkipNext
+import androidx.compose.material.icons.outlined.ArrowForward
 import androidx.compose.material.icons.outlined.Wifi
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -32,7 +32,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.Button
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -49,6 +48,8 @@ import bb.pix.wall.engine.WallpaperController
 import bb.pix.wall.network.LanInfo
 import bb.pix.wall.network.LanServerService
 import bb.pix.wall.settings.SettingsStore
+import bb.pix.wall.ui.theme.BBPixWallTheme
+import bb.pix.wall.ui.theme.ThemeProfile
 
 /** On-demand dialog: no timer, observer service, or background state polling. */
 class ControlHubActivity : ComponentActivity() {
@@ -63,7 +64,7 @@ class ControlHubActivity : ComponentActivity() {
             WindowManager.LayoutParams.WRAP_CONTENT,
         )
         setContent {
-            MaterialTheme(colorScheme = darkColorScheme()) {
+            BBPixWallTheme(profile = ThemeProfile.MATERIAL_PRO, appearanceMode = SettingsStore(this@ControlHubActivity).load().appearanceMode) {
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(24.dp),
@@ -74,7 +75,7 @@ class ControlHubActivity : ComponentActivity() {
                         verticalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("BB-PixWall Controls", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+                            Text("BB-PixWall Hub", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
                             OutlinedButton(onClick = { finish() }, contentPadding = androidx.compose.foundation.layout.PaddingValues(8.dp)) {
                                 Icon(Icons.Outlined.Close, contentDescription = "Close")
                             }
@@ -92,7 +93,7 @@ class ControlHubActivity : ComponentActivity() {
                             )
                         }
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            HubAction("Next Wallpaper", Icons.Outlined.SkipNext, null, !busy, Modifier.weight(1f)) { execute("next") }
+                            HubAction("Next Wallpaper", Icons.Outlined.ArrowForward, null, !busy, Modifier.weight(1f)) { execute("next") }
                             HubAction("Previous Wallpaper", Icons.Outlined.ArrowBack, null, !busy && snapshot.previous, Modifier.weight(1f)) { execute("previous") }
                         }
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
