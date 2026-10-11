@@ -57,8 +57,8 @@ internal object HubDiagnostics {
         val elapsed = (SystemClock.elapsedRealtime() - t0).coerceAtLeast(1L)
         val cpuPct = (100.0 * (Process.getElapsedCpuTime() - cpu0) / elapsed).coerceAtLeast(0.0)
         val ramKb = Debug.getPss()
-        val stats = "Photos $photos  •  Drive $drive  •  Local $local fetched" +
+        val stats = "Photos $photos  •  Drive $drive  •  Local $local prepared*" +
             "\nNet $net (UID, since boot)  •  RAM ${ramKb / 1024} MB PSS  •  CPU ${cpuPct.roundToInt()}% (300ms)"
-        return Snapshot(previews, stats)
+        return Snapshot(previews, stats + "\n*Successfully acquired since this update; not historic album totals")
     }
 }
