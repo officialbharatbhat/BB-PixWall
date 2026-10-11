@@ -60,38 +60,6 @@
         <service android:name=".tiles.ControlHubTileService" android:exported="true" android:icon="@drawable/ic_tile_next" android:label="BB-PixWall Hub" android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
             <intent-filter><action android:name="android.service.quicksettings.action.QS_TILE" /></intent-filter>
         </service>
-        <service android:name=".tiles.WallpaperLockTileService" android:exported="true" android:icon="@drawable/ic_tile_safe" android:label="Wallpaper Lock" android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
-            <intent-filter><action android:name="android.service.quicksettings.action.QS_TILE" /></intent-filter>
-        </service>
-        <service android:name=".tiles.NextWallTileService" android:exported="true" android:icon="@drawable/ic_tile_next" android:label="Next Wall" android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
-            <intent-filter><action android:name="android.service.quicksettings.action.QS_TILE" /></intent-filter>
-        </service>
-        <service android:name=".tiles.WallpaperUndoTileService" android:exported="true" android:icon="@drawable/ic_tile_previous" android:label="Undo Wallpaper" android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
-            <intent-filter><action android:name="android.service.quicksettings.action.QS_TILE" /></intent-filter>
-        </service>
-        <service android:name=".tiles.PreviousWallTileService" android:exported="true" android:icon="@drawable/ic_tile_previous" android:label="Previous Wall" android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
-            <intent-filter><action android:name="android.service.quicksettings.action.QS_TILE" /></intent-filter>
-        </service>
-        <service android:name=".tiles.SafeWallTileService" android:exported="true" android:icon="@drawable/ic_tile_safe" android:label="Safe Wall" android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
-            <intent-filter><action android:name="android.service.quicksettings.action.QS_TILE" /></intent-filter>
-        </service>
-        <service android:name=".tiles.SaveWallTileService" android:exported="true" android:icon="@drawable/ic_tile_save" android:label="Save Wall" android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
-            <intent-filter><action android:name="android.service.quicksettings.action.QS_TILE" /></intent-filter>
-        </service>
-        <service android:name=".tiles.BlurWallTileService" android:exported="true" android:icon="@drawable/ic_tile_blur" android:label="Blur Wall" android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
-            <intent-filter><action android:name="android.service.quicksettings.action.QS_TILE" /></intent-filter>
-        </service>
-
-        <service
-            android:name=".tiles.RemoteTileService"
-            android:exported="true"
-            android:icon="@drawable/ic_tile_remote"
-            android:label="BB-Remote"
-            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
-            <intent-filter>
-                <action android:name="android.service.quicksettings.action.QS_TILE" />
-            </intent-filter>
-        </service>
 
 
 </application>
