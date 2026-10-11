@@ -91,12 +91,12 @@ object SafeWall {
             }
             true
         }.getOrDefault(false) // Fail closed: if interrupted, safe mode remains active.
+        }
     }
 
-    }
-
-    /** Boot recovery: reassert selected safe wallpapers if Safe Wall was active at shutdown. */
-    fun reassert(c: Context): Boolean = synchronized(gate) {
+    /** Boot recovery must not race with an in-flight normal wallpaper mutation. */
+    fun reassert(c: Context): Boolean = WallpaperController.withWallpaperMutationLock {
+        synchronized(gate) {
         if (!active(c) || !configured(c)) return@synchronized false
         runCatching {
             val wm = WallpaperManager.getInstance(c)
@@ -104,5 +104,6 @@ object SafeWall {
             safeHome(c).inputStream().use { wm.setStream(it, null, true, WallpaperManager.FLAG_SYSTEM) }
             true
         }.getOrDefault(false)
+        }
     }
 }
