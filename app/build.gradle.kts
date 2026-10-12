@@ -40,6 +40,11 @@ android {
     }
 
     buildTypes {
+        debug {
+            // Install the unsigned-release-key test build alongside the official app.
+            applicationIdSuffix = ".test"
+            versionNameSuffix = "-TEST"
+        }
         release {
             if (hasReleaseSigning) {
                 signingConfig = signingConfigs.getByName("release")
