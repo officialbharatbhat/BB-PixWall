@@ -21,6 +21,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.border
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
@@ -107,10 +109,6 @@ class ControlHubActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setFinishOnTouchOutside(false)
-        window.setLayout(
-            (resources.displayMetrics.widthPixels * 0.94f).toInt(),
-            WindowManager.LayoutParams.WRAP_CONTENT,
-        )
         refreshState()
         setContent {
             BBPixWallTheme(profile = ThemeProfile.MATERIAL_PRO, appearanceMode = appearanceMode) {
@@ -118,19 +116,20 @@ class ControlHubActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(24.dp),
                     color = if (appearanceMode == AppearanceMode.PITCH_BLACK) Color.Black else MaterialTheme.colorScheme.surface,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.85f)),
                     tonalElevation = 0.dp,
                     shadowElevation = 0.dp,
                 ) {
                     Column(
-                        modifier = Modifier.fillMaxWidth().heightIn(max = (resources.displayMetrics.heightPixels / resources.displayMetrics.density * 0.86f).dp).verticalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 8.dp),
-                        verticalArrangement = Arrangement.spacedBy(5.dp),
+                        modifier = Modifier.fillMaxWidth().heightIn(max = (resources.displayMetrics.heightPixels / resources.displayMetrics.density * 0.87f).dp).verticalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(
                                 painter = painterResource(id = R.drawable.ic_tile_hub),
                                 contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.width(24.dp).height(24.dp),
+                                tint = Color.Unspecified,
+                                modifier = Modifier.width(26.dp).height(28.dp),
                             )
                             Spacer(Modifier.width(8.dp))
                             Text("BB-PixWall Hub", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
@@ -141,23 +140,12 @@ class ControlHubActivity : ComponentActivity() {
                         if (status != "Tap an action") {
                             Text(status, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2)
                         }
-                        Row(horizontalArrangement = Arrangement.SpaceEvenly, modifier = Modifier.fillMaxWidth()) {
-                            listOf("Home", "Lock", "Next H", "Next L").forEachIndexed { index, label ->
-                                val bmp = previewItems.getOrNull(index)?.bitmap
-                                Column(modifier = Modifier.width(43.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                                    Box(
-                                        modifier = Modifier.width(39.dp).aspectRatio(9f / 20f).clip(RoundedCornerShape(8.dp)),
-                                        contentAlignment = Alignment.Center,
-                                    ) {
-                                        if (bmp != null && !bmp.isRecycled) {
-                                            Image(bitmap = bmp.asImageBitmap(), contentDescription = label, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-                                        } else {
-                                            Text("—", style = MaterialTheme.typography.bodySmall)
-                                        }
-                                    }
-                                    Text(label, style = MaterialTheme.typography.labelSmall, maxLines = 1)
-                                }
-                            }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            PreviewGroup("Current", 0, Modifier.weight(1f))
+                            PreviewGroup("Next", 2, Modifier.weight(1f))
                         }
 
                         val snapshot = hubState
@@ -177,10 +165,92 @@ class ControlHubActivity : ComponentActivity() {
                             HubAction("Wallpaper Blur", Icons.Outlined.BlurOn, snapshot.blur, !busy && !snapshot.locked && !snapshot.safe, Modifier.weight(1f)) { execute("blur") }
                             HubAction("BB-Remote", Icons.Outlined.Wifi, snapshot.remote, !busy, Modifier.weight(1f)) { openRemote() }
                         }
-                        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                            Text("Web Remote service", modifier = Modifier.weight(1f), style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Switch(checked = snapshot.remote, enabled = !busy, onCheckedChange = { setRemoteService(it) })
+                        Surface(
+                            shape = RoundedCornerShape(14.dp),
+                            color = MaterialTheme.colorScheme.surfaceContainerLow,
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.80f)),
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text("Web Remote service", modifier = Modifier.weight(1f),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurface)
+                                Switch(checked = snapshot.remote, enabled = !busy,
+                                    onCheckedChange = { setRemoteService(it) })
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Android's Dialog theme can reset the width after onCreate.
+    // Apply it when the dialog window is attached, not before.
+    private fun applyHubWindowSize() {
+        window.setLayout(
+            (resources.displayMetrics.widthPixels * 0.96f).toInt(),
+            WindowManager.LayoutParams.WRAP_CONTENT,
+        )
+    }
+
+    override fun onStart() {
+        super.onStart()
+        applyHubWindowSize()
+    }
+
+    @Composable
+    private fun PreviewGroup(title: String, startIndex: Int, modifier: Modifier) {
+        Card(
+            modifier = modifier,
+            shape = RoundedCornerShape(16.dp),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.80f)),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+            ),
+        ) {
+            Column(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp, horizontal = 6.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(5.dp),
+            ) {
+                Text(
+                    title,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                ) {
+                    listOf("Home", "Lock").forEachIndexed { offset, label ->
+                        val previewIndex = startIndex + offset
+                        val bmp = previewItems.getOrNull(previewIndex)?.bitmap
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(3.dp),
+                        ) {
+                            Box(
+                                modifier = Modifier.width(47.dp).aspectRatio(9f / 20f)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .border(1.dp, MaterialTheme.colorScheme.outlineVariant,
+                                        RoundedCornerShape(8.dp)),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                if (bmp != null && !bmp.isRecycled) {
+                                    Image(
+                                        bitmap = bmp.asImageBitmap(),
+                                        contentDescription = "$title $label",
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentScale = ContentScale.Crop,
+                                    )
+                                } else {
+                                    Text("—", style = MaterialTheme.typography.bodySmall)
+                                }
+                            }
+                            Text(label, style = MaterialTheme.typography.labelSmall, maxLines = 1)
                         }
                     }
                 }
@@ -209,6 +279,7 @@ class ControlHubActivity : ComponentActivity() {
 
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
+        applyHubWindowSize()
         refreshState()
     }
 
@@ -270,12 +341,13 @@ class ControlHubActivity : ComponentActivity() {
     ) {
         val highlighted = active == true
         val color = if (highlighted) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerLow
-        val ink = if (highlighted) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
+        val ink = if (highlighted) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
         Card(
             modifier = modifier,
             enabled = enabled,
             onClick = action,
             shape = RoundedCornerShape(14.dp),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.80f)),
             colors = CardDefaults.cardColors(containerColor = color, contentColor = ink),
         ) {
             Column(
