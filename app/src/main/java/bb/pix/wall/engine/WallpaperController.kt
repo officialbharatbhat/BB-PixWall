@@ -3249,8 +3249,8 @@ fun invalidateQueue() =
         context: Context,
         settings: AppSettings,
     ) {
-        val hotTarget = 32
-        val warmTarget = 64
+        val hotTarget = 16
+        val warmTarget = 32
         val totalTarget = hotTarget + warmTarget
 
         fun imageCount(dir: File): Int =
@@ -3367,7 +3367,7 @@ fun invalidateQueue() =
         /*
          * Normalize tiers before deciding whether refill is needed.
          * Old Lite builds could leave more Warm files than the current
-         * contract. Keep a strict 32 Hot + 64 Warm ready reserve.
+         * contract. Keep a bounded 16 Hot + 32 Warm ready reserve.
          */
         while (
             imageCount(WallpaperFiles.hotCache) <
@@ -3410,8 +3410,8 @@ fun invalidateQueue() =
             RuntimeStatus.set(
                 context,
                 "cache_progress",
-                "Lite ready • hot=${imageCount(WallpaperFiles.hotCache)}/32" +
-                    " • warm=${imageCount(WallpaperFiles.warmCache)}/64",
+                "Lite ready • hot=${imageCount(WallpaperFiles.hotCache)}/16" +
+                    " • warm=${imageCount(WallpaperFiles.warmCache)}/32",
             )
             return
         }
@@ -3478,7 +3478,6 @@ fun invalidateQueue() =
                     candidate.source,
                     candidate.id,
                 )
-                HubFetchCounters.record(context, candidate.source)
 
 
                 existingIds += candidate.id
@@ -4172,7 +4171,6 @@ fun invalidateQueue() =
                                 candidate.source,
                                 candidate.id,
                             )
-                HubFetchCounters.record(context, candidate.source)
 
 
                             true
@@ -5361,7 +5359,6 @@ fun invalidateQueue() =
                     candidate.source,
                     candidate.id,
                 )
-                HubFetchCounters.record(context, candidate.source)
 
 
                 RuntimeStatus.activeSource(
@@ -5499,7 +5496,6 @@ fun invalidateQueue() =
                         val size = input.read(buf)
                         if (size < 0) break
                         output.write(buf, 0, size)
-                        HubFetchCounters.recordWallpaperTransfer(context, size.toLong())
                     }
                 }
             }

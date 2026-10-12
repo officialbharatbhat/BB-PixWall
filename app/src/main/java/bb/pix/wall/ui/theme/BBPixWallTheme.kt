@@ -235,8 +235,10 @@ private fun pitchBlack(
         surfaceContainerHighest = Color(0xFF0B0B0B),
         surfaceDim = Color.Black,
         surfaceBright = Color(0xFF0D0D0D),
-        outline = Color(0xFF242424),
-        outlineVariant = Color(0xFF151515),
+        // High-contrast borders on pure black; old #242424 at 52% opacity
+        // rendered almost invisible against the black section background.
+        outline = Color(0xFF77717F),
+        outlineVariant = Color(0xFF45414B),
         onBackground = Color(0xFFF5F3F6),
         onSurface = Color(0xFFF5F3F6),
         onSurfaceVariant = Color(0xFFC0BBC4),
@@ -587,11 +589,11 @@ fun BBPixWallTheme(
             )
         }
 
-    colors =
-        enforceReadableContent(
-            colors,
-            dark,
-        )
+    // System Monet supplies its own paired foreground/background tokens.
+    // Don't replace those with fixed white/black values: that can break tonal contrast.
+    if (appearanceMode != AppearanceMode.SYSTEM_MONET) {
+        colors = enforceReadableContent(colors, dark)
+    }
 
     if (
         appearanceMode ==

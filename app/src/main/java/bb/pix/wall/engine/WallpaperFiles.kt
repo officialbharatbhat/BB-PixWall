@@ -9,13 +9,14 @@ object WallpaperFiles {
     val cache = File(root, "cache")
     val hotCache = File(cache, "hot")
     val warmCache = File(cache, "warm")
-    val queue = File(root, "queue")
-    val legacyQueue = File(root, "quee")
+    // Legacy/offline queue paths remain available but do not create extra top-level folders.
+    val queue = File(backup, ".queue")
+    val legacyQueue = File(backup, ".quee")
     val saved = File(root, "saved")
     val history = File(root, "history")
     val favorites = File(root, "favorites")
     val logs = File(root, "logs")
-    val quarantine = File(root, "quarantine")
+    val quarantine = File(backup, ".quarantine")
 
     val currentHome = File(backup, "current_home.jpg")
     val currentLock = File(backup, "current_lock.jpg")
@@ -35,24 +36,66 @@ object WallpaperFiles {
     val blockedIds = File(logs, "blocked_ids.txt")
     val blockedHashes = File(logs, "blocked_hashes.txt")
 
+    @Volatile private var migrated = false
+
+    // Old installs placed unused folders beside backup/cache. Preserve nonempty
+    // legacy queue files inside backup and only delete now-empty directories.
+    private fun migrateUnusedTopLevelDirs() {
+        if (migrated) return
+        synchronized(this) {
+            if (migrated) return
+            listOf(
+                File(root, "queue") to queue,
+                File(root, "quee") to legacyQueue,
+                File(root, "quarantine") to quarantine,
+            ).forEach { (old, destination) ->
+                if (!old.isDirectory) return@forEach
+                val entries = old.listFiles().orEmpty()
+                if (entries.isNotEmpty()) {
+                    destination.mkdirs()
+                    entries.forEach { item ->
+                        val target = File(destination, item.name)
+                        if (!target.exists()) {
+                            if (!item.renameTo(target) && item.isFile) {
+                                runCatching {
+                                    item.copyTo(target, overwrite = false)
+                                    if (item.length() == target.length()) item.delete()
+                                }
+                            }
+                        }
+                    }
+                }
+                // delete() only succeeds if every item was safely moved.
+                old.delete()
+            }
+            // /sdcard/wallpaper was previously created by the root setup.
+            // Only remove the generated, empty directory tree; never delete local images.
+            if (local.isDirectory) {
+                val allowed = setOf("backup", "cache", "local", "queue", "quee", "saved", "logs", "quarantine")
+                if (local.listFiles().orEmpty().all { it.isDirectory && it.name in allowed } &&
+                    local.walkTopDown().none { it.isFile }) {
+                    local.walkBottomUp().forEach { if (it.isDirectory) it.delete() }
+                }
+            }
+            migrated = true
+        }
+    }
+
     fun ensure(): Boolean {
         val ok = root.exists() || root.mkdirs()
         if (!ok) return false
         val dirsOk = listOf(
-            local,
             backup,
             cache,
             hotCache,
             warmCache,
-            queue,
-            legacyQueue,
             saved,
             history,
             favorites,
             logs,
-            quarantine,
         ).all { it.exists() || it.mkdirs() }
         if (!dirsOk) return false
+        migrateUnusedTopLevelDirs()
         // Migrate beta-era cache images that were stored directly under /cache into warm/.
         // This keeps the cache layout predictable without deleting user-ready assets.
         val allowed = setOf("jpg", "jpeg", "png", "webp", "avif")

@@ -138,12 +138,7 @@ object RootAccess {
         }
 
         val tuned = tuneBackground(context)
-        val dirs = runCommand(
-            "mkdir -p /sdcard/wallpaper/{backup,cache/hot,cache/warm,local,queue,quee,saved,logs,quarantine} && chmod -R 0775 /sdcard/wallpaper",
-            4000L,
-        )
-        RuntimeStatus.set(context, "root_dirs", if (dirs.granted) "Verified" else "Skipped/failed: ${dirs.detail.take(80)}")
-        rootLog("ROOT request complete tune=${tuned.granted} dirs=${dirs.granted}")
+        rootLog("ROOT request complete tune=${tuned.granted}; no legacy storage directories created")
         return Result(true, "Root granted; ${tuned.detail}", System.currentTimeMillis() - started)
     }
 
