@@ -41,7 +41,7 @@ data class AppSettings(
     val homeBlurRadius: Int = 16,
     val lockBlurRadius: Int = 16,
     val lanEnabled: Boolean = false,
-    val lanPort: Int = if (bb.pix.wall.BuildConfig.DEBUG) 9191 else 9090,
+    val lanPort: Int = 9090,
     val lanPinEnabled: Boolean = false,
     val lanPin: String = "",
     val photosAlbumUrl: String = "",
