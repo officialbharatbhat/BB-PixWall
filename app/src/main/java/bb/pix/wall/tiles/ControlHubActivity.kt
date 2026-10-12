@@ -48,7 +48,8 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Surface
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
@@ -90,10 +91,14 @@ class ControlHubActivity : ComponentActivity() {
                 previewSignature = signature
                 loadDiagnostics()
             }
-            previewHandler.postDelayed(this, 1500L)
+            previewHandler.postDelayed(this, 2500L)
         }
     }
     private val previewHandler = Handler(Looper.getMainLooper())
+    // Independent preview lane: cloud cache downloads must never delay Hub thumbnails.
+    private val previewExecutor = java.util.concurrent.Executors.newSingleThreadExecutor { task ->
+        Thread(task, "bbpix-hub-preview").apply { priority = Thread.NORM_PRIORITY - 1 }
+    }
     private var previewActive = false
     private var busy by mutableStateOf(false)
     private var status by mutableStateOf("Tap an action")
@@ -103,7 +108,7 @@ class ControlHubActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         setFinishOnTouchOutside(false)
         window.setLayout(
-            (resources.displayMetrics.widthPixels * 0.97f).toInt(),
+            (resources.displayMetrics.widthPixels * 0.94f).toInt(),
             WindowManager.LayoutParams.WRAP_CONTENT,
         )
         refreshState()
@@ -117,8 +122,8 @@ class ControlHubActivity : ComponentActivity() {
                     shadowElevation = 0.dp,
                 ) {
                     Column(
-                        modifier = Modifier.fillMaxWidth().heightIn(max = (resources.displayMetrics.heightPixels / resources.displayMetrics.density * 0.88f).dp).verticalScroll(rememberScrollState()).padding(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(7.dp),
+                        modifier = Modifier.fillMaxWidth().heightIn(max = (resources.displayMetrics.heightPixels / resources.displayMetrics.density * 0.86f).dp).verticalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalArrangement = Arrangement.spacedBy(5.dp),
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(
@@ -129,17 +134,19 @@ class ControlHubActivity : ComponentActivity() {
                             )
                             Spacer(Modifier.width(8.dp))
                             Text("BB-PixWall Hub", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-                            OutlinedButton(onClick = { finish() }, contentPadding = androidx.compose.foundation.layout.PaddingValues(8.dp)) {
+                            IconButton(onClick = { finish() }) {
                                 Icon(Icons.Outlined.Close, contentDescription = "Close")
                             }
                         }
-                        Text(status, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        if (status != "Tap an action") {
+                            Text(status, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2)
+                        }
                         Row(horizontalArrangement = Arrangement.SpaceEvenly, modifier = Modifier.fillMaxWidth()) {
                             listOf("Home", "Lock", "Next H", "Next L").forEachIndexed { index, label ->
                                 val bmp = previewItems.getOrNull(index)?.bitmap
-                                Column(modifier = Modifier.width(47.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                                Column(modifier = Modifier.width(43.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                                     Box(
-                                        modifier = Modifier.width(44.dp).aspectRatio(9f / 20f).clip(RoundedCornerShape(8.dp)),
+                                        modifier = Modifier.width(39.dp).aspectRatio(9f / 20f).clip(RoundedCornerShape(8.dp)),
                                         contentAlignment = Alignment.Center,
                                     ) {
                                         if (bmp != null && !bmp.isRecycled) {
@@ -154,7 +161,7 @@ class ControlHubActivity : ComponentActivity() {
                         }
 
                         val snapshot = hubState
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                             HubAction("Next Wallpaper", Icons.Outlined.ArrowForward, null, !busy && !snapshot.locked && !snapshot.safe, Modifier.weight(1f)) { execute("next") }
                             HubAction("Previous Wallpaper", Icons.Outlined.ArrowBack, null, !busy && snapshot.previous && !snapshot.locked && !snapshot.safe, Modifier.weight(1f)) { execute("previous") }
                         }
@@ -169,6 +176,11 @@ class ControlHubActivity : ComponentActivity() {
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             HubAction("Wallpaper Blur", Icons.Outlined.BlurOn, snapshot.blur, !busy && !snapshot.locked && !snapshot.safe, Modifier.weight(1f)) { execute("blur") }
                             HubAction("BB-Remote", Icons.Outlined.Wifi, snapshot.remote, !busy, Modifier.weight(1f)) { openRemote() }
+                        }
+                        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            Text("Web Remote service", modifier = Modifier.weight(1f), style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Switch(checked = snapshot.remote, enabled = !busy, onCheckedChange = { setRemoteService(it) })
                         }
                     }
                 }
@@ -192,7 +204,7 @@ class ControlHubActivity : ComponentActivity() {
         previewSignature = queueSignature()
         previewActive = true
         previewHandler.removeCallbacks(previewWatcher)
-        previewHandler.postDelayed(previewWatcher, 1500L)
+        previewHandler.postDelayed(previewWatcher, 2500L)
     }
 
     override fun onConfigurationChanged(newConfig: Configuration) {
@@ -212,7 +224,7 @@ class ControlHubActivity : ComponentActivity() {
         previewRunning = true
         val request = ++diagnosticsVersion
         val app = applicationContext
-        EngineExecutors.io {
+        previewExecutor.execute {
             val result = runCatching { HubDiagnostics.collect(app) }.getOrNull()
             runOnUiThread {
                 previewRunning = false
@@ -221,6 +233,13 @@ class ControlHubActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    override fun onDestroy() {
+        previewActive = false
+        previewHandler.removeCallbacksAndMessages(null)
+        previewExecutor.shutdownNow()
+        super.onDestroy()
     }
 
     private data class HubState(val safe: Boolean, val blur: Boolean, val remote: Boolean, val previous: Boolean, val locked: Boolean)
@@ -258,9 +277,9 @@ class ControlHubActivity : ComponentActivity() {
             colors = CardDefaults.cardColors(containerColor = color, contentColor = ink),
         ) {
             Column(
-                modifier = Modifier.fillMaxWidth().padding(vertical = 7.dp, horizontal = 6.dp),
+                modifier = Modifier.fillMaxWidth().padding(vertical = 5.dp, horizontal = 6.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(3.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
                 Icon(symbol, contentDescription = null, modifier = Modifier.height(19.dp))
                 Text(label, style = MaterialTheme.typography.labelSmall, maxLines = 2)
@@ -317,11 +336,28 @@ class ControlHubActivity : ComponentActivity() {
         }
     }
 
-    private fun openRemote() {
-        val old = SettingsStore(this).load()
-        val settings = if (!old.lanEnabled) old.copy(lanEnabled = true).also { SettingsStore(this).save(it) } else old
+    private fun setRemoteService(enabled: Boolean) {
+        val store = SettingsStore(this)
+        val current = store.load()
+        if (current.lanEnabled == enabled) return
+        store.save(current.copy(lanEnabled = enabled))
+        val intent = Intent(this, LanServerService::class.java)
+        runCatching {
+            if (enabled) startForegroundService(intent) else stopService(intent)
+        }.onFailure {
+            status = "Remote service failed: ${it.javaClass.simpleName}"
+        }.onSuccess {
+            status = if (enabled) "Remote service ON" else "Remote service OFF"
+        }
         refreshState()
-        runCatching { startForegroundService(Intent(this, LanServerService::class.java)) }
+    }
+
+    private fun openRemote() {
+        val settings = SettingsStore(this).load()
+        if (!settings.lanEnabled) {
+            status = "Enable Web Remote service first"
+            return
+        }
         val ip = LanInfo.localIpv4()
         if (ip == "Unavailable") {
             status = "Wi-Fi address unavailable"
