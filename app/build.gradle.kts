@@ -30,8 +30,8 @@ android {
         applicationId = "bb.pixwall.lite"
         minSdk = 35
         targetSdk = 37
-        versionCode = 3
-        versionName = "1.2.0"
+        versionCode = 4
+        versionName = "1.2.1"
     }
 
     buildFeatures {

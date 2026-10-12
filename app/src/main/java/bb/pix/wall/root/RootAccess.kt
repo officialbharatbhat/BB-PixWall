@@ -138,12 +138,7 @@ object RootAccess {
         }
 
         val tuned = tuneBackground(context)
-        val dirs = runCommand(
-            "mkdir -p /sdcard/wallpaper/{backup,cache/hot,cache/warm,local,queue,quee,saved,logs,quarantine} && chmod -R 0775 /sdcard/wallpaper",
-            4000L,
-        )
-        RuntimeStatus.set(context, "root_dirs", if (dirs.granted) "Verified" else "Skipped/failed: ${dirs.detail.take(80)}")
-        rootLog("ROOT request complete tune=${tuned.granted} dirs=${dirs.granted}")
+        rootLog("ROOT request complete tune=${tuned.granted}; no legacy storage directories created")
         return Result(true, "Root granted; ${tuned.detail}", System.currentTimeMillis() - started)
     }
 
@@ -224,40 +219,9 @@ object RootAccess {
                 "else exit 0; fi"
         )
 
-        if (caps.deviceIdle) {
-            runVerified(
-                "doze-whitelist",
-                "cmd deviceidle whitelist +$pkg"
-            )
-        }
-
-        /*
-         * Keep the package in the active standby bucket and explicitly
-         * clear its inactive state. Both commands are app-scoped.
-         */
-        runVerified(
-            "standby-active",
-            "am set-standby-bucket $pkg active"
-        )
-
-        runVerified(
-            "inactive-false",
-            "cmd activity set-inactive $pkg false 2>/dev/null || " +
-                "am set-inactive $pkg false 2>/dev/null"
-        )
-
-        if (caps.appOps) {
-            runVerified(
-                "appops-bg",
-                "cmd appops set $pkg RUN_IN_BACKGROUND allow"
-            )
-
-            runVerified(
-                "appops-any-bg",
-                "cmd appops set $pkg RUN_ANY_IN_BACKGROUND allow"
-            )
-        }
-
+        // Battery-first Lite mode: keep Android Doze, standby and app-ops
+        // decisions under system control. Foreground wallpaper services still
+        // use their normal Android lifecycle and screen-off wakelock timeout.
         if (caps.oomScore) {
             runVerified(
                 "oom-score",
