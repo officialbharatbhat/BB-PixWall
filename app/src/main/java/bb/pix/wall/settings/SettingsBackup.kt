@@ -12,7 +12,7 @@ import java.util.Locale
  * BB-PixWall portable local backup.
  *
  * Design:
- * - survives app uninstall because file lives under /sdcard/wallpaper/
+ * - survives app uninstall because file lives under /sdcard/BB-PixWall-Lite/
  * - versioned JSON schema
  * - restores known SharedPreferences without deleting future/new keys
  * - runtime/transient diagnostics are intentionally excluded
@@ -49,12 +49,41 @@ object SettingsBackup {
         val file: File? = null,
     )
 
-    private fun backupDir(): File =
-        File(
-            "/sdcard/wallpaper/backup/settings"
-        ).apply {
-            mkdirs()
+    // Keep all Lite-owned data under one root; import previously saved
+    // settings without overwriting the user's newer Lite snapshots.
+    @Volatile private var legacyChecked = false
+
+    private fun backupDir(): File {
+        val target = File("/sdcard/BB-PixWall-Lite/backup/settings")
+        target.mkdirs()
+        if (!legacyChecked) {
+            synchronized(this) {
+                if (!legacyChecked) {
+                    val legacy = File("/sdcard/wallpaper/backup/settings")
+                    if (legacy.isDirectory) {
+                        legacy.listFiles().orEmpty()
+                            .filter { it.isFile && it.name.startsWith("BB-PixWall-settings-") && it.extension == "json" }
+                            .forEach { old ->
+                                val destination = File(target, old.name)
+                                if (!destination.exists()) {
+                                    runCatching {
+                                        if (!old.renameTo(destination)) {
+                                            old.copyTo(destination, overwrite = false)
+                                            if (old.length() == destination.length()) old.delete()
+                                        }
+                                    }
+                                }
+                            }
+                        legacy.delete() // only succeeds if empty; never delete user files
+                        legacy.parentFile?.delete()
+                        legacy.parentFile?.parentFile?.delete()
+                    }
+                    legacyChecked = true
+                }
+            }
         }
+        return target
+    }
 
     private fun latestFile(): File =
         File(
