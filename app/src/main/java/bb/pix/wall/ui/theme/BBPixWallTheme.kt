@@ -587,11 +587,11 @@ fun BBPixWallTheme(
             )
         }
 
-    colors =
-        enforceReadableContent(
-            colors,
-            dark,
-        )
+    // System Monet supplies its own paired foreground/background tokens.
+    // Don't replace those with fixed white/black values: that can break tonal contrast.
+    if (appearanceMode != AppearanceMode.SYSTEM_MONET) {
+        colors = enforceReadableContent(colors, dark)
+    }
 
     if (
         appearanceMode ==
