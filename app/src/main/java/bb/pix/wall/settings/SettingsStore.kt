@@ -77,7 +77,7 @@ class SettingsStore(context: Context) {
             lanPort =
                 prefs.getInt(
                     "lan_port",
-                    if (bb.pix.wall.BuildConfig.DEBUG) 9191 else 9090,
+                    9090,
                 ).coerceIn(1024, 65535),
             lanPinEnabled =
                 prefs.getBoolean(
