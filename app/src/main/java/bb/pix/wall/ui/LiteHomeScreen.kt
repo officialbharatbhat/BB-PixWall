@@ -801,6 +801,15 @@ fun LiteHomeScreen(
                         )
                     }
                 }
+                LiteChoice(
+                    "Monet (System colors)",
+                    settings.appearanceMode == AppearanceMode.SYSTEM_MONET,
+                    Modifier.fillMaxWidth(),
+                ) {
+                    onSettingsChange(
+                        settings.copy(appearanceMode = AppearanceMode.SYSTEM_MONET)
+                    )
+                }
             }
 
             LiteSection(
@@ -1225,8 +1234,11 @@ private fun LiteSection(
     content: @Composable ColumnScope.() -> Unit,
 ) {
     Card(
-        modifier =
-            Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(18.dp),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.52f)),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
     ) {
         Column(
             modifier =
