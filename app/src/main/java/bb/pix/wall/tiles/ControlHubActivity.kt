@@ -6,6 +6,8 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.content.res.Configuration
+import bb.pix.wall.R
+import androidx.compose.ui.res.painterResource
 import bb.pix.wall.engine.WallpaperFiles
 import bb.pix.wall.settings.AppearanceMode
 import android.view.WindowManager
@@ -74,7 +76,6 @@ class ControlHubActivity : ComponentActivity() {
     companion object { @Volatile var isVisible: Boolean = false; private set }
     private var appearanceMode by mutableStateOf(AppearanceMode.SYSTEM)
     private var previewItems by mutableStateOf<List<HubDiagnostics.Preview>>(emptyList())
-    private var bottomInfo by mutableStateOf("Loading usage…")
     private var diagnosticsVersion = 0
     private var previewSignature = ""
     private var previewRunning = false
@@ -83,30 +84,17 @@ class ControlHubActivity : ComponentActivity() {
             .joinToString("|") { "${it.length()}:${it.lastModified()}" }
     private val previewWatcher = object : Runnable {
         override fun run() {
-            if (!statsActive || isFinishing || isDestroyed) return
+            if (!previewActive || isFinishing || isDestroyed) return
             val signature = queueSignature()
             if (signature != previewSignature && !previewRunning) {
                 previewSignature = signature
                 loadDiagnostics()
             }
-            statsHandler.postDelayed(this, 900L)
+            previewHandler.postDelayed(this, 1500L)
         }
     }
-    private val statsHandler = Handler(Looper.getMainLooper())
-    private var statsActive = false
-    private val statsRefresh = object : Runnable {
-        override fun run() {
-            if (!statsActive || isFinishing || isDestroyed) return
-            val app = applicationContext
-            EngineExecutors.io {
-                val latest = runCatching { HubDiagnostics.stats(app) }.getOrNull()
-                if (latest != null) runOnUiThread {
-                    if (statsActive && !isFinishing && !isDestroyed) bottomInfo = latest
-                }
-            }
-            statsHandler.postDelayed(this, 3000L)
-        }
-    }
+    private val previewHandler = Handler(Looper.getMainLooper())
+    private var previewActive = false
     private var busy by mutableStateOf(false)
     private var status by mutableStateOf("Tap an action")
     private var hubState by mutableStateOf(HubState(false, false, false, false, false))
@@ -133,6 +121,13 @@ class ControlHubActivity : ComponentActivity() {
                         verticalArrangement = Arrangement.spacedBy(7.dp),
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                painter = painterResource(id = R.drawable.ic_tile_hub),
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.width(24.dp).height(24.dp),
+                            )
+                            Spacer(Modifier.width(8.dp))
                             Text("BB-PixWall Hub", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
                             OutlinedButton(onClick = { finish() }, contentPadding = androidx.compose.foundation.layout.PaddingValues(8.dp)) {
                                 Icon(Icons.Outlined.Close, contentDescription = "Close")
@@ -175,7 +170,6 @@ class ControlHubActivity : ComponentActivity() {
                             HubAction("Wallpaper Blur", Icons.Outlined.BlurOn, snapshot.blur, !busy && !snapshot.locked && !snapshot.safe, Modifier.weight(1f)) { execute("blur") }
                             HubAction("BB-Remote", Icons.Outlined.Wifi, snapshot.remote, !busy, Modifier.weight(1f)) { openRemote() }
                         }
-                        Text(bottomInfo, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             }
@@ -196,11 +190,9 @@ class ControlHubActivity : ComponentActivity() {
         refreshState()
         loadDiagnostics()
         previewSignature = queueSignature()
-        statsActive = true
-        statsHandler.removeCallbacks(previewWatcher)
-        statsHandler.postDelayed(previewWatcher, 900L)
-        statsHandler.removeCallbacks(statsRefresh)
-        statsHandler.postDelayed(statsRefresh, 3000L)
+        previewActive = true
+        previewHandler.removeCallbacks(previewWatcher)
+        previewHandler.postDelayed(previewWatcher, 1500L)
     }
 
     override fun onConfigurationChanged(newConfig: Configuration) {
@@ -210,9 +202,8 @@ class ControlHubActivity : ComponentActivity() {
 
     override fun onPause() {
         isVisible = false
-        statsActive = false
-        statsHandler.removeCallbacks(previewWatcher)
-        statsHandler.removeCallbacks(statsRefresh)
+        previewActive = false
+        previewHandler.removeCallbacks(previewWatcher)
         super.onPause()
     }
 
@@ -226,8 +217,7 @@ class ControlHubActivity : ComponentActivity() {
             runOnUiThread {
                 previewRunning = false
                 if (result != null && !isFinishing && !isDestroyed && diagnosticsVersion == request) {
-                    previewItems = result.images
-                    bottomInfo = result.footer
+                    previewItems = result
                 }
             }
         }
@@ -315,8 +305,8 @@ class ControlHubActivity : ComponentActivity() {
                 refreshState()
                 loadDiagnostics()
                 if (action == "next" || action == "previous" || action == "undo" || action == "blur") {
-                    statsHandler.postDelayed({ if (!isFinishing && !isDestroyed) loadDiagnostics() }, 700L)
-                    if (action == "blur") statsHandler.postDelayed({
+                    previewHandler.postDelayed({ if (!isFinishing && !isDestroyed) loadDiagnostics() }, 700L)
+                    if (action == "blur") previewHandler.postDelayed({
                         if (!isFinishing && !isDestroyed) loadDiagnostics()
                     }, 2400L)
 
