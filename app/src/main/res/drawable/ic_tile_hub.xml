@@ -1,18 +1,19 @@
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
     android:height="24dp"
-    android:viewportWidth="24"
-    android:viewportHeight="24">
-    <!-- Crisp monochrome wallpaper/gallery mark for QS and the Hub header. -->
-    <path
-        android:fillColor="@android:color/transparent"
-        android:strokeColor="#FFFFFFFF"
-        android:strokeWidth="1.7"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round"
-        android:pathData="M5.5,3.5h13a2,2 0,0 1,2 2v13a2,2 0,0 1,-2 2h-13a2,2 0,0 1,-2 -2v-13a2,2 0,0 1,2 -2z"/>
-    <path android:fillColor="#FFFFFFFF"
-        android:pathData="M5.4,16.7l4.2,-5.2 2.6,2.9 2.1,-2.6 4.2,4.9z"/>
-    <path android:fillColor="#FFFFFFFF"
-        android:pathData="M16.1,7.2a1.45,1.45 0,1 0,0.01 0z"/>
+    android:viewportWidth="44"
+    android:viewportHeight="60">
+    <!-- Same framed-wallpaper + LITE lettering silhouette as the app launcher.
+         Crop the large adaptive-icon safe area for a readable 24dp tile. -->
+    <group android:translateX="-31" android:translateY="-20">
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:pathData="M35,31C35,27.7 37.7,25 41,25H67C70.3,25 73,27.7 73,31V69C73,72.3 70.3,75 67,75H41C37.7,75 35,72.3 35,69V31ZM41,31V57L47.8,50.2L53.2,55.6L60.2,48.6L67,55.4V31H41ZM44.5,41A4,4 0,1 0,52.5 41A4,4 0,1 0,44.5 41Z" />
+        <path
+            android:fillColor="#FF00E5FF"
+            android:pathData="M39,62H69V73H39Z" />
+        <path
+            android:fillColor="#FF071014"
+            android:pathData="M42,64H43.5V69H46.5V70.5H42ZM48,64H49.5V70.5H48ZM51,64H57V65.5H54.8V70.5H53.2V65.5H51ZM58.5,64H64.5V65.5H60V66.6H64V68H60V69H64.5V70.5H58.5Z" />
+    </group>
 </vector>
