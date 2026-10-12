@@ -220,19 +220,21 @@ class ControlHubActivity : ComponentActivity() {
     }
 
     private fun loadDiagnostics() {
-        if (previewRunning) return
+        if (previewRunning || isFinishing || isDestroyed || previewExecutor.isShutdown) return
         previewRunning = true
         val request = ++diagnosticsVersion
         val app = applicationContext
-        previewExecutor.execute {
-            val result = runCatching { HubDiagnostics.collect(app) }.getOrNull()
-            runOnUiThread {
-                previewRunning = false
-                if (result != null && !isFinishing && !isDestroyed && diagnosticsVersion == request) {
-                    previewItems = result
+        runCatching {
+            previewExecutor.execute {
+                val result = runCatching { HubDiagnostics.collect(app) }.getOrNull()
+                runOnUiThread {
+                    previewRunning = false
+                    if (result != null && !isFinishing && !isDestroyed && diagnosticsVersion == request) {
+                        previewItems = result
+                    }
                 }
             }
-        }
+        }.onFailure { previewRunning = false }
     }
 
     override fun onDestroy() {
