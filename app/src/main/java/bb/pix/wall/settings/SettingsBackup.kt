@@ -54,9 +54,10 @@ object SettingsBackup {
     @Volatile private var legacyChecked = false
 
     private fun backupDir(): File {
-        val target = File("/sdcard/BB-PixWall-Lite/backup/settings")
+        val target = File(bb.pix.wall.engine.WallpaperFiles.backup, "settings")
         target.mkdirs()
-        if (!legacyChecked) {
+        // Debug builds never migrate or touch the official app's legacy backups.
+        if (!bb.pix.wall.BuildConfig.DEBUG && !legacyChecked) {
             synchronized(this) {
                 if (!legacyChecked) {
                     val legacy = File("/sdcard/wallpaper/backup/settings")
