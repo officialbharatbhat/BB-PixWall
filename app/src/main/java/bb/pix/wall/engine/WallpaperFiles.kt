@@ -1,13 +1,10 @@
 package bb.pix.wall.engine
 
 import java.io.File
-import bb.pix.wall.BuildConfig
 
 object WallpaperFiles {
-    // A debug APK must not migrate, delete or consume the official app's files.
-    // The release APK continues using precisely the original storage path.
-    val root = File(if (BuildConfig.DEBUG) "/sdcard/BB-PixWall-Lite-TEST" else "/sdcard/BB-PixWall-Lite")
-    val local = if (BuildConfig.DEBUG) File(root, "local") else File("/sdcard/wallpaper")
+    val root = File("/sdcard/BB-PixWall-Lite")
+    val local = File("/sdcard/wallpaper")
     val backup = File(root, "backup")
     val cache = File(root, "cache")
     val hotCache = File(cache, "hot")
