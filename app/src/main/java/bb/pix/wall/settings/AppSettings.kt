@@ -6,7 +6,7 @@ enum class WallpaperTargetMode(val label: String) {
 }
 
 enum class TriggerMode(val label: String) {
-    INTERVAL("Interval"), SCREEN_OFF("Screen off"), SCREEN_ON("Screen on"), SCREEN_OFF_OR_ON("Screen off / on"), MANUAL("Manual only"),
+    INTERVAL("Interval"), SCREEN_OFF("Screen off"), SCREEN_ON("Device unlock"), SCREEN_OFF_OR_ON("Screen off / unlock"), MANUAL("Manual only"),
 }
 
 enum class AppearanceMode(val label: String) {
