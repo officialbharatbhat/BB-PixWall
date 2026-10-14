@@ -339,18 +339,23 @@ fun LiteHomeScreen(
                         onSettingsChange(settings.copy(lockTriggerMode = TriggerMode.SCREEN_ON))
                     }
                 }
-                if (settings.homeTriggerMode == TriggerMode.INTERVAL ||
-                    settings.lockTriggerMode == TriggerMode.INTERVAL) {
-                    val mins = settings.intervalMinutes.coerceIn(1, 300)
-                    Text("Interval: $mins min (shared timing)", style = MaterialTheme.typography.labelMedium)
+                if (settings.homeTriggerMode == TriggerMode.INTERVAL) {
+                    Text("Home interval: ${settings.homeIntervalMinutes} min", style = MaterialTheme.typography.labelMedium)
                     Slider(
-                        value = mins.toFloat(),
-                        onValueChange = {
-                            onSettingsChange(settings.copy(intervalMinutes = it.roundToInt().coerceIn(1, 300)))
-                        },
+                        value = settings.homeIntervalMinutes.toFloat(),
+                        onValueChange = { onSettingsChange(settings.copy(homeIntervalMinutes = it.roundToInt().coerceIn(1, 300))) },
                         valueRange = 1f..300f,
                     )
                 }
+                if (settings.lockTriggerMode == TriggerMode.INTERVAL) {
+                    Text("Lock interval: ${settings.lockIntervalMinutes} min", style = MaterialTheme.typography.labelMedium)
+                    Slider(
+                        value = settings.lockIntervalMinutes.toFloat(),
+                        onValueChange = { onSettingsChange(settings.copy(lockIntervalMinutes = it.roundToInt().coerceIn(1, 300))) },
+                        valueRange = 1f..300f,
+                    )
+                }
+
             }
 
             LiteSection(
