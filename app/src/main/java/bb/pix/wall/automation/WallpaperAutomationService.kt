@@ -25,6 +25,7 @@ import bb.pix.wall.settings.AppSettings
 import bb.pix.wall.settings.EngineMode
 import bb.pix.wall.settings.SettingsStore
 import bb.pix.wall.settings.TriggerMode
+import bb.pix.wall.settings.WallpaperTargetMode
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -90,25 +91,11 @@ class WallpaperAutomationService : Service() {
                     return
                 }
 
-                val matches =
-                    when (settings.triggerMode) {
-                        TriggerMode.SCREEN_OFF ->
-                            action ==
-                                Intent.ACTION_SCREEN_OFF
-
-                        TriggerMode.SCREEN_ON ->
-                            action ==
-                                Intent.ACTION_SCREEN_ON
-
-                        else ->
-                            false
-                    }
-
-                if (matches) {
-                    applyPrepared(
-                        settings,
-                        "event:${action.substringAfterLast('.')}",
-                    )
+                val target = targetForEvent(settings,
+                    action == Intent.ACTION_SCREEN_OFF,
+                    action == Intent.ACTION_SCREEN_ON)
+                if (target != null) {
+                    applyPrepared(settings, "event:${action.substringAfterLast('.')}", target)
                 }
             }
         }
@@ -121,15 +108,12 @@ class WallpaperAutomationService : Service() {
                         this@WallpaperAutomationService
                     ).load()
 
-                if (
-                    settings.autoChange && !bb.pix.wall.engine.SafeWall.active(this@WallpaperAutomationService) &&
-                    settings.triggerMode ==
-                        TriggerMode.INTERVAL
-                ) {
-                    applyPrepared(
-                        settings,
-                        "interval",
-                    )
+                if (settings.autoChange &&
+                    !SafeWall.active(this@WallpaperAutomationService)) {
+                    val target = combineTargets(
+                        settings.homeTriggerMode == TriggerMode.INTERVAL,
+                        settings.lockTriggerMode == TriggerMode.INTERVAL)
+                    if (target != null) applyPrepared(settings, "interval", target)
                 }
 
                 scheduleNextInterval(
@@ -264,10 +248,8 @@ class WallpaperAutomationService : Service() {
             }
         }
 
-        if (
-            settings.triggerMode ==
-            TriggerMode.INTERVAL
-        ) {
+        if (settings.homeTriggerMode == TriggerMode.INTERVAL ||
+            settings.lockTriggerMode == TriggerMode.INTERVAL) {
             scheduleNextInterval(
                 settings
             )
@@ -288,11 +270,9 @@ class WallpaperAutomationService : Service() {
             intervalTask
         )
 
-        if (
-            !settings.autoChange ||
-            settings.triggerMode !=
-                TriggerMode.INTERVAL
-        ) {
+        if (!settings.autoChange ||
+            (settings.homeTriggerMode != TriggerMode.INTERVAL &&
+                settings.lockTriggerMode != TriggerMode.INTERVAL)) {
             return
         }
 
@@ -316,9 +296,28 @@ class WallpaperAutomationService : Service() {
         )
     }
 
+    private fun combineTargets(home: Boolean, lock: Boolean): WallpaperTargetMode? =
+        when {
+            home && lock -> WallpaperTargetMode.BOTH_DIFFERENT
+            home -> WallpaperTargetMode.HOME
+            lock -> WallpaperTargetMode.LOCK
+            else -> null
+        }
+
+    private fun targetForEvent(settings: AppSettings, off: Boolean, on: Boolean): WallpaperTargetMode? {
+        fun matches(mode: TriggerMode): Boolean = when (mode) {
+            TriggerMode.SCREEN_OFF -> off
+            TriggerMode.SCREEN_ON -> on
+            TriggerMode.SCREEN_OFF_OR_ON -> off || on
+            else -> false
+        }
+        return combineTargets(matches(settings.homeTriggerMode), matches(settings.lockTriggerMode))
+    }
+
     private fun applyPrepared(
         settings: AppSettings,
         reason: String,
+        target: WallpaperTargetMode,
     ) {
         if (bb.pix.wall.engine.SafeWall.active(this)) return
         val now =
@@ -392,7 +391,7 @@ class WallpaperAutomationService : Service() {
                 var changed =
                     if (screenOff) {
                         WallpaperController.screenOffFastWall(
-                            applicationContext
+                            applicationContext, targetOverride = target
                         )
                     } else {
                         WallpaperController.nextWall(
@@ -400,6 +399,7 @@ class WallpaperAutomationService : Service() {
                             allowNetwork = false,
                             userInitiated = false,
                             preferLockFirst = false,
+                            targetOverride = target,
                         )
                     }
 
@@ -407,7 +407,7 @@ class WallpaperAutomationService : Service() {
                     runCatching {
                         WallpaperController.ensureNext(
                             applicationContext,
-                            settings,
+                            settings.copy(targetMode = target),
                             allowNetwork = false,
                         )
                     }
@@ -415,7 +415,7 @@ class WallpaperAutomationService : Service() {
                     changed =
                         if (screenOff) {
                             WallpaperController.screenOffFastWall(
-                                applicationContext
+                                applicationContext, targetOverride = target
                             )
                         } else {
                             WallpaperController.nextWall(
@@ -423,6 +423,7 @@ class WallpaperAutomationService : Service() {
                                 allowNetwork = false,
                                 userInitiated = false,
                                 preferLockFirst = false,
+                                targetOverride = target,
                             )
                         }
                 }
