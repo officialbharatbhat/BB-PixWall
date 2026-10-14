@@ -36,38 +36,14 @@ class WallpaperAutomationService : Service() {
     private val applying =
         AtomicBoolean(false)
 
-    private val normalWorker =
-        Executors.newSingleThreadExecutor { runnable ->
-            Thread(
-                runnable,
-                "bbpix-lite-apply",
-            ).apply {
-                priority =
-                    Thread.NORM_PRIORITY + 1
-            }
+    // All automatic events use one serial worker. SCREEN_ON must wait behind
+    // SCREEN_OFF instead of racing it on a second executor.
+    private val automationWorker = Executors.newSingleThreadExecutor { runnable ->
+        Thread(runnable, "bbpix-lite-automatic").apply {
+            priority = Thread.NORM_PRIORITY + 1
         }
-
-    private val screenWorker =
-        Executors.newSingleThreadExecutor { runnable ->
-            Thread(
-                {
-                    runCatching {
-                        android.os.Process.setThreadPriority(
-                            android.os.Process.THREAD_PRIORITY_DISPLAY
-                        )
-                    }
-                    runnable.run()
-                },
-                "bbpix-lite-screen",
-            ).apply {
-                priority =
-                    Thread.MAX_PRIORITY
-            }
-        }
-
-    @Volatile
-    private var lastApplyStartedAt =
-        0L
+    }
+    private val recentEvents = mutableMapOf<String, Long>()
 
     private var screenRegistered =
         false
@@ -294,35 +270,17 @@ class WallpaperAutomationService : Service() {
         target: WallpaperTargetMode,
     ) {
         if (bb.pix.wall.engine.SafeWall.active(this)) return
-        val now =
-            System.currentTimeMillis()
-
-        if (
-            now - lastApplyStartedAt <
-            900L
-        ) {
-            recordTrigger(
-                reason,
-                "debounced",
-            )
-            return
+        // Debounce only duplicate broadcasts of the SAME event. Different
+        // targets/events (lock then unlock) must never suppress each other.
+        val now = android.os.SystemClock.elapsedRealtime()
+        synchronized(recentEvents) {
+            val last = recentEvents[reason] ?: 0L
+            if (now - last < 250L) {
+                recordTrigger(reason, "duplicate")
+                return
+            }
+            recentEvents[reason] = now
         }
-
-        if (
-            !applying.compareAndSet(
-                false,
-                true,
-            )
-        ) {
-            recordTrigger(
-                reason,
-                "busy",
-            )
-            return
-        }
-
-        lastApplyStartedAt =
-            now
 
         val screenOff =
             reason ==
@@ -348,24 +306,17 @@ class WallpaperAutomationService : Service() {
                 null
             }
 
-        val worker =
-            if (screenOff) {
-                screenWorker
-            } else {
-                normalWorker
-            }
-
         recordTrigger(
             reason,
             "start",
         )
 
-        worker.execute {
+        automationWorker.execute {
             try {
                 var changed =
                     if (screenOff) {
                         WallpaperController.screenOffFastWall(
-                            applicationContext, targetOverride = target
+                            applicationContext, targetOverride = target, automationTriggered = true, automationTriggered = true
                         )
                     } else {
                         WallpaperController.nextWall(
@@ -373,7 +324,7 @@ class WallpaperAutomationService : Service() {
                             allowNetwork = false,
                             userInitiated = false,
                             preferLockFirst = false,
-                            targetOverride = target,
+                            targetOverride = target, automationTriggered = true,
                         )
                     }
 
@@ -389,7 +340,7 @@ class WallpaperAutomationService : Service() {
                     changed =
                         if (screenOff) {
                             WallpaperController.screenOffFastWall(
-                                applicationContext, targetOverride = target
+                                applicationContext, targetOverride = target, automationTriggered = true, automationTriggered = true
                             )
                         } else {
                             WallpaperController.nextWall(
@@ -397,7 +348,7 @@ class WallpaperAutomationService : Service() {
                                 allowNetwork = false,
                                 userInitiated = false,
                                 preferLockFirst = false,
-                                targetOverride = target,
+                                targetOverride = target, automationTriggered = true,
                             )
                         }
                 }
@@ -441,7 +392,6 @@ class WallpaperAutomationService : Service() {
                     }
                 }
 
-                applying.set(false)
             }
         }
     }
@@ -499,8 +449,7 @@ class WallpaperAutomationService : Service() {
             }
         }
 
-        normalWorker.shutdownNow()
-        screenWorker.shutdownNow()
+        automationWorker.shutdownNow()
 
         super.onDestroy()
     }
