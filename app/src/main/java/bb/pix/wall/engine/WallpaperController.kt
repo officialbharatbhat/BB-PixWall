@@ -8,6 +8,7 @@ import bb.pix.wall.model.WallpaperState
 import bb.pix.wall.settings.AppSettings
 import bb.pix.wall.settings.SettingsStore
 import bb.pix.wall.settings.WallpaperTargetMode
+import bb.pix.wall.settings.WallpaperOrder
 import bb.pix.wall.settings.EngineMode
 import java.io.File
 import java.io.FileOutputStream
@@ -375,7 +376,11 @@ fun invalidateQueue() =
                 return try {
                     fetchWithHistoryReset(
                         context,
-                        candidates,
+                        WallpaperSourceEngine.reorderForTarget(
+                            context, candidates,
+                            if (dest == WallpaperFiles.nextHome) settings.homeWallpaperOrder
+                            else settings.lockWallpaperOrder,
+                        ),
                         tmp,
                         avoid,
                     )
@@ -559,6 +564,20 @@ fun invalidateQueue() =
             if (dest.exists()) {
                 return true
             }
+            val order = if (dest == WallpaperFiles.nextHome)
+                settings.homeWallpaperOrder else settings.lockWallpaperOrder
+            val nameOf: (File) -> String = { metaId(it) ?: it.name }
+            val comparator: Comparator<File> = when (order) {
+                WallpaperOrder.A_Z -> compareBy { nameOf(it).lowercase() }
+                WallpaperOrder.Z_A -> compareByDescending { nameOf(it).lowercase() }
+                WallpaperOrder.DATE_NEWEST -> compareByDescending { it.lastModified() }
+                WallpaperOrder.DATE_OLDEST -> compareBy { it.lastModified() }
+                WallpaperOrder.SIZE_LOW_HIGH -> compareBy { it.length() }
+                WallpaperOrder.SIZE_HIGH_LOW -> compareByDescending { it.length() }
+                WallpaperOrder.SURPRISE -> compareBy { nameOf(it).hashCode() xor (System.currentTimeMillis() / 86_400_000L).toInt() }
+                WallpaperOrder.RANDOM_SHUFFLE -> compareBy { nameOf(it).hashCode() xor (System.currentTimeMillis() / 60_000L).toInt() }
+            }
+            cached.sortWith(comparator)
 
             while (cached.isNotEmpty()) {
                 val src =
