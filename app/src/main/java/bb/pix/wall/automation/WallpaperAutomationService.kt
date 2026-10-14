@@ -1,5 +1,7 @@
 package bb.pix.wall.automation
 
+import android.app.AlarmManager
+import android.app.PendingIntent
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
@@ -11,6 +13,7 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
+import android.os.SystemClock
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import bb.pix.wall.R
@@ -71,28 +74,6 @@ class WallpaperAutomationService : Service() {
                 }
             }
         }
-
-    private val homeIntervalTask = object : Runnable {
-        override fun run() {
-            val config = SettingsStore(this@WallpaperAutomationService).load()
-            if (config.autoChange && !SafeWall.active(this@WallpaperAutomationService) &&
-                config.homeTriggerMode == TriggerMode.INTERVAL) {
-                applyPrepared(config, "interval:HOME", WallpaperTargetMode.HOME)
-            }
-            scheduleInterval(config, WallpaperTargetMode.HOME)
-        }
-    }
-
-    private val lockIntervalTask = object : Runnable {
-        override fun run() {
-            val config = SettingsStore(this@WallpaperAutomationService).load()
-            if (config.autoChange && !SafeWall.active(this@WallpaperAutomationService) &&
-                config.lockTriggerMode == TriggerMode.INTERVAL) {
-                applyPrepared(config, "interval:LOCK", WallpaperTargetMode.LOCK)
-            }
-            scheduleInterval(config, WallpaperTargetMode.LOCK)
-        }
-    }
 
     private val networkRecovered: () -> Unit = {
         if (!SafeWall.active(applicationContext) &&
@@ -160,14 +141,12 @@ class WallpaperAutomationService : Service() {
         flags: Int,
         startId: Int,
     ): Int {
-        handler.removeCallbacks(homeIntervalTask)
-        handler.removeCallbacks(lockIntervalTask)
-
         val settings =
             SettingsStore(this)
                 .load()
 
         if (!settings.autoChange) {
+            cancelIntervalAlarms()
             stopSelf()
             return START_NOT_STICKY
         }
@@ -219,9 +198,41 @@ class WallpaperAutomationService : Service() {
             }
         }
 
-        scheduleNextInterval(settings)
+        val intervalTarget = intent?.getStringExtra(EXTRA_INTERVAL_TARGET)
+        when (intervalTarget) {
+            WallpaperTargetMode.HOME.name -> {
+                if (settings.homeTriggerMode == TriggerMode.INTERVAL && !SafeWall.active(this)) {
+                    applyPrepared(settings, "interval:HOME", WallpaperTargetMode.HOME)
+                }
+                scheduleInterval(settings, WallpaperTargetMode.HOME)
+            }
+            WallpaperTargetMode.LOCK.name -> {
+                if (settings.lockTriggerMode == TriggerMode.INTERVAL && !SafeWall.active(this)) {
+                    applyPrepared(settings, "interval:LOCK", WallpaperTargetMode.LOCK)
+                }
+                scheduleInterval(settings, WallpaperTargetMode.LOCK)
+            }
+            else -> scheduleNextInterval(settings)
+        }
 
         return START_STICKY
+    }
+
+    private fun intervalIntent(target: WallpaperTargetMode): PendingIntent {
+        val requestCode = if (target == WallpaperTargetMode.HOME) 201 else 202
+        val intent = Intent(this, WallpaperAutomationService::class.java)
+            .putExtra(EXTRA_INTERVAL_TARGET, target.name)
+        return PendingIntent.getForegroundService(
+            this, requestCode, intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+    }
+
+    private fun cancelIntervalAlarms() {
+        val alarms = getSystemService(AlarmManager::class.java)
+        for (target in listOf(WallpaperTargetMode.HOME, WallpaperTargetMode.LOCK)) {
+            alarms.cancel(intervalIntent(target))
+        }
     }
 
     private fun scheduleNextInterval(settings: AppSettings) {
@@ -231,15 +242,27 @@ class WallpaperAutomationService : Service() {
 
     private fun scheduleInterval(settings: AppSettings, target: WallpaperTargetMode) {
         val isHome = target == WallpaperTargetMode.HOME
-        val task = if (isHome) homeIntervalTask else lockIntervalTask
-        handler.removeCallbacks(task)
+        val alarms = getSystemService(AlarmManager::class.java)
+        val alarmIntent = intervalIntent(target)
+        alarms.cancel(alarmIntent)
         val active = if (isHome) settings.homeTriggerMode == TriggerMode.INTERVAL
             else settings.lockTriggerMode == TriggerMode.INTERVAL
         if (!settings.autoChange || !active) return
-        val duration = if (isHome) settings.homeIntervalMinutes else settings.lockIntervalMinutes
-        val delay = duration.coerceIn(1, 300) * 60_000L
-        RuntimeStatus.nextRun(applicationContext, System.currentTimeMillis() + delay)
-        handler.postDelayed(task, delay)
+
+        val minutes = if (isHome) settings.homeIntervalMinutes else settings.lockIntervalMinutes
+        val delay = minutes.coerceIn(1, 300) * 60_000L
+        // AlarmManager wakes the process after Doze delays; no perpetual poller.
+        // setAndAllowWhileIdle is inexact and subject to Android idle quotas.
+        alarms.setAndAllowWhileIdle(
+            AlarmManager.ELAPSED_REALTIME_WAKEUP,
+            SystemClock.elapsedRealtime() + delay,
+            alarmIntent,
+        )
+        RuntimeStatus.setLong(
+            applicationContext,
+            if (isHome) "home_interval_due" else "lock_interval_due",
+            System.currentTimeMillis() + delay,
+        )
     }
 
     private fun combineTargets(home: Boolean, lock: Boolean): WallpaperTargetMode? =
@@ -469,6 +492,7 @@ class WallpaperAutomationService : Service() {
     }
 
     companion object {
+        private const val EXTRA_INTERVAL_TARGET = "bb.pix.wall.INTERVAL_TARGET"
         const val CHANNEL =
             "bb_pixwall_lite_automation"
 
