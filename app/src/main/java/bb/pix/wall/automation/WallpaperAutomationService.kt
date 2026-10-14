@@ -32,8 +32,8 @@ class WallpaperAutomationService : Service() {
     private val handler =
         Handler(Looper.getMainLooper())
 
-    // All automatic events use one serial worker. SCREEN_ON must wait behind
-    // SCREEN_OFF instead of racing it on a second executor.
+    // All automatic events use one serial worker so screen-off and
+    // completed device-unlock events cannot race on separate executors.
     private val automationWorker = Executors.newSingleThreadExecutor { runnable ->
         Thread(runnable, "bbpix-lite-automatic").apply {
             priority = Thread.NORM_PRIORITY + 1
@@ -65,7 +65,7 @@ class WallpaperAutomationService : Service() {
 
                 val target = targetForEvent(settings,
                     action == Intent.ACTION_SCREEN_OFF,
-                    action == Intent.ACTION_SCREEN_ON)
+                    action == Intent.ACTION_USER_PRESENT)
                 if (target != null) {
                     applyPrepared(settings, "event:${action.substringAfterLast('.')}", target)
                 }
@@ -140,7 +140,7 @@ class WallpaperAutomationService : Service() {
                     Intent.ACTION_SCREEN_OFF
                 )
                 addAction(
-                    Intent.ACTION_SCREEN_ON
+                    Intent.ACTION_USER_PRESENT
                 )
             }
 
