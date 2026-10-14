@@ -821,10 +821,13 @@ fun invalidateQueue() =
 
     fun screenOffFastWall(
         context: Context,
+        targetOverride: WallpaperTargetMode? = null,
     ): Boolean {
         if (SafeWall.active(context) || WallpaperLock.active(context)) return false
         val settings =
-            SettingsStore(context).load()
+            SettingsStore(context).load().let {
+                if (targetOverride == null) it else it.copy(targetMode = targetOverride)
+            }
 
         val now =
             System.currentTimeMillis()
@@ -1109,6 +1112,7 @@ fun invalidateQueue() =
         allowNetwork: Boolean = true,
         userInitiated: Boolean = false,
         preferLockFirst: Boolean = false,
+        targetOverride: WallpaperTargetMode? = null,
     ): Boolean {
         if (SafeWall.active(context) || WallpaperLock.active(context)) return false
         val now = System.currentTimeMillis()
@@ -1117,7 +1121,9 @@ fun invalidateQueue() =
         lastApplyStartedAt = now
         return try {
             val settings =
-                SettingsStore(context).load()
+                SettingsStore(context).load().let {
+                    if (targetOverride == null) it else it.copy(targetMode = targetOverride)
+                }
 
             /*
              * Defense in depth for strict Web-only mode.
@@ -1436,17 +1442,14 @@ fun invalidateQueue() =
             }
             if (changed) {
                 recordSeenForCurrent(settings.targetMode)
-                WallpaperFiles.nextHome.delete()
-                File(
-                    WallpaperFiles.nextHome.absolutePath +
-                        ".meta"
-                ).delete()
-
-                WallpaperFiles.nextLock.delete()
-                File(
-                    WallpaperFiles.nextLock.absolutePath +
-                        ".meta"
-                ).delete()
+                if (settings.targetMode != WallpaperTargetMode.LOCK) {
+                    WallpaperFiles.nextHome.delete()
+                    File(WallpaperFiles.nextHome.absolutePath + ".meta").delete()
+                }
+                if (settings.targetMode != WallpaperTargetMode.HOME) {
+                    WallpaperFiles.nextLock.delete()
+                    File(WallpaperFiles.nextLock.absolutePath + ".meta").delete()
+                }
 
                 stageNextPairFromLocalCache(
                     context,
