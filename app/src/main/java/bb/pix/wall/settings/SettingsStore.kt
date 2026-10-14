@@ -41,6 +41,26 @@ class SettingsStore(context: Context) {
                     ),
                     WallpaperOrder.RANDOM_SHUFFLE,
                 ),
+            homeTriggerMode =
+                enumOrDefault(
+                    prefs.getString("home_trigger_mode", prefs.getString("trigger_mode", null)),
+                    TriggerMode.INTERVAL,
+                ),
+            lockTriggerMode =
+                enumOrDefault(
+                    prefs.getString("lock_trigger_mode", prefs.getString("trigger_mode", null)),
+                    TriggerMode.INTERVAL,
+                ),
+            homeWallpaperOrder =
+                enumOrDefault(
+                    prefs.getString("home_wallpaper_order", prefs.getString("wallpaper_order", null)),
+                    WallpaperOrder.RANDOM_SHUFFLE,
+                ),
+            lockWallpaperOrder =
+                enumOrDefault(
+                    prefs.getString("lock_wallpaper_order", prefs.getString("wallpaper_order", null)),
+                    WallpaperOrder.RANDOM_SHUFFLE,
+                ),
             engineMode =
                 enumOrDefault(
                     prefs.getString(
@@ -327,6 +347,10 @@ class SettingsStore(context: Context) {
             .putInt("interval_minutes", settings.intervalMinutes.coerceIn(1, 300))
             .putString("target_mode", settings.targetMode.name)
             .putString("wallpaper_order", settings.wallpaperOrder.name)
+            .putString("home_trigger_mode", settings.homeTriggerMode.name)
+            .putString("lock_trigger_mode", settings.lockTriggerMode.name)
+            .putString("home_wallpaper_order", settings.homeWallpaperOrder.name)
+            .putString("lock_wallpaper_order", settings.lockWallpaperOrder.name)
             .putString("engine_mode", settings.engineMode.name)
             .putBoolean("home_blur_enabled", settings.homeBlurEnabled)
             .putBoolean("lock_blur_enabled", settings.lockBlurEnabled)
