@@ -100,27 +100,27 @@ class WallpaperAutomationService : Service() {
             }
         }
 
-    private val intervalTask =
-        object : Runnable {
-            override fun run() {
-                val settings =
-                    SettingsStore(
-                        this@WallpaperAutomationService
-                    ).load()
-
-                if (settings.autoChange &&
-                    !SafeWall.active(this@WallpaperAutomationService)) {
-                    val target = combineTargets(
-                        settings.homeTriggerMode == TriggerMode.INTERVAL,
-                        settings.lockTriggerMode == TriggerMode.INTERVAL)
-                    if (target != null) applyPrepared(settings, "interval", target)
-                }
-
-                scheduleNextInterval(
-                    settings
-                )
+    private val homeIntervalTask = object : Runnable {
+        override fun run() {
+            val config = SettingsStore(this@WallpaperAutomationService).load()
+            if (config.autoChange && !SafeWall.active(this@WallpaperAutomationService) &&
+                config.homeTriggerMode == TriggerMode.INTERVAL) {
+                applyPrepared(config, "interval:HOME", WallpaperTargetMode.HOME)
             }
+            scheduleInterval(config, WallpaperTargetMode.HOME)
         }
+    }
+
+    private val lockIntervalTask = object : Runnable {
+        override fun run() {
+            val config = SettingsStore(this@WallpaperAutomationService).load()
+            if (config.autoChange && !SafeWall.active(this@WallpaperAutomationService) &&
+                config.lockTriggerMode == TriggerMode.INTERVAL) {
+                applyPrepared(config, "interval:LOCK", WallpaperTargetMode.LOCK)
+            }
+            scheduleInterval(config, WallpaperTargetMode.LOCK)
+        }
+    }
 
     private val networkRecovered: () -> Unit = {
         if (!SafeWall.active(applicationContext) &&
@@ -188,9 +188,8 @@ class WallpaperAutomationService : Service() {
         flags: Int,
         startId: Int,
     ): Int {
-        handler.removeCallbacks(
-            intervalTask
-        )
+        handler.removeCallbacks(homeIntervalTask)
+        handler.removeCallbacks(lockIntervalTask)
 
         val settings =
             SettingsStore(this)
@@ -248,52 +247,27 @@ class WallpaperAutomationService : Service() {
             }
         }
 
-        if (settings.homeTriggerMode == TriggerMode.INTERVAL ||
-            settings.lockTriggerMode == TriggerMode.INTERVAL) {
-            scheduleNextInterval(
-                settings
-            )
-        } else {
-            RuntimeStatus.nextRun(
-                applicationContext,
-                0L,
-            )
-        }
+        scheduleNextInterval(settings)
 
         return START_STICKY
     }
 
-    private fun scheduleNextInterval(
-        settings: AppSettings,
-    ) {
-        handler.removeCallbacks(
-            intervalTask
-        )
+    private fun scheduleNextInterval(settings: AppSettings) {
+        scheduleInterval(settings, WallpaperTargetMode.HOME)
+        scheduleInterval(settings, WallpaperTargetMode.LOCK)
+    }
 
-        if (!settings.autoChange ||
-            (settings.homeTriggerMode != TriggerMode.INTERVAL &&
-                settings.lockTriggerMode != TriggerMode.INTERVAL)) {
-            return
-        }
-
-        val delay =
-            settings.intervalMinutes
-                .coerceIn(
-                    1,
-                    300,
-                ) *
-                60_000L
-
-        RuntimeStatus.nextRun(
-            applicationContext,
-            System.currentTimeMillis() +
-                delay,
-        )
-
-        handler.postDelayed(
-            intervalTask,
-            delay,
-        )
+    private fun scheduleInterval(settings: AppSettings, target: WallpaperTargetMode) {
+        val isHome = target == WallpaperTargetMode.HOME
+        val task = if (isHome) homeIntervalTask else lockIntervalTask
+        handler.removeCallbacks(task)
+        val active = if (isHome) settings.homeTriggerMode == TriggerMode.INTERVAL
+            else settings.lockTriggerMode == TriggerMode.INTERVAL
+        if (!settings.autoChange || !active) return
+        val duration = if (isHome) settings.homeIntervalMinutes else settings.lockIntervalMinutes
+        val delay = duration.coerceIn(1, 300) * 60_000L
+        RuntimeStatus.nextRun(applicationContext, System.currentTimeMillis() + delay)
+        handler.postDelayed(task, delay)
     }
 
     private fun combineTargets(home: Boolean, lock: Boolean): WallpaperTargetMode? =
