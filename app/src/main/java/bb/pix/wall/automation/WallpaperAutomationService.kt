@@ -9,9 +9,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
-import android.os.Handler
 import android.os.IBinder
-import android.os.Looper
 import android.os.PowerManager
 import android.os.SystemClock
 import androidx.core.app.NotificationCompat
@@ -32,9 +30,6 @@ import bb.pix.wall.settings.WallpaperTargetMode
 import java.util.concurrent.Executors
 
 class WallpaperAutomationService : Service() {
-    private val handler =
-        Handler(Looper.getMainLooper())
-
     // All automatic events use one serial worker so screen-off and
     // completed device-unlock events cannot race on separate executors.
     private val automationWorker = Executors.newSingleThreadExecutor { runnable ->
@@ -372,6 +367,24 @@ class WallpaperAutomationService : Service() {
                         }
                 }
 
+                // A trigger must not stall cloud I/O, but a cache miss must
+                // request replenishment so future independent events can succeed.
+                if (!changed) {
+                    EngineExecutors.io {
+                        runCatching {
+                            WallpaperController.primeCache(
+                                applicationContext,
+                                SettingsStore(applicationContext).load(),
+                            )
+                        }.onFailure {
+                            RuntimeStatus.failure(
+                                applicationContext,
+                                "Automation refill: ${it.javaClass.simpleName}",
+                            )
+                        }
+                    }
+                }
+
                 recordTrigger(
                     reason,
                     if (changed) {
@@ -456,10 +469,6 @@ class WallpaperAutomationService : Service() {
 
     override fun onDestroy() {
         NetworkMonitor.remove(networkRecovered)
-        handler.removeCallbacksAndMessages(
-            null
-        )
-
         if (screenRegistered) {
             runCatching {
                 unregisterReceiver(
