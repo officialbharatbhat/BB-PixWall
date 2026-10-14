@@ -313,6 +313,11 @@ object WallpaperSourceEngine {
         return seed
     }
 
+    // Keep source priority unchanged while allowing target-specific order.
+    fun reorderForTarget(context: Context, candidates: List<Candidate>, order: WallpaperOrder): List<Candidate> =
+        candidates.groupBy { it.priority }.toSortedMap().values
+            .flatMap { sortGroup(it, order, stableSeed(context)) }
+
     private fun sortGroup(items: List<Candidate>, order: WallpaperOrder, seed: Long): List<Candidate> = when (order) {
         WallpaperOrder.A_Z -> items.sortedBy { it.name.lowercase(Locale.ROOT) }
         WallpaperOrder.Z_A -> items.sortedByDescending { it.name.lowercase(Locale.ROOT) }

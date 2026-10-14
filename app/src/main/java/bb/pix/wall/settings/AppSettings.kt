@@ -6,7 +6,7 @@ enum class WallpaperTargetMode(val label: String) {
 }
 
 enum class TriggerMode(val label: String) {
-    INTERVAL("Interval"), SCREEN_OFF("Screen off"), SCREEN_ON("Screen on"), SCREEN_OFF_OR_ON("Screen off / on"), MANUAL("Manual only"),
+    INTERVAL("Interval"), SCREEN_OFF("Screen off"), SCREEN_ON("Device unlock"), SCREEN_OFF_OR_ON("Screen off / unlock"), MANUAL("Manual only"),
 }
 
 enum class AppearanceMode(val label: String) {
@@ -35,6 +35,14 @@ data class AppSettings(
     val intervalMinutes: Int = 30,
     val targetMode: WallpaperTargetMode = WallpaperTargetMode.BOTH_DIFFERENT,
     val wallpaperOrder: WallpaperOrder = WallpaperOrder.RANDOM_SHUFFLE,
+    // Independent Home/Lock automation. Old installations initialize
+    // the new settings from their existing shared trigger/order on first load.
+    val homeIntervalMinutes: Int = 30,
+    val lockIntervalMinutes: Int = 30,
+    val homeTriggerMode: TriggerMode = TriggerMode.INTERVAL,
+    val lockTriggerMode: TriggerMode = TriggerMode.INTERVAL,
+    val homeWallpaperOrder: WallpaperOrder = WallpaperOrder.RANDOM_SHUFFLE,
+    val lockWallpaperOrder: WallpaperOrder = WallpaperOrder.RANDOM_SHUFFLE,
     val engineMode: EngineMode = EngineMode.STANDARD,
     val homeBlurEnabled: Boolean = false,
     val lockBlurEnabled: Boolean = false,

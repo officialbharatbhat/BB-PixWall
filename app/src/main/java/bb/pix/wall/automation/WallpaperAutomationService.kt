@@ -1,5 +1,8 @@
 package bb.pix.wall.automation
 
+import android.app.AlarmManager
+import android.app.KeyguardManager
+import android.app.PendingIntent
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
@@ -11,6 +14,7 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
+import android.os.SystemClock
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import bb.pix.wall.R
@@ -25,48 +29,68 @@ import bb.pix.wall.settings.AppSettings
 import bb.pix.wall.settings.EngineMode
 import bb.pix.wall.settings.SettingsStore
 import bb.pix.wall.settings.TriggerMode
+import bb.pix.wall.settings.WallpaperTargetMode
 import java.util.concurrent.Executors
-import java.util.concurrent.atomic.AtomicBoolean
 
 class WallpaperAutomationService : Service() {
-    private val handler =
-        Handler(Looper.getMainLooper())
-
-    private val applying =
-        AtomicBoolean(false)
-
-    private val normalWorker =
-        Executors.newSingleThreadExecutor { runnable ->
-            Thread(
-                runnable,
-                "bbpix-lite-apply",
-            ).apply {
-                priority =
-                    Thread.NORM_PRIORITY + 1
-            }
+    // All automatic events use one serial worker so screen-off and
+    // completed device-unlock events cannot race on separate executors.
+    private val automationWorker = Executors.newSingleThreadExecutor { runnable ->
+        Thread(runnable, "bbpix-lite-automatic").apply {
+            priority = Thread.NORM_PRIORITY + 1
         }
+    }
+    private val recentEvents = mutableMapOf<String, Long>()
 
-    private val screenWorker =
-        Executors.newSingleThreadExecutor { runnable ->
-            Thread(
-                {
-                    runCatching {
-                        android.os.Process.setThreadPriority(
-                            android.os.Process.THREAD_PRIORITY_DISPLAY
-                        )
+    // One wallpaper rotation per real unlocked -> locked session.
+    private val lockHandler = Handler(Looper.getMainLooper())
+    private val keyguard by lazy { getSystemService(KeyguardManager::class.java) }
+    private var lockCycleArmed = false
+    private var pendingLockCheck: Runnable? = null
+    private var lockCheckGeneration = 0
+
+    private fun cancelPendingLockCheck() {
+        lockCheckGeneration++
+        pendingLockCheck?.let(lockHandler::removeCallbacks)
+        pendingLockCheck = null
+    }
+
+    private fun verifySecureLockTransition() {
+        if (!lockCycleArmed || pendingLockCheck != null) return
+
+        // PIN lock can activate after SCREEN_OFF if the user's security
+        // timeout is configured. Bounded checks, never continuous polling.
+        val generation = ++lockCheckGeneration
+        val checks = longArrayOf(250L, 1_000L, 3_000L, 7_000L, 15_000L,
+            30_000L, 60_000L, 120_000L, 300_000L)
+
+        fun scheduleCheck(index: Int) {
+            if (index >= checks.size) {
+                pendingLockCheck = null
+                recordTrigger("event:SECURE_LOCK", "not-confirmed")
+                return
+            }
+            val task = Runnable {
+                pendingLockCheck = null
+                if (generation != lockCheckGeneration || !lockCycleArmed) return@Runnable
+                val locked = if (keyguard.isDeviceSecure) keyguard.isDeviceLocked
+                    else keyguard.isKeyguardLocked
+                if (locked) {
+                    lockCycleArmed = false
+                    val settings = SettingsStore(this).load()
+                    if (settings.autoChange && !SafeWall.active(this)) {
+                        val target = targetForEvent(settings, off = true, on = false)
+                        if (target != null) applyPrepared(settings, "event:SECURE_LOCK", target)
                     }
-                    runnable.run()
-                },
-                "bbpix-lite-screen",
-            ).apply {
-                priority =
-                    Thread.MAX_PRIORITY
+                } else {
+                    scheduleCheck(index + 1)
+                }
             }
+            pendingLockCheck = task
+            lockHandler.postDelayed(task, checks[index])
         }
-
-    @Volatile
-    private var lastApplyStartedAt =
-        0L
+        scheduleCheck(0)
+    }
 
     private var screenRegistered =
         false
@@ -90,51 +114,18 @@ class WallpaperAutomationService : Service() {
                     return
                 }
 
-                val matches =
-                    when (settings.triggerMode) {
-                        TriggerMode.SCREEN_OFF ->
-                            action ==
-                                Intent.ACTION_SCREEN_OFF
-
-                        TriggerMode.SCREEN_ON ->
-                            action ==
-                                Intent.ACTION_SCREEN_ON
-
-                        else ->
-                            false
+                when (action) {
+                    Intent.ACTION_USER_PRESENT -> {
+                        cancelPendingLockCheck()
+                        lockCycleArmed = true
+                        recordTrigger("receiver:USER_PRESENT", "received")
+                        val target = targetForEvent(settings, off = false, on = true)
+                        if (target != null) {
+                            applyPrepared(settings, "event:USER_PRESENT", target)
+                        }
                     }
-
-                if (matches) {
-                    applyPrepared(
-                        settings,
-                        "event:${action.substringAfterLast('.')}",
-                    )
+                    Intent.ACTION_SCREEN_OFF -> verifySecureLockTransition()
                 }
-            }
-        }
-
-    private val intervalTask =
-        object : Runnable {
-            override fun run() {
-                val settings =
-                    SettingsStore(
-                        this@WallpaperAutomationService
-                    ).load()
-
-                if (
-                    settings.autoChange && !bb.pix.wall.engine.SafeWall.active(this@WallpaperAutomationService) &&
-                    settings.triggerMode ==
-                        TriggerMode.INTERVAL
-                ) {
-                    applyPrepared(
-                        settings,
-                        "interval",
-                    )
-                }
-
-                scheduleNextInterval(
-                    settings
-                )
             }
         }
 
@@ -153,6 +144,7 @@ class WallpaperAutomationService : Service() {
     override fun onCreate() {
         super.onCreate()
 
+        lockCycleArmed = !keyguard.isKeyguardLocked && !keyguard.isDeviceLocked
         createChannel()
         NetworkMonitor.register(applicationContext)
         NetworkMonitor.add(networkRecovered)
@@ -184,7 +176,7 @@ class WallpaperAutomationService : Service() {
                     Intent.ACTION_SCREEN_OFF
                 )
                 addAction(
-                    Intent.ACTION_SCREEN_ON
+                    Intent.ACTION_USER_PRESENT
                 )
             }
 
@@ -192,7 +184,9 @@ class WallpaperAutomationService : Service() {
             this,
             screenReceiver,
             filter,
-            ContextCompat.RECEIVER_NOT_EXPORTED,
+            // Both actions are Android protected system broadcasts.
+            // Some privileged system senders are excluded by NOT_EXPORTED.
+            ContextCompat.RECEIVER_EXPORTED,
         )
 
         screenRegistered =
@@ -204,15 +198,12 @@ class WallpaperAutomationService : Service() {
         flags: Int,
         startId: Int,
     ): Int {
-        handler.removeCallbacks(
-            intervalTask
-        )
-
         val settings =
             SettingsStore(this)
                 .load()
 
         if (!settings.autoChange) {
+            cancelIntervalAlarms()
             stopSelf()
             return START_NOT_STICKY
         }
@@ -264,96 +255,111 @@ class WallpaperAutomationService : Service() {
             }
         }
 
-        if (
-            settings.triggerMode ==
-            TriggerMode.INTERVAL
-        ) {
-            scheduleNextInterval(
-                settings
-            )
-        } else {
-            RuntimeStatus.nextRun(
-                applicationContext,
-                0L,
-            )
+        val intervalTarget = intent?.getStringExtra(EXTRA_INTERVAL_TARGET)
+        when (intervalTarget) {
+            WallpaperTargetMode.HOME.name -> {
+                if (settings.homeTriggerMode == TriggerMode.INTERVAL && !SafeWall.active(this)) {
+                    applyPrepared(settings, "interval:HOME", WallpaperTargetMode.HOME)
+                }
+                scheduleInterval(settings, WallpaperTargetMode.HOME)
+            }
+            WallpaperTargetMode.LOCK.name -> {
+                if (settings.lockTriggerMode == TriggerMode.INTERVAL && !SafeWall.active(this)) {
+                    applyPrepared(settings, "interval:LOCK", WallpaperTargetMode.LOCK)
+                }
+                scheduleInterval(settings, WallpaperTargetMode.LOCK)
+            }
+            else -> scheduleNextInterval(settings)
         }
 
         return START_STICKY
     }
 
-    private fun scheduleNextInterval(
-        settings: AppSettings,
-    ) {
-        handler.removeCallbacks(
-            intervalTask
+    private fun intervalIntent(target: WallpaperTargetMode): PendingIntent {
+        val requestCode = if (target == WallpaperTargetMode.HOME) 201 else 202
+        val intent = Intent(this, WallpaperAutomationService::class.java)
+            .putExtra(EXTRA_INTERVAL_TARGET, target.name)
+        return PendingIntent.getForegroundService(
+            this, requestCode, intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
+    }
 
-        if (
-            !settings.autoChange ||
-            settings.triggerMode !=
-                TriggerMode.INTERVAL
-        ) {
-            return
+    private fun cancelIntervalAlarms() {
+        val alarms = getSystemService(AlarmManager::class.java)
+        for (target in listOf(WallpaperTargetMode.HOME, WallpaperTargetMode.LOCK)) {
+            alarms.cancel(intervalIntent(target))
+        }
+    }
+
+    private fun scheduleNextInterval(settings: AppSettings) {
+        scheduleInterval(settings, WallpaperTargetMode.HOME)
+        scheduleInterval(settings, WallpaperTargetMode.LOCK)
+    }
+
+    private fun scheduleInterval(settings: AppSettings, target: WallpaperTargetMode) {
+        val isHome = target == WallpaperTargetMode.HOME
+        val alarms = getSystemService(AlarmManager::class.java)
+        val alarmIntent = intervalIntent(target)
+        alarms.cancel(alarmIntent)
+        val active = if (isHome) settings.homeTriggerMode == TriggerMode.INTERVAL
+            else settings.lockTriggerMode == TriggerMode.INTERVAL
+        if (!settings.autoChange || !active) return
+
+        val minutes = if (isHome) settings.homeIntervalMinutes else settings.lockIntervalMinutes
+        val delay = minutes.coerceIn(1, 300) * 60_000L
+        // AlarmManager wakes the process after Doze delays; no perpetual poller.
+        // setAndAllowWhileIdle is inexact and subject to Android idle quotas.
+        alarms.setAndAllowWhileIdle(
+            AlarmManager.ELAPSED_REALTIME_WAKEUP,
+            SystemClock.elapsedRealtime() + delay,
+            alarmIntent,
+        )
+        RuntimeStatus.setLong(
+            applicationContext,
+            if (isHome) "home_interval_due" else "lock_interval_due",
+            System.currentTimeMillis() + delay,
+        )
+    }
+
+    private fun combineTargets(home: Boolean, lock: Boolean): WallpaperTargetMode? =
+        when {
+            home && lock -> WallpaperTargetMode.BOTH_DIFFERENT
+            home -> WallpaperTargetMode.HOME
+            lock -> WallpaperTargetMode.LOCK
+            else -> null
         }
 
-        val delay =
-            settings.intervalMinutes
-                .coerceIn(
-                    1,
-                    300,
-                ) *
-                60_000L
-
-        RuntimeStatus.nextRun(
-            applicationContext,
-            System.currentTimeMillis() +
-                delay,
-        )
-
-        handler.postDelayed(
-            intervalTask,
-            delay,
-        )
+    private fun targetForEvent(settings: AppSettings, off: Boolean, on: Boolean): WallpaperTargetMode? {
+        fun matches(mode: TriggerMode): Boolean = when (mode) {
+            TriggerMode.SCREEN_OFF -> off
+            TriggerMode.SCREEN_ON -> on
+            TriggerMode.SCREEN_OFF_OR_ON -> off || on
+            else -> false
+        }
+        return combineTargets(matches(settings.homeTriggerMode), matches(settings.lockTriggerMode))
     }
 
     private fun applyPrepared(
         settings: AppSettings,
         reason: String,
+        target: WallpaperTargetMode,
     ) {
         if (bb.pix.wall.engine.SafeWall.active(this)) return
-        val now =
-            System.currentTimeMillis()
-
-        if (
-            now - lastApplyStartedAt <
-            900L
-        ) {
-            recordTrigger(
-                reason,
-                "debounced",
-            )
-            return
+        // Debounce only duplicate broadcasts of the SAME event. Different
+        // targets/events (lock then unlock) must never suppress each other.
+        val now = android.os.SystemClock.elapsedRealtime()
+        synchronized(recentEvents) {
+            val last = recentEvents[reason] ?: 0L
+            if (now - last < 250L) {
+                recordTrigger(reason, "duplicate")
+                return
+            }
+            recentEvents[reason] = now
         }
-
-        if (
-            !applying.compareAndSet(
-                false,
-                true,
-            )
-        ) {
-            recordTrigger(
-                reason,
-                "busy",
-            )
-            return
-        }
-
-        lastApplyStartedAt =
-            now
 
         val screenOff =
-            reason ==
-                "event:SCREEN_OFF"
+            reason == "event:SCREEN_OFF" || reason == "event:SECURE_LOCK"
 
         val wakeLock =
             if (screenOff) {
@@ -375,24 +381,22 @@ class WallpaperAutomationService : Service() {
                 null
             }
 
-        val worker =
-            if (screenOff) {
-                screenWorker
-            } else {
-                normalWorker
-            }
-
         recordTrigger(
-            reason,
+            "$reason target=$target",
             "start",
         )
 
-        worker.execute {
+        automationWorker.execute {
             try {
                 var changed =
                     if (screenOff) {
-                        WallpaperController.screenOffFastWall(
-                            applicationContext
+                        WallpaperController.nextWall(
+                            applicationContext,
+                            allowNetwork = false,
+                            userInitiated = false,
+                            preferLockFirst = true,
+                            targetOverride = target,
+                            automationTriggered = true,
                         )
                     } else {
                         WallpaperController.nextWall(
@@ -400,6 +404,7 @@ class WallpaperAutomationService : Service() {
                             allowNetwork = false,
                             userInitiated = false,
                             preferLockFirst = false,
+                            targetOverride = target, automationTriggered = true,
                         )
                     }
 
@@ -407,28 +412,52 @@ class WallpaperAutomationService : Service() {
                     runCatching {
                         WallpaperController.ensureNext(
                             applicationContext,
-                            settings,
+                            settings.copy(targetMode = target),
                             allowNetwork = false,
                         )
                     }
 
                     changed =
                         if (screenOff) {
-                            WallpaperController.screenOffFastWall(
-                                applicationContext
-                            )
+                            WallpaperController.nextWall(
+                            applicationContext,
+                            allowNetwork = false,
+                            userInitiated = false,
+                            preferLockFirst = true,
+                            targetOverride = target,
+                            automationTriggered = true,
+                        )
                         } else {
                             WallpaperController.nextWall(
                                 applicationContext,
                                 allowNetwork = false,
                                 userInitiated = false,
                                 preferLockFirst = false,
+                                targetOverride = target, automationTriggered = true,
                             )
                         }
                 }
 
+                // A trigger must not stall cloud I/O, but a cache miss must
+                // request replenishment so future independent events can succeed.
+                if (!changed) {
+                    EngineExecutors.io {
+                        runCatching {
+                            WallpaperController.primeCache(
+                                applicationContext,
+                                SettingsStore(applicationContext).load(),
+                            )
+                        }.onFailure {
+                            RuntimeStatus.failure(
+                                applicationContext,
+                                "Automation refill: ${it.javaClass.simpleName}",
+                            )
+                        }
+                    }
+                }
+
                 recordTrigger(
-                    reason,
+                    "$reason target=$target",
                     if (changed) {
                         "applied"
                     } else {
@@ -466,7 +495,6 @@ class WallpaperAutomationService : Service() {
                     }
                 }
 
-                applying.set(false)
             }
         }
     }
@@ -511,11 +539,8 @@ class WallpaperAutomationService : Service() {
     }
 
     override fun onDestroy() {
+        cancelPendingLockCheck()
         NetworkMonitor.remove(networkRecovered)
-        handler.removeCallbacksAndMessages(
-            null
-        )
-
         if (screenRegistered) {
             runCatching {
                 unregisterReceiver(
@@ -524,8 +549,7 @@ class WallpaperAutomationService : Service() {
             }
         }
 
-        normalWorker.shutdownNow()
-        screenWorker.shutdownNow()
+        automationWorker.shutdownNow()
 
         super.onDestroy()
     }
@@ -549,6 +573,7 @@ class WallpaperAutomationService : Service() {
     }
 
     companion object {
+        private const val EXTRA_INTERVAL_TARGET = "bb.pix.wall.INTERVAL_TARGET"
         const val CHANNEL =
             "bb_pixwall_lite_automation"
 

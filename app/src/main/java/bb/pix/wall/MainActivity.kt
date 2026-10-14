@@ -167,6 +167,10 @@ class MainActivity : ComponentActivity() {
         val automationChanged = previous.autoChange != updated.autoChange ||
             previous.triggerMode != updated.triggerMode ||
             previous.intervalMinutes != updated.intervalMinutes ||
+            previous.homeIntervalMinutes != updated.homeIntervalMinutes ||
+            previous.lockIntervalMinutes != updated.lockIntervalMinutes ||
+            previous.homeTriggerMode != updated.homeTriggerMode ||
+            previous.lockTriggerMode != updated.lockTriggerMode ||
             previous.chargingOnly != updated.chargingOnly ||
             previous.mobileDataAllowed != updated.mobileDataAllowed ||
             previous.pauseBatterySaver != updated.pauseBatterySaver ||

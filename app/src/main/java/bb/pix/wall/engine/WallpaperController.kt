@@ -8,6 +8,7 @@ import bb.pix.wall.model.WallpaperState
 import bb.pix.wall.settings.AppSettings
 import bb.pix.wall.settings.SettingsStore
 import bb.pix.wall.settings.WallpaperTargetMode
+import bb.pix.wall.settings.WallpaperOrder
 import bb.pix.wall.settings.EngineMode
 import java.io.File
 import java.io.FileOutputStream
@@ -375,7 +376,11 @@ fun invalidateQueue() =
                 return try {
                     fetchWithHistoryReset(
                         context,
-                        candidates,
+                        WallpaperSourceEngine.reorderForTarget(
+                            context, candidates,
+                            if (dest == WallpaperFiles.nextHome) settings.homeWallpaperOrder
+                            else settings.lockWallpaperOrder,
+                        ),
                         tmp,
                         avoid,
                     )
@@ -559,6 +564,20 @@ fun invalidateQueue() =
             if (dest.exists()) {
                 return true
             }
+            val order = if (dest == WallpaperFiles.nextHome)
+                settings.homeWallpaperOrder else settings.lockWallpaperOrder
+            val nameOf: (File) -> String = { metaId(it) ?: it.name }
+            val comparator: Comparator<File> = when (order) {
+                WallpaperOrder.A_Z -> compareBy { nameOf(it).lowercase() }
+                WallpaperOrder.Z_A -> compareByDescending { nameOf(it).lowercase() }
+                WallpaperOrder.DATE_NEWEST -> compareByDescending { it.lastModified() }
+                WallpaperOrder.DATE_OLDEST -> compareBy { it.lastModified() }
+                WallpaperOrder.SIZE_LOW_HIGH -> compareBy { it.length() }
+                WallpaperOrder.SIZE_HIGH_LOW -> compareByDescending { it.length() }
+                WallpaperOrder.SURPRISE -> compareBy { nameOf(it).hashCode() xor (System.currentTimeMillis() / 86_400_000L).toInt() }
+                WallpaperOrder.RANDOM_SHUFFLE -> compareBy { nameOf(it).hashCode() xor (System.currentTimeMillis() / 60_000L).toInt() }
+            }
+            cached.sortWith(comparator)
 
             while (cached.isNotEmpty()) {
                 val src =
@@ -821,16 +840,20 @@ fun invalidateQueue() =
 
     fun screenOffFastWall(
         context: Context,
+        targetOverride: WallpaperTargetMode? = null,
+        automationTriggered: Boolean = false,
     ): Boolean {
         if (SafeWall.active(context) || WallpaperLock.active(context)) return false
         val settings =
-            SettingsStore(context).load()
+            SettingsStore(context).load().let {
+                if (targetOverride == null) it else it.copy(targetMode = targetOverride)
+            }
 
         val now =
             System.currentTimeMillis()
 
         if (
-            now - lastApplyStartedAt <
+            !automationTriggered && now - lastApplyStartedAt <
             350L
         ) {
             return false
@@ -1065,7 +1088,18 @@ fun invalidateQueue() =
                 System.currentTimeMillis(),
             )
 
-            deletePreparedPair()
+            if (settings.targetMode == WallpaperTargetMode.HOME ||
+                settings.targetMode == WallpaperTargetMode.BOTH_SAME ||
+                settings.targetMode == WallpaperTargetMode.BOTH_DIFFERENT) {
+                WallpaperFiles.nextHome.delete()
+                File(WallpaperFiles.nextHome.absolutePath + ".meta").delete()
+            }
+            if (settings.targetMode == WallpaperTargetMode.LOCK ||
+                settings.targetMode == WallpaperTargetMode.BOTH_SAME ||
+                settings.targetMode == WallpaperTargetMode.BOTH_DIFFERENT) {
+                WallpaperFiles.nextLock.delete()
+                File(WallpaperFiles.nextLock.absolutePath + ".meta").delete()
+            }
 
             /*
              * Re-stage from already-local Hot/Warm cache synchronously.
@@ -1109,15 +1143,19 @@ fun invalidateQueue() =
         allowNetwork: Boolean = true,
         userInitiated: Boolean = false,
         preferLockFirst: Boolean = false,
+        targetOverride: WallpaperTargetMode? = null,
+        automationTriggered: Boolean = false,
     ): Boolean {
         if (SafeWall.active(context) || WallpaperLock.active(context)) return false
         val now = System.currentTimeMillis()
-        if (now - lastApplyStartedAt < 900L) return false
+        if (!automationTriggered && now - lastApplyStartedAt < 900L) return false
         if (!applying.compareAndSet(false, true)) return false
         lastApplyStartedAt = now
         return try {
             val settings =
-                SettingsStore(context).load()
+                SettingsStore(context).load().let {
+                    if (targetOverride == null) it else it.copy(targetMode = targetOverride)
+                }
 
             /*
              * Defense in depth for strict Web-only mode.
@@ -1436,17 +1474,14 @@ fun invalidateQueue() =
             }
             if (changed) {
                 recordSeenForCurrent(settings.targetMode)
-                WallpaperFiles.nextHome.delete()
-                File(
-                    WallpaperFiles.nextHome.absolutePath +
-                        ".meta"
-                ).delete()
-
-                WallpaperFiles.nextLock.delete()
-                File(
-                    WallpaperFiles.nextLock.absolutePath +
-                        ".meta"
-                ).delete()
+                if (settings.targetMode != WallpaperTargetMode.LOCK) {
+                    WallpaperFiles.nextHome.delete()
+                    File(WallpaperFiles.nextHome.absolutePath + ".meta").delete()
+                }
+                if (settings.targetMode != WallpaperTargetMode.HOME) {
+                    WallpaperFiles.nextLock.delete()
+                    File(WallpaperFiles.nextLock.absolutePath + ".meta").delete()
+                }
 
                 stageNextPairFromLocalCache(
                     context,
@@ -3852,45 +3887,13 @@ fun invalidateQueue() =
                     candidate.id !in cachedIds
             }
 
-        if (
-            refillBatch > 0 &&
-            unseenAvailable < refillBatch &&
-            seenIds.isNotEmpty()
-        ) {
-            val previousSeen =
-                seenIds.size
-
-            clearSeenHashes()
-
-            writeLinesSet(
-                WallpaperFiles.seenIds,
-                emptySet(),
-            )
-
-            writeLinesSet(
-                WallpaperFiles.seenPerceptual,
-                emptySet(),
-            )
-
-            seenHashes = emptySet()
-            seenIds = emptySet()
-            seenPhash = emptySet()
-
-            RuntimeStatus.set(
-                context,
-                "cache_seen_cycle",
-                "reset • seen=$previousSeen" +
-                    " • pool=${candidates.size}" +
-                    " • available=$unseenAvailable",
-            )
-
-            log(
-                "CACHE seen-cycle reset: " +
-                    "seen=$previousSeen " +
-                    "pool=${candidates.size} " +
-                    "available=$unseenAvailable " +
-                    "needed=$refillBatch"
-            )
+        // A shared Google Photos album can contain thousands of images while
+        // the public preview API exposes only a limited discovery window.
+        // Never wipe cycle history just because one window has < refillBatch
+        // unseen entries: that causes repeats days before 2600+ images cycle.
+        if (unseenAvailable < refillBatch && seenIds.isNotEmpty()) {
+            RuntimeStatus.set(context, "cache_seen_cycle",
+                "preserved • seen=${seenIds.size} • window=${candidates.size} • unseen=$unseenAvailable")
         }
 
         val knownHashes =
@@ -5297,13 +5300,10 @@ fun invalidateQueue() =
         try {
             fetchFirstWorking(context, candidates, dest, avoidCurrent + seenHashes, seenIds)
         } catch (first: Throwable) {
-            // Reset only after the whole candidate pool has been exhausted. This allows
-            // 2k+ albums to complete a full cycle before repeating.
-            if (seenHashes.isEmpty() && seenIds.isEmpty()) throw first
-            clearSeenHashes()
-            writeLinesSet(WallpaperFiles.seenIds, emptySet())
-            writeLinesSet(WallpaperFiles.seenPerceptual, emptySet())
-            fetchFirstWorking(context, candidates, dest, avoidCurrent, emptySet())
+            // Preserving the historical seen set is more important than
+            // forcing a duplicate when the current discovery window is stale.
+            // A later network discovery pass may expose more unseen items.
+            throw first
         }
     }
 
