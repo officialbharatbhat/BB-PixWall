@@ -41,6 +41,10 @@ class SettingsStore(context: Context) {
                     ),
                     WallpaperOrder.RANDOM_SHUFFLE,
                 ),
+            homeIntervalMinutes =
+                prefs.getInt("home_interval_minutes", prefs.getInt("interval_minutes", 30)).coerceIn(1, 300),
+            lockIntervalMinutes =
+                prefs.getInt("lock_interval_minutes", prefs.getInt("interval_minutes", 30)).coerceIn(1, 300),
             homeTriggerMode =
                 enumOrDefault(
                     prefs.getString("home_trigger_mode", prefs.getString("trigger_mode", null)),
@@ -347,6 +351,8 @@ class SettingsStore(context: Context) {
             .putInt("interval_minutes", settings.intervalMinutes.coerceIn(1, 300))
             .putString("target_mode", settings.targetMode.name)
             .putString("wallpaper_order", settings.wallpaperOrder.name)
+            .putInt("home_interval_minutes", settings.homeIntervalMinutes.coerceIn(1, 300))
+            .putInt("lock_interval_minutes", settings.lockIntervalMinutes.coerceIn(1, 300))
             .putString("home_trigger_mode", settings.homeTriggerMode.name)
             .putString("lock_trigger_mode", settings.lockTriggerMode.name)
             .putString("home_wallpaper_order", settings.homeWallpaperOrder.name)
