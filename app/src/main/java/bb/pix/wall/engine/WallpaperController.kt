@@ -3852,45 +3852,13 @@ fun invalidateQueue() =
                     candidate.id !in cachedIds
             }
 
-        if (
-            refillBatch > 0 &&
-            unseenAvailable < refillBatch &&
-            seenIds.isNotEmpty()
-        ) {
-            val previousSeen =
-                seenIds.size
-
-            clearSeenHashes()
-
-            writeLinesSet(
-                WallpaperFiles.seenIds,
-                emptySet(),
-            )
-
-            writeLinesSet(
-                WallpaperFiles.seenPerceptual,
-                emptySet(),
-            )
-
-            seenHashes = emptySet()
-            seenIds = emptySet()
-            seenPhash = emptySet()
-
-            RuntimeStatus.set(
-                context,
-                "cache_seen_cycle",
-                "reset • seen=$previousSeen" +
-                    " • pool=${candidates.size}" +
-                    " • available=$unseenAvailable",
-            )
-
-            log(
-                "CACHE seen-cycle reset: " +
-                    "seen=$previousSeen " +
-                    "pool=${candidates.size} " +
-                    "available=$unseenAvailable " +
-                    "needed=$refillBatch"
-            )
+        // A shared Google Photos album can contain thousands of images while
+        // the public preview API exposes only a limited discovery window.
+        // Never wipe cycle history just because one window has < refillBatch
+        // unseen entries: that causes repeats days before 2600+ images cycle.
+        if (unseenAvailable < refillBatch && seenIds.isNotEmpty()) {
+            RuntimeStatus.set(context, "cache_seen_cycle",
+                "preserved • seen=${seenIds.size} • window=${candidates.size} • unseen=$unseenAvailable")
         }
 
         val knownHashes =
@@ -5297,13 +5265,10 @@ fun invalidateQueue() =
         try {
             fetchFirstWorking(context, candidates, dest, avoidCurrent + seenHashes, seenIds)
         } catch (first: Throwable) {
-            // Reset only after the whole candidate pool has been exhausted. This allows
-            // 2k+ albums to complete a full cycle before repeating.
-            if (seenHashes.isEmpty() && seenIds.isEmpty()) throw first
-            clearSeenHashes()
-            writeLinesSet(WallpaperFiles.seenIds, emptySet())
-            writeLinesSet(WallpaperFiles.seenPerceptual, emptySet())
-            fetchFirstWorking(context, candidates, dest, avoidCurrent, emptySet())
+            // Preserving the historical seen set is more important than
+            // forcing a duplicate when the current discovery window is stale.
+            // A later network discovery pass may expose more unseen items.
+            throw first
         }
     }
 
