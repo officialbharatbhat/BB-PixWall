@@ -37,6 +37,8 @@ data class AppSettings(
     val wallpaperOrder: WallpaperOrder = WallpaperOrder.RANDOM_SHUFFLE,
     // Independent Home/Lock automation. Old installations initialize
     // the new settings from their existing shared trigger/order on first load.
+    val homeIntervalMinutes: Int = 30,
+    val lockIntervalMinutes: Int = 30,
     val homeTriggerMode: TriggerMode = TriggerMode.INTERVAL,
     val lockTriggerMode: TriggerMode = TriggerMode.INTERVAL,
     val homeWallpaperOrder: WallpaperOrder = WallpaperOrder.RANDOM_SHUFFLE,
