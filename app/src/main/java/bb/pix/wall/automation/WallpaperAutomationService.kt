@@ -359,8 +359,7 @@ class WallpaperAutomationService : Service() {
         }
 
         val screenOff =
-            reason ==
-                "event:SCREEN_OFF"
+            reason == "event:SCREEN_OFF" || reason == "event:SECURE_LOCK"
 
         val wakeLock =
             if (screenOff) {
