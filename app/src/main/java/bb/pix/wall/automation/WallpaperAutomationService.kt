@@ -61,6 +61,10 @@ class WallpaperAutomationService : Service() {
                     return
                 }
 
+                if (action == Intent.ACTION_USER_PRESENT) {
+                    recordTrigger("receiver:USER_PRESENT", "received")
+                }
+
                 val target = targetForEvent(settings,
                     action == Intent.ACTION_SCREEN_OFF,
                     action == Intent.ACTION_USER_PRESENT)
@@ -124,7 +128,9 @@ class WallpaperAutomationService : Service() {
             this,
             screenReceiver,
             filter,
-            ContextCompat.RECEIVER_NOT_EXPORTED,
+            // Both actions are Android protected system broadcasts.
+            // Some privileged system senders are excluded by NOT_EXPORTED.
+            ContextCompat.RECEIVER_EXPORTED,
         )
 
         screenRegistered =
