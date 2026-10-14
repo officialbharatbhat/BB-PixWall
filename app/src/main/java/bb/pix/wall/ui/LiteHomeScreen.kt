@@ -307,114 +307,46 @@ fun LiteHomeScreen(
 
             LiteSection(
                 title = "Trigger",
-                subtitle = "Automatic wallpaper change",
+                subtitle = "Independent Home / Lock automatic changes",
                 trailing = {
                     Switch(
-                        checked =
-                            settings.autoChange,
-                        onCheckedChange = {
-                            onSettingsChange(
-                                settings.copy(
-                                    autoChange = it
-                                )
-                            )
-                        },
+                        checked = settings.autoChange,
+                        onCheckedChange = { onSettingsChange(settings.copy(autoChange = it)) },
                     )
                 },
             ) {
-                Row(
-                    modifier =
-                        Modifier.fillMaxWidth(),
-                    horizontalArrangement =
-                        Arrangement.spacedBy(8.dp),
-                ) {
-                    LiteChoice(
-                        label = "Interval",
-                        selected =
-                            settings.triggerMode ==
-                                TriggerMode.INTERVAL,
-                        modifier =
-                            Modifier.weight(1f),
-                    ) {
-                        onSettingsChange(
-                            settings.copy(
-                                triggerMode =
-                                    TriggerMode.INTERVAL
-                            )
-                        )
+                Text("Home trigger", style = MaterialTheme.typography.titleSmall)
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    LiteChoice("Interval", settings.homeTriggerMode == TriggerMode.INTERVAL, Modifier.weight(1f)) {
+                        onSettingsChange(settings.copy(homeTriggerMode = TriggerMode.INTERVAL))
                     }
-
-                    LiteChoice(
-                        label = "Screen Lock",
-                        selected =
-                            settings.triggerMode ==
-                                TriggerMode.SCREEN_OFF,
-                        modifier =
-                            Modifier.weight(1f),
-                    ) {
-                        onSettingsChange(
-                            settings.copy(
-                                triggerMode =
-                                    TriggerMode.SCREEN_OFF
-                            )
-                        )
+                    LiteChoice("Screen Lock", settings.homeTriggerMode == TriggerMode.SCREEN_OFF, Modifier.weight(1f)) {
+                        onSettingsChange(settings.copy(homeTriggerMode = TriggerMode.SCREEN_OFF))
                     }
-
-                    LiteChoice(
-                        label = "Screen Unlock",
-                        selected =
-                            settings.triggerMode ==
-                                TriggerMode.SCREEN_ON,
-                        modifier =
-                            Modifier.weight(1f),
-                    ) {
-                        onSettingsChange(
-                            settings.copy(
-                                triggerMode =
-                                    TriggerMode.SCREEN_ON
-                            )
-                        )
+                    LiteChoice("Unlock", settings.homeTriggerMode == TriggerMode.SCREEN_ON, Modifier.weight(1f)) {
+                        onSettingsChange(settings.copy(homeTriggerMode = TriggerMode.SCREEN_ON))
                     }
                 }
-
-                if (
-                    settings.triggerMode ==
-                    TriggerMode.INTERVAL
-                ) {
-                    val mins =
-                        settings.intervalMinutes
-                            .coerceIn(1, 300)
-
-                    Text(
-                        if (mins < 60) {
-                            "$mins min"
-                        } else {
-                            val h = mins / 60
-                            val m = mins % 60
-                            if (m == 0) {
-                                "$h hr"
-                            } else {
-                                "$h hr $m min"
-                            }
-                        },
-                        style =
-                            MaterialTheme.typography
-                                .labelMedium,
-                    )
-
+                Text("Lock trigger", style = MaterialTheme.typography.titleSmall)
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    LiteChoice("Interval", settings.lockTriggerMode == TriggerMode.INTERVAL, Modifier.weight(1f)) {
+                        onSettingsChange(settings.copy(lockTriggerMode = TriggerMode.INTERVAL))
+                    }
+                    LiteChoice("Screen Lock", settings.lockTriggerMode == TriggerMode.SCREEN_OFF, Modifier.weight(1f)) {
+                        onSettingsChange(settings.copy(lockTriggerMode = TriggerMode.SCREEN_OFF))
+                    }
+                    LiteChoice("Unlock", settings.lockTriggerMode == TriggerMode.SCREEN_ON, Modifier.weight(1f)) {
+                        onSettingsChange(settings.copy(lockTriggerMode = TriggerMode.SCREEN_ON))
+                    }
+                }
+                if (settings.homeTriggerMode == TriggerMode.INTERVAL ||
+                    settings.lockTriggerMode == TriggerMode.INTERVAL) {
+                    val mins = settings.intervalMinutes.coerceIn(1, 300)
+                    Text("Interval: $mins min (shared timing)", style = MaterialTheme.typography.labelMedium)
                     Slider(
                         value = mins.toFloat(),
                         onValueChange = {
-                            onSettingsChange(
-                                settings.copy(
-                                    intervalMinutes =
-                                        it.roundToInt()
-                                            .coerceIn(
-                                                1,
-                                                300,
-                                            )
-                                )
-                            )
+                            onSettingsChange(settings.copy(intervalMinutes = it.roundToInt().coerceIn(1, 300)))
                         },
                         valueRange = 1f..300f,
                     )
@@ -496,86 +428,47 @@ fun LiteHomeScreen(
 
             LiteSection(
                 title = "Wallpaper Order",
-                subtitle = "Simple source ordering only",
+                subtitle = "Choose a different order for each screen",
             ) {
-                Row(
-                    modifier =
-                        Modifier.fillMaxWidth(),
-                    horizontalArrangement =
-                        Arrangement.spacedBy(8.dp),
-                ) {
-                    LiteChoice(
-                        "A-Z",
-                        settings.wallpaperOrder ==
-                            WallpaperOrder.A_Z,
-                        Modifier.weight(1f),
-                    ) {
-                        onSettingsChange(
-                            settings.copy(
-                                wallpaperOrder =
-                                    WallpaperOrder.A_Z
-                            )
-                        )
+                Text("Home wallpaper order", style = MaterialTheme.typography.titleSmall)
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    LiteChoice("A-Z", settings.homeWallpaperOrder == WallpaperOrder.A_Z, Modifier.weight(1f)) {
+                        onSettingsChange(settings.copy(homeWallpaperOrder = WallpaperOrder.A_Z))
                     }
-                    LiteChoice(
-                        "Size ↑",
-                        settings.wallpaperOrder ==
-                            WallpaperOrder.SIZE_LOW_HIGH,
-                        Modifier.weight(1f),
-                    ) {
-                        onSettingsChange(
-                            settings.copy(
-                                wallpaperOrder =
-                                    WallpaperOrder.SIZE_LOW_HIGH
-                            )
-                        )
+                    LiteChoice("Size ↑", settings.homeWallpaperOrder == WallpaperOrder.SIZE_LOW_HIGH, Modifier.weight(1f)) {
+                        onSettingsChange(settings.copy(homeWallpaperOrder = WallpaperOrder.SIZE_LOW_HIGH))
                     }
-                    LiteChoice(
-                        "Size ↓",
-                        settings.wallpaperOrder ==
-                            WallpaperOrder.SIZE_HIGH_LOW,
-                        Modifier.weight(1f),
-                    ) {
-                        onSettingsChange(
-                            settings.copy(
-                                wallpaperOrder =
-                                    WallpaperOrder.SIZE_HIGH_LOW
-                            )
-                        )
+                    LiteChoice("Size ↓", settings.homeWallpaperOrder == WallpaperOrder.SIZE_HIGH_LOW, Modifier.weight(1f)) {
+                        onSettingsChange(settings.copy(homeWallpaperOrder = WallpaperOrder.SIZE_HIGH_LOW))
                     }
                 }
-
-                Row(
-                    modifier =
-                        Modifier.fillMaxWidth(),
-                    horizontalArrangement =
-                        Arrangement.spacedBy(8.dp),
-                ) {
-                    LiteChoice(
-                        "Random",
-                        settings.wallpaperOrder ==
-                            WallpaperOrder.RANDOM_SHUFFLE,
-                        Modifier.weight(1f),
-                    ) {
-                        onSettingsChange(
-                            settings.copy(
-                                wallpaperOrder =
-                                    WallpaperOrder.RANDOM_SHUFFLE
-                            )
-                        )
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    LiteChoice("Random", settings.homeWallpaperOrder == WallpaperOrder.RANDOM_SHUFFLE, Modifier.weight(1f)) {
+                        onSettingsChange(settings.copy(homeWallpaperOrder = WallpaperOrder.RANDOM_SHUFFLE))
                     }
-                    LiteChoice(
-                        "Surprise",
-                        settings.wallpaperOrder ==
-                            WallpaperOrder.SURPRISE,
-                        Modifier.weight(1f),
-                    ) {
-                        onSettingsChange(
-                            settings.copy(
-                                wallpaperOrder =
-                                    WallpaperOrder.SURPRISE
-                            )
-                        )
+                    LiteChoice("Surprise", settings.homeWallpaperOrder == WallpaperOrder.SURPRISE, Modifier.weight(1f)) {
+                        onSettingsChange(settings.copy(homeWallpaperOrder = WallpaperOrder.SURPRISE))
+                    }
+                }
+                HorizontalDivider()
+                Text("Lock wallpaper order", style = MaterialTheme.typography.titleSmall)
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    LiteChoice("A-Z", settings.lockWallpaperOrder == WallpaperOrder.A_Z, Modifier.weight(1f)) {
+                        onSettingsChange(settings.copy(lockWallpaperOrder = WallpaperOrder.A_Z))
+                    }
+                    LiteChoice("Size ↑", settings.lockWallpaperOrder == WallpaperOrder.SIZE_LOW_HIGH, Modifier.weight(1f)) {
+                        onSettingsChange(settings.copy(lockWallpaperOrder = WallpaperOrder.SIZE_LOW_HIGH))
+                    }
+                    LiteChoice("Size ↓", settings.lockWallpaperOrder == WallpaperOrder.SIZE_HIGH_LOW, Modifier.weight(1f)) {
+                        onSettingsChange(settings.copy(lockWallpaperOrder = WallpaperOrder.SIZE_HIGH_LOW))
+                    }
+                }
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    LiteChoice("Random", settings.lockWallpaperOrder == WallpaperOrder.RANDOM_SHUFFLE, Modifier.weight(1f)) {
+                        onSettingsChange(settings.copy(lockWallpaperOrder = WallpaperOrder.RANDOM_SHUFFLE))
+                    }
+                    LiteChoice("Surprise", settings.lockWallpaperOrder == WallpaperOrder.SURPRISE, Modifier.weight(1f)) {
+                        onSettingsChange(settings.copy(lockWallpaperOrder = WallpaperOrder.SURPRISE))
                     }
                 }
             }
