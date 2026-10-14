@@ -841,6 +841,7 @@ fun invalidateQueue() =
     fun screenOffFastWall(
         context: Context,
         targetOverride: WallpaperTargetMode? = null,
+        automationTriggered: Boolean = false,
     ): Boolean {
         if (SafeWall.active(context) || WallpaperLock.active(context)) return false
         val settings =
@@ -852,7 +853,7 @@ fun invalidateQueue() =
             System.currentTimeMillis()
 
         if (
-            now - lastApplyStartedAt <
+            !automationTriggered && now - lastApplyStartedAt <
             350L
         ) {
             return false
@@ -1143,10 +1144,11 @@ fun invalidateQueue() =
         userInitiated: Boolean = false,
         preferLockFirst: Boolean = false,
         targetOverride: WallpaperTargetMode? = null,
+        automationTriggered: Boolean = false,
     ): Boolean {
         if (SafeWall.active(context) || WallpaperLock.active(context)) return false
         val now = System.currentTimeMillis()
-        if (now - lastApplyStartedAt < 900L) return false
+        if (!automationTriggered && now - lastApplyStartedAt < 900L) return false
         if (!applying.compareAndSet(false, true)) return false
         lastApplyStartedAt = now
         return try {
