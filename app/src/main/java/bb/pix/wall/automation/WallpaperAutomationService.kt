@@ -1,6 +1,7 @@
 package bb.pix.wall.automation
 
 import android.app.AlarmManager
+import android.app.KeyguardManager
 import android.app.PendingIntent
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -9,7 +10,9 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.os.PowerManager
 import android.os.SystemClock
 import androidx.core.app.NotificationCompat
@@ -39,6 +42,56 @@ class WallpaperAutomationService : Service() {
     }
     private val recentEvents = mutableMapOf<String, Long>()
 
+    // One wallpaper rotation per real unlocked -> locked session.
+    private val lockHandler = Handler(Looper.getMainLooper())
+    private val keyguard by lazy { getSystemService(KeyguardManager::class.java) }
+    private var lockCycleArmed = false
+    private var pendingLockCheck: Runnable? = null
+    private var lockCheckGeneration = 0
+
+    private fun cancelPendingLockCheck() {
+        lockCheckGeneration++
+        pendingLockCheck?.let(lockHandler::removeCallbacks)
+        pendingLockCheck = null
+    }
+
+    private fun verifySecureLockTransition() {
+        if (!lockCycleArmed || pendingLockCheck != null) return
+
+        // PIN lock can activate after SCREEN_OFF if the user's security
+        // timeout is configured. Bounded checks, never continuous polling.
+        val generation = ++lockCheckGeneration
+        val checks = longArrayOf(250L, 1_000L, 3_000L, 7_000L, 15_000L,
+            30_000L, 60_000L, 120_000L, 300_000L)
+
+        fun scheduleCheck(index: Int) {
+            if (index >= checks.size) {
+                pendingLockCheck = null
+                recordTrigger("event:SECURE_LOCK", "not-confirmed")
+                return
+            }
+            val task = Runnable {
+                pendingLockCheck = null
+                if (generation != lockCheckGeneration || !lockCycleArmed) return@Runnable
+                val locked = if (keyguard.isDeviceSecure) keyguard.isDeviceLocked
+                    else keyguard.isKeyguardLocked
+                if (locked) {
+                    lockCycleArmed = false
+                    val settings = SettingsStore(this).load()
+                    if (settings.autoChange && !SafeWall.active(this)) {
+                        val target = targetForEvent(settings, off = true, on = false)
+                        if (target != null) applyPrepared(settings, "event:SECURE_LOCK", target)
+                    }
+                } else {
+                    scheduleCheck(index + 1)
+                }
+            }
+            pendingLockCheck = task
+            lockHandler.postDelayed(task, checks[index])
+        }
+        scheduleCheck(0)
+    }
+
     private var screenRegistered =
         false
 
@@ -61,15 +114,17 @@ class WallpaperAutomationService : Service() {
                     return
                 }
 
-                if (action == Intent.ACTION_USER_PRESENT) {
-                    recordTrigger("receiver:USER_PRESENT", "received")
-                }
-
-                val target = targetForEvent(settings,
-                    action == Intent.ACTION_SCREEN_OFF,
-                    action == Intent.ACTION_USER_PRESENT)
-                if (target != null) {
-                    applyPrepared(settings, "event:${action.substringAfterLast('.')}", target)
+                when (action) {
+                    Intent.ACTION_USER_PRESENT -> {
+                        cancelPendingLockCheck()
+                        lockCycleArmed = true
+                        recordTrigger("receiver:USER_PRESENT", "received")
+                        val target = targetForEvent(settings, off = false, on = true)
+                        if (target != null) {
+                            applyPrepared(settings, "event:USER_PRESENT", target)
+                        }
+                    }
+                    Intent.ACTION_SCREEN_OFF -> verifySecureLockTransition()
                 }
             }
         }
@@ -89,6 +144,7 @@ class WallpaperAutomationService : Service() {
     override fun onCreate() {
         super.onCreate()
 
+        lockCycleArmed = !keyguard.isKeyguardLocked && !keyguard.isDeviceLocked
         createChannel()
         NetworkMonitor.register(applicationContext)
         NetworkMonitor.add(networkRecovered)
@@ -484,6 +540,7 @@ class WallpaperAutomationService : Service() {
     }
 
     override fun onDestroy() {
+        cancelPendingLockCheck()
         NetworkMonitor.remove(networkRecovered)
         if (screenRegistered) {
             runCatching {
