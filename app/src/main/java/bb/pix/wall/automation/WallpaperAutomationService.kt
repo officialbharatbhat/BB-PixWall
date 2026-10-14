@@ -321,7 +321,7 @@ class WallpaperAutomationService : Service() {
             }
 
         recordTrigger(
-            reason,
+            "$reason target=$target",
             "start",
         )
 
@@ -329,8 +329,13 @@ class WallpaperAutomationService : Service() {
             try {
                 var changed =
                     if (screenOff) {
-                        WallpaperController.screenOffFastWall(
-                            applicationContext, targetOverride = target, automationTriggered = true
+                        WallpaperController.nextWall(
+                            applicationContext,
+                            allowNetwork = false,
+                            userInitiated = false,
+                            preferLockFirst = true,
+                            targetOverride = target,
+                            automationTriggered = true,
                         )
                     } else {
                         WallpaperController.nextWall(
@@ -353,9 +358,14 @@ class WallpaperAutomationService : Service() {
 
                     changed =
                         if (screenOff) {
-                            WallpaperController.screenOffFastWall(
-                                applicationContext, targetOverride = target, automationTriggered = true
-                            )
+                            WallpaperController.nextWall(
+                            applicationContext,
+                            allowNetwork = false,
+                            userInitiated = false,
+                            preferLockFirst = true,
+                            targetOverride = target,
+                            automationTriggered = true,
+                        )
                         } else {
                             WallpaperController.nextWall(
                                 applicationContext,
@@ -386,7 +396,7 @@ class WallpaperAutomationService : Service() {
                 }
 
                 recordTrigger(
-                    reason,
+                    "$reason target=$target",
                     if (changed) {
                         "applied"
                     } else {
