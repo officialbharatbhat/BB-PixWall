@@ -1068,7 +1068,18 @@ fun invalidateQueue() =
                 System.currentTimeMillis(),
             )
 
-            deletePreparedPair()
+            if (settings.targetMode == WallpaperTargetMode.HOME ||
+                settings.targetMode == WallpaperTargetMode.BOTH_SAME ||
+                settings.targetMode == WallpaperTargetMode.BOTH_DIFFERENT) {
+                WallpaperFiles.nextHome.delete()
+                File(WallpaperFiles.nextHome.absolutePath + ".meta").delete()
+            }
+            if (settings.targetMode == WallpaperTargetMode.LOCK ||
+                settings.targetMode == WallpaperTargetMode.BOTH_SAME ||
+                settings.targetMode == WallpaperTargetMode.BOTH_DIFFERENT) {
+                WallpaperFiles.nextLock.delete()
+                File(WallpaperFiles.nextLock.absolutePath + ".meta").delete()
+            }
 
             /*
              * Re-stage from already-local Hot/Warm cache synchronously.
