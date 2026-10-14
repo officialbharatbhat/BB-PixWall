@@ -27,14 +27,10 @@ import bb.pix.wall.settings.SettingsStore
 import bb.pix.wall.settings.TriggerMode
 import bb.pix.wall.settings.WallpaperTargetMode
 import java.util.concurrent.Executors
-import java.util.concurrent.atomic.AtomicBoolean
 
 class WallpaperAutomationService : Service() {
     private val handler =
         Handler(Looper.getMainLooper())
-
-    private val applying =
-        AtomicBoolean(false)
 
     // All automatic events use one serial worker. SCREEN_ON must wait behind
     // SCREEN_OFF instead of racing it on a second executor.
@@ -316,7 +312,7 @@ class WallpaperAutomationService : Service() {
                 var changed =
                     if (screenOff) {
                         WallpaperController.screenOffFastWall(
-                            applicationContext, targetOverride = target, automationTriggered = true, automationTriggered = true
+                            applicationContext, targetOverride = target, automationTriggered = true
                         )
                     } else {
                         WallpaperController.nextWall(
@@ -340,7 +336,7 @@ class WallpaperAutomationService : Service() {
                     changed =
                         if (screenOff) {
                             WallpaperController.screenOffFastWall(
-                                applicationContext, targetOverride = target, automationTriggered = true, automationTriggered = true
+                                applicationContext, targetOverride = target, automationTriggered = true
                             )
                         } else {
                             WallpaperController.nextWall(
