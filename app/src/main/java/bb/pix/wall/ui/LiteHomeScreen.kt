@@ -360,7 +360,7 @@ fun LiteHomeScreen(
 
             LiteSection(
                 title = "Target",
-                subtitle = "Where wallpaper should change",
+                subtitle = "Manual Next target only; automatic Home/Lock triggers remain independent",
             ) {
                 Row(
                     modifier =
