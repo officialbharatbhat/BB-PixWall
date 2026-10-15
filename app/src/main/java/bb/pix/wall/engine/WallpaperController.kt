@@ -3284,8 +3284,10 @@ fun invalidateQueue() =
         context: Context,
         settings: AppSettings,
     ) {
-        val hotTarget = 16
-        val warmTarget = 32
+        // Lite is constrained to a small ready-cache budget. Keep a reserve
+        // for fast dual-target changes without keeping 48 images on disk.
+        val hotTarget = settings.cacheTarget.coerceIn(4, 12)
+        val warmTarget = hotTarget * 2
         val totalTarget = hotTarget + warmTarget
 
         fun imageCount(dir: File): Int =
@@ -3445,8 +3447,8 @@ fun invalidateQueue() =
             RuntimeStatus.set(
                 context,
                 "cache_progress",
-                "Lite ready • hot=${imageCount(WallpaperFiles.hotCache)}/16" +
-                    " • warm=${imageCount(WallpaperFiles.warmCache)}/32",
+                "Lite ready • hot=${imageCount(WallpaperFiles.hotCache)}/$hotTarget" +
+                    " • warm=${imageCount(WallpaperFiles.warmCache)}/$warmTarget",
             )
             return
         }

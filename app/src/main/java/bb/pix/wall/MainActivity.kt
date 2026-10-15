@@ -191,6 +191,8 @@ class MainActivity : ComponentActivity() {
             previous.photosAlbumUrl != updated.photosAlbumUrl ||
                 previous.driveFolderUrl != updated.driveFolderUrl ||
                 previous.wallpaperOrder != updated.wallpaperOrder ||
+                previous.homeWallpaperOrder != updated.homeWallpaperOrder ||
+                previous.lockWallpaperOrder != updated.lockWallpaperOrder ||
                 previous.dataSaverEnabled != updated.dataSaverEnabled
 
         if (sourcePipelineChanged) {

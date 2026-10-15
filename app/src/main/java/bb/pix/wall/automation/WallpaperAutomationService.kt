@@ -64,6 +64,7 @@ class WallpaperAutomationService : Service() {
         val checks = longArrayOf(250L, 1_000L, 3_000L, 7_000L, 15_000L,
             30_000L, 60_000L, 120_000L, 300_000L)
 
+        val startedAt = SystemClock.elapsedRealtime()
         fun scheduleCheck(index: Int) {
             if (index >= checks.size) {
                 pendingLockCheck = null
@@ -87,7 +88,8 @@ class WallpaperAutomationService : Service() {
                 }
             }
             pendingLockCheck = task
-            lockHandler.postDelayed(task, checks[index])
+            // Check at absolute elapsed offsets, not cumulative delays.
+            lockHandler.postDelayed(task, (startedAt + checks[index] - SystemClock.elapsedRealtime()).coerceAtLeast(0L))
         }
         scheduleCheck(0)
     }
@@ -261,13 +263,13 @@ class WallpaperAutomationService : Service() {
                 if (settings.homeTriggerMode == TriggerMode.INTERVAL && !SafeWall.active(this)) {
                     applyPrepared(settings, "interval:HOME", WallpaperTargetMode.HOME)
                 }
-                scheduleInterval(settings, WallpaperTargetMode.HOME)
+                scheduleInterval(settings, WallpaperTargetMode.HOME, fromAlarm = true)
             }
             WallpaperTargetMode.LOCK.name -> {
                 if (settings.lockTriggerMode == TriggerMode.INTERVAL && !SafeWall.active(this)) {
                     applyPrepared(settings, "interval:LOCK", WallpaperTargetMode.LOCK)
                 }
-                scheduleInterval(settings, WallpaperTargetMode.LOCK)
+                scheduleInterval(settings, WallpaperTargetMode.LOCK, fromAlarm = true)
             }
             else -> scheduleNextInterval(settings)
         }
@@ -297,29 +299,45 @@ class WallpaperAutomationService : Service() {
         scheduleInterval(settings, WallpaperTargetMode.LOCK)
     }
 
-    private fun scheduleInterval(settings: AppSettings, target: WallpaperTargetMode) {
+    private fun scheduleInterval(
+        settings: AppSettings,
+        target: WallpaperTargetMode,
+        fromAlarm: Boolean = false,
+    ) {
         val isHome = target == WallpaperTargetMode.HOME
         val alarms = getSystemService(AlarmManager::class.java)
         val alarmIntent = intervalIntent(target)
-        alarms.cancel(alarmIntent)
         val active = if (isHome) settings.homeTriggerMode == TriggerMode.INTERVAL
             else settings.lockTriggerMode == TriggerMode.INTERVAL
-        if (!settings.autoChange || !active) return
+        val dueKey = if (isHome) "home_interval_due" else "lock_interval_due"
+        val periodKey = if (isHome) "home_interval_period" else "lock_interval_period"
+        if (!settings.autoChange || !active) {
+            alarms.cancel(alarmIntent)
+            RuntimeStatus.setLong(applicationContext, dueKey, 0L)
+            RuntimeStatus.setLong(applicationContext, periodKey, 0L)
+            return
+        }
 
         val minutes = if (isHome) settings.homeIntervalMinutes else settings.lockIntervalMinutes
         val delay = minutes.coerceIn(1, 300) * 60_000L
-        // AlarmManager wakes the process after Doze delays; no perpetual poller.
-        // setAndAllowWhileIdle is inexact and subject to Android idle quotas.
+        val now = System.currentTimeMillis()
+        val previousDue = RuntimeStatus.getLong(applicationContext, dueKey, 0L)
+        val previousPeriod = RuntimeStatus.getLong(applicationContext, periodKey, 0L)
+        // An unrelated setting change must not restart the interval countdown.
+        // After process/boot restart, re-register an alarm at the saved deadline.
+        val preserveDeadline = !fromAlarm && previousPeriod == delay &&
+            previousDue > now && previousDue <= now + delay
+        val deadline = if (preserveDeadline) previousDue else now + delay
+        val remaining = (deadline - now).coerceAtLeast(1_000L)
+
+        alarms.cancel(alarmIntent)
         alarms.setAndAllowWhileIdle(
             AlarmManager.ELAPSED_REALTIME_WAKEUP,
-            SystemClock.elapsedRealtime() + delay,
+            SystemClock.elapsedRealtime() + remaining,
             alarmIntent,
         )
-        RuntimeStatus.setLong(
-            applicationContext,
-            if (isHome) "home_interval_due" else "lock_interval_due",
-            System.currentTimeMillis() + delay,
-        )
+        RuntimeStatus.setLong(applicationContext, dueKey, deadline)
+        RuntimeStatus.setLong(applicationContext, periodKey, delay)
     }
 
     private fun combineTargets(home: Boolean, lock: Boolean): WallpaperTargetMode? =
