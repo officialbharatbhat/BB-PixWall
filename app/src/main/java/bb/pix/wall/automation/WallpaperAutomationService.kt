@@ -64,6 +64,7 @@ class WallpaperAutomationService : Service() {
         val checks = longArrayOf(250L, 1_000L, 3_000L, 7_000L, 15_000L,
             30_000L, 60_000L, 120_000L, 300_000L)
 
+        val startedAt = SystemClock.elapsedRealtime()
         fun scheduleCheck(index: Int) {
             if (index >= checks.size) {
                 pendingLockCheck = null
@@ -87,7 +88,8 @@ class WallpaperAutomationService : Service() {
                 }
             }
             pendingLockCheck = task
-            lockHandler.postDelayed(task, checks[index])
+            // Check at absolute elapsed offsets, not cumulative delays.
+            lockHandler.postDelayed(task, (startedAt + checks[index] - SystemClock.elapsedRealtime()).coerceAtLeast(0L))
         }
         scheduleCheck(0)
     }
