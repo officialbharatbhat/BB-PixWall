@@ -3290,6 +3290,17 @@ fun invalidateQueue() =
         val warmTarget = hotTarget * 2
         val totalTarget = hotTarget + warmTarget
 
+        // Retain applied IDs and SHA-256 hashes across cache refill runs.
+        // Old Lite only checked current cache IDs, which allowed already
+        // displayed Google Photos images to be downloaded again indefinitely.
+        val seenIds = readLinesSet(WallpaperFiles.seenIds)
+        val seenHashes = readSeenHashes()
+        val reservedHashes = listOf(
+            WallpaperFiles.currentHome, WallpaperFiles.currentLock,
+            WallpaperFiles.nextHome, WallpaperFiles.nextLock,
+        ).filter(File::isFile).mapNotNull { runCatching { sha256(it) }.getOrNull() }.toMutableSet()
+        val cachedHashes = mutableSetOf<String>()
+
         fun imageCount(dir: File): Int =
             dir.listFiles()
                 .orEmpty()
@@ -3401,6 +3412,23 @@ fun invalidateQueue() =
             }.getOrDefault(false)
         }
 
+        // Evict old Lite entries already applied, and duplicate/invalid
+        // entries remaining from previous releases. This only touches
+        // disposable cache files; current/previous/next originals stay intact.
+        for (cached in imageFiles(WallpaperFiles.hotCache) + imageFiles(WallpaperFiles.warmCache)) {
+            val id = candidateId(cached)
+            val hash = runCatching { sha256(cached) }.getOrNull()
+            if ((id != null && id in seenIds) ||
+                (hash != null && (hash in seenHashes || hash in reservedHashes || !cachedHashes.add(hash)))) {
+                deleteWithMeta(cached)
+            }
+        }
+        existingIds.clear()
+        existingIds.addAll((cacheImageFiles() + listOf(
+            WallpaperFiles.currentHome, WallpaperFiles.currentLock,
+            WallpaperFiles.nextHome, WallpaperFiles.nextLock,
+        )).filter(File::exists).mapNotNull(::candidateId))
+
         /*
          * Normalize tiers before deciding whether refill is needed.
          * Old Lite builds could leave more Warm files than the current
@@ -3461,15 +3489,19 @@ fun invalidateQueue() =
             )
 
         var added = 0
+        var skippedSeen = 0
+        var skippedDuplicate = 0
+        val unseen = candidates.count { it.id !in seenIds && it.id !in existingIds }
+        RuntimeStatus.set(context, "photos_selection_window",
+            "index=${candidates.size} unseen=$unseen seen=${seenIds.size}")
 
         for (candidate in candidates) {
-            if (
-                totalReady() >= totalTarget ||
-                candidate.id in existingIds ||
-                WallpaperLibrary.isBlocked(candidate.id)
-            ) {
+            if (totalReady() >= totalTarget) break
+            if (candidate.id in seenIds) {
+                skippedSeen++
                 continue
             }
+            if (candidate.id in existingIds || WallpaperLibrary.isBlocked(candidate.id)) continue
 
             val staging =
                 File(
@@ -3480,6 +3512,12 @@ fun invalidateQueue() =
             try {
                 fetchTo(context, candidate, staging)
                 validateImage(staging)
+                val hash = sha256(staging)
+                if (hash in seenHashes || hash in reservedHashes ||
+                    hash in cachedHashes || WallpaperLibrary.isBlockedHash(hash)) {
+                    skippedDuplicate++
+                    continue
+                }
 
                 val ext =
                     detectImageExtension(staging)
@@ -3518,6 +3556,7 @@ fun invalidateQueue() =
 
 
                 existingIds += candidate.id
+                cachedHashes += hash
                 added++
 
                 RuntimeStatus.set(
@@ -3527,12 +3566,11 @@ fun invalidateQueue() =
                         " • warm=${imageCount(WallpaperFiles.warmCache)}/$warmTarget",
                 )
             } catch (t: Throwable) {
+                log("LITE CACHE skip ${candidate.id}: ${t.message}")
+            } finally {
                 staging.delete()
                 File(staging.absolutePath + ".meta").delete()
 
-                log(
-                    "LITE CACHE skip ${candidate.id}: ${t.message}"
-                )
             }
         }
 
@@ -3541,7 +3579,7 @@ fun invalidateQueue() =
             "cache_refill_result",
             "Lite ready • hot=${imageCount(WallpaperFiles.hotCache)}/$hotTarget" +
                 " • warm=${imageCount(WallpaperFiles.warmCache)}/$warmTarget" +
-                " • added=$added",
+                " • added=$added • seenSkipped=$skippedSeen • duplicates=$skippedDuplicate",
         )
     }
 
