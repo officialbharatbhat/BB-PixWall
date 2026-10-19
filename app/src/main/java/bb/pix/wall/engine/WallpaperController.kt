@@ -3289,6 +3289,8 @@ fun invalidateQueue() =
         val hotTarget = settings.cacheTarget.coerceIn(4, 12)
         val warmTarget = hotTarget * 2
         val totalTarget = hotTarget + warmTarget
+        val refillGeneration = generation.get()
+        fun staleRefill(): Boolean = generation.get() != refillGeneration
 
         // Retain applied IDs and SHA-256 hashes across cache refill runs.
         // Old Lite only checked current cache IDs, which allowed already
@@ -3481,6 +3483,7 @@ fun invalidateQueue() =
             return
         }
 
+        if (staleRefill()) return
         val candidates =
             WallpaperSourceEngine.collect(
                 context,
@@ -3496,6 +3499,10 @@ fun invalidateQueue() =
             "index=${candidates.size} unseen=$unseen seen=${seenIds.size}")
 
         for (candidate in candidates) {
+            if (staleRefill()) {
+                RuntimeStatus.set(context, "cache_refill_contract", "stale-before-download")
+                break
+            }
             if (totalReady() >= totalTarget) break
             if (candidate.id in seenIds) {
                 skippedSeen++
@@ -3511,6 +3518,10 @@ fun invalidateQueue() =
 
             try {
                 fetchTo(context, candidate, staging)
+                if (staleRefill()) {
+                    RuntimeStatus.set(context, "cache_refill_contract", "stale-after-download")
+                    break
+                }
                 validateImage(staging)
                 val hash = sha256(staging)
                 if (hash in seenHashes || hash in reservedHashes ||
@@ -3539,6 +3550,10 @@ fun invalidateQueue() =
                     )
 
                 targetDir.mkdirs()
+                if (staleRefill()) {
+                    RuntimeStatus.set(context, "cache_refill_contract", "stale-before-commit")
+                    break
+                }
 
                 if (!staging.renameTo(dest)) {
                     staging.copyTo(
